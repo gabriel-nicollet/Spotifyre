@@ -27,7 +27,6 @@ static NSDictionary *sg_spotifyInfo;
 static CFAbsoluteTime sg_spotifyInfoAt;
 static NSString *sg_shownLine;
 static BOOL sg_resending;
-static id sg_defaultsObserver;
 // What the cover was last drawn for: the track and the line's index, or nil with no line.
 static NSString *sg_shownCover;
 static NSTimer *sg_timer;
@@ -234,22 +233,8 @@ static BOOL playingBy(NSDictionary *info) {
 %ctor {
     sg_lock = [NSObject new];
     %init;
-    // Always install the lightweight passthrough hook so the switches work without restarting Spotify.
-    // When both are off, setNowPlayingInfo: forwards Spotify's original dictionary untouched.
-    sg_defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
-        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            BOOL enabled = SGFlag(SGKeyLockScreenLyrics, NO) || SGFlag(SGKeyLockScreenLyricsCover, NO);
-            if (!enabled) {
-                setTicking(NO);
-                sg_shownLine = nil;
-                sg_shownCover = nil;
-                return;
-            }
-            NSDictionary *info;
-            @synchronized (sg_lock) { info = sg_spotifyInfo; }
-            BOOL playing = info[MPNowPlayingInfoPropertyElapsedPlaybackTime] && playingBy(info);
-            setTicking(playing);
-            if (playing) tick();
-        }];
-    SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d", SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
+    SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d",
+          SGFlag(SGKeyLockScreenLyrics, NO),
+          SGFlag(SGKeyLockScreenLyricsCover, NO));
 }
+
