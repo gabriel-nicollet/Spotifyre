@@ -10,7 +10,7 @@ NSNotificationName const SGSingModelDidChangeNotification = @"spotifyglass.singM
 // The model host: a Hugging Face repository holding the compiled model's files at the paths below. A test
 // build serves them itself and keeps them somewhere of its own (harness/sing/model_test.m).
 #ifndef SGSingModelBase
-#define SGSingModelBase @"https://huggingface.co/Darkkos/spoti-sing/resolve/main/"
+#define SGSingModelBase @"https://huggingface.co/My-Name-Is-Jeff/vitrine-sing/resolve/main/"
 #endif
 #ifndef SGSingModelRoot
 #define SGSingModelRoot nil
