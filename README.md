@@ -2,7 +2,7 @@
   <img src="docs/icon.png" width="96" alt="">
 </p>
 
-<h1 align="center">spoti.pw</h1>
+<h1 align="center">Spotifyre</h1>
 
 <p align="center">Spotify, in glass.</p>
 
@@ -15,10 +15,10 @@
 </p>
 
 <p align="center">
-  <a href="https://spoti.pw">spoti.pw</a> ·
+  <a href="https://gabriel-nicollet.eu">Spotifyre</a> ·
   <a href="#build-it">Build it</a> ·
   <a href="docs/tweaks.md">Hack on it</a> ·
-  <a href="https://ko-fi.com/darkksh">Support</a>
+  <a href="https://paypal.me">Support</a>
 </p>
 
 <p align="center">
@@ -49,7 +49,7 @@ all. Both looks live in Settings → Mod Settings.
 ## Build it
 
 No IPA is distributed. Bring a decrypted **Spotify 9.1.78** IPA; you get an unsigned
-`spoti.pw-<mod version>.ipa` to sign with SideStore, Feather or any certificate signer. Each
+`Spotifyre-<mod version>.ipa` to sign with SideStore, Feather or any certificate signer. Each
 [release](https://github.com/skopevoj/spoti.pw/releases) also carries the tweak's `.deb`.
 
 ### Build with GitHub Actions
@@ -68,7 +68,7 @@ alone builds too, but without the Live Activity. Then:
 
 Put the decrypted `.ipa` in `ipa/`, then:
 
-    make release    # out/spoti.pw-<version>.ipa, ready to sign
+    make release    # out/Spotifyre-<version>.ipa, ready to sign
     make install    # the same, signed with your certificate and pushed over USB
 
 `make install` reads `SIGN_P12`, `SIGN_PROFILE` and `SIGN_P12_PASSWORD` from `.signing.env`; copy
@@ -89,7 +89,7 @@ The app keeps Spotify's bundle id, so it installs over the real Spotify.
 
 If it made your phone nicer to use, a coffee is a good way to say so.
 
-<a href="https://ko-fi.com/darkksh">
+<a href="https://paypal.me">
   <img src="https://img.shields.io/badge/Ko--fi-Buy_me_a_coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Support on Ko-fi">
 </a>
 
@@ -101,10 +101,10 @@ contribution; it is ticked once, before the first pull request is merged.
 
 ## Star history
 
-<a href="https://star-history.com/#skopevoj/spoti.pw&Date">
+<a href="https://star-history.com/#gabriel-nicollet/Spotifyre&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=skopevoj/spoti.pw&type=Date&theme=dark">
-    <img src="https://api.star-history.com/svg?repos=skopevoj/spoti.pw&type=Date" alt="Star history chart">
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=gabriel-nicollet/Spotifyre&type=Date&theme=dark">
+    <img src="https://api.star-history.com/svg?repos=gabriel-nicollet/Spotifyre&type=Date" alt="Star history chart">
   </picture>
 </a>
 
