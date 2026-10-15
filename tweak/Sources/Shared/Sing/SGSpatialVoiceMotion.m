@@ -51,9 +51,15 @@
         return;
     }
 
-    if (CMHeadphoneMotionManager.authorizationStatus == CMAuthorizationStatusDenied ||
+    // This code is injected into Spotify, so its own Info.plist controls Core Motion's
+    // usage-description requirement. Do not start motion updates if the host app has no
+    // NSMotionUsageDescription: Core Motion can raise an exception in that case. The DSP
+    // still provides the fixed front/center Spatial Voice effect without head tracking.
+    id motionUsageDescription = NSBundle.mainBundle.infoDictionary[@"NSMotionUsageDescription"];
+    if (![motionUsageDescription isKindOfClass:NSString.class] ||
+        [(NSString *)motionUsageDescription length] == 0 ||
+        CMHeadphoneMotionManager.authorizationStatus == CMAuthorizationStatusDenied ||
         CMHeadphoneMotionManager.authorizationStatus == CMAuthorizationStatusRestricted) {
-        // The effect still works as a fixed front/center voice if motion access is unavailable.
         SGSingDSPSetSpatialAzimuthDegrees(0);
         return;
     }
