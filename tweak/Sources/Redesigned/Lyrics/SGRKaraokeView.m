@@ -801,10 +801,10 @@ static const NSUInteger kLinesPerFrame = 4;
 }
 
 - (CGRect)bubbleTarget {
-    // Artist-verified meanings get a bubble; community/editor meanings are dotted-underlined, so
-    // make the annotated line itself the tap target for those.
+    // Only the artist-verified meaning bubble gets a tap target. Community/editor meanings are
+    // still indicated by their dotted underline, but tapping the lyric itself must seek; hold to
+    // open its meaning, just as for an unannotated line.
     if (_bubble) return CGRectInset(_bubble.frame, -kBubbleReach, -kBubbleReach);
-    if (_underline) return CGRectInset(self.bounds, -kBubbleReach, -kBubbleReach);
     return CGRectNull;
 }
 
