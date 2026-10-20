@@ -12,9 +12,6 @@
 #import "Shared/Sing/SGSingController.h"
 #import "Shared/Player/PlayerState.h"
 
-// Temporary diagnostic switch: bypass custom lock-screen metadata interception to isolate launch hangs.
-#define SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH 1
-
 static const NSTimeInterval kTick = 0.25;
 // Past a line's sung end by this much, with the next line at least this far off, the artist comes back.
 static const NSInteger kBreakMs = 4000;
@@ -30,6 +27,7 @@ static BOOL sg_resending;
 // What the cover was last drawn for: the track and the line's index, or nil with no line.
 static NSString *sg_shownCover;
 static NSTimer *sg_timer;
+static id sg_defaultsObserver;
 
 static NSString *textOf(NSArray<SGKaraokeWord *> *words) {
     SGKaraokeLine *line = [SGKaraokeLine new];
@@ -173,10 +171,6 @@ static BOOL playingBy(NSDictionary *info) {
 
 %hook MPNowPlayingInfoCenter
 - (void)setNowPlayingInfo:(NSDictionary *)info {
-#if SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH
-    %orig;
-    return;
-#endif
     if (sg_resending) {
         %orig;
         return;
@@ -219,9 +213,6 @@ static BOOL playingBy(NSDictionary *info) {
 }
 
 - (NSDictionary *)nowPlayingInfo {
-#if SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH
-    return %orig;
-#endif
     NSDictionary *info;
     @synchronized (sg_lock) {
         info = sg_spotifyInfo;
@@ -233,6 +224,21 @@ static BOOL playingBy(NSDictionary *info) {
 %ctor {
     sg_lock = [NSObject new];
     %init;
+    sg_defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            BOOL enabled = SGFlag(SGKeyLockScreenLyrics, NO) || SGFlag(SGKeyLockScreenLyricsCover, NO);
+            if (!enabled) {
+                setTicking(NO);
+                sg_shownLine = nil;
+                sg_shownCover = nil;
+                return;
+            }
+            NSDictionary *info;
+            @synchronized (sg_lock) { info = sg_spotifyInfo; }
+            BOOL playing = info[MPNowPlayingInfoPropertyElapsedPlaybackTime] && playingBy(info);
+            setTicking(playing);
+            if (playing) tick();
+        }];
     SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d",
           SGFlag(SGKeyLockScreenLyrics, NO),
           SGFlag(SGKeyLockScreenLyricsCover, NO));
