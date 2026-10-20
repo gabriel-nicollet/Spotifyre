@@ -778,7 +778,8 @@ static UIMenu *menuFor(SGRPlayerMenuTakeover *t) {
     }
     [main addObject:speedAndPitchAction(t)];
     if (SGSingSupported()) [main addObject:spatialVoiceAction(t)];
-    [main addObject:lyricsTranslationAction(t)];
+    UIAction *translation = lyricsTranslationAction(t);
+    if (translation) [main addObject:translation];
     if (more.count == 1) {
         [feedback addObject:more.firstObject];
     } else if (more.count) {
