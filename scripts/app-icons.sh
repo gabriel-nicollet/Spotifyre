@@ -40,7 +40,12 @@ for TEMPLATE in "$ROOT"/icons/*.icon; do
   NAME="$(basename "$TEMPLATE" .icon)"
   cp -R "$TEMPLATE" "$WORK/art/$NAME.icon"
   mkdir -p "$WORK/art/$NAME.icon/Assets"
-  cp "$WORK/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
+  # Keep each icon bundle’s custom Spotifyre artwork when supplied; only fall back to Spotify’s logo for templates without one.
+  if [ -f "$TEMPLATE/Assets/Logo.svg" ]; then
+    cp "$TEMPLATE/Assets/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
+  else
+    cp "$WORK/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
+  fi
   "$ICTOOL" "$WORK/art/$NAME.icon" --export-image --output-file "$PREVIEWS/$NAME.png" --platform iOS \
     --rendition Default --width 60 --height 60 --scale 3 >/dev/null 2>&1 || skip "ictool could not draw $NAME"
   [ "$NAME" = Spotify ] || NAMES+=("$NAME")
