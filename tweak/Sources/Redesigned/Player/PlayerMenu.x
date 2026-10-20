@@ -727,6 +727,7 @@ static UIAction *lyricsTranslationAction(SGRPlayerMenuTakeover *t) {
                                          handler:^(UIAction *sender) {
         BOOL enabled = !SGFlag(SGKeyLyricsAITranslation, NO);
         SGSetEnabled(SGKeyLyricsAITranslation, enabled);
+        [NSNotificationCenter.defaultCenter postNotificationName:@"spotifyglass.lyricsAITranslationChanged" object:nil];
 
         SGRPlayerMenuTakeover *strong = weak;
         if (strong.anchor && strong.shown && !strong.closed) {
