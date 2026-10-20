@@ -1,6 +1,9 @@
 // The track's Canvas or its album's Apple Music cover as the lock screen's animated artwork. The key
 // is put on every dictionary that goes out, so the lock screen lyrics' rewrites carry it too.
 #import <MediaPlayer/MediaPlayer.h>
+
+// Temporary startup isolation: skip all Lock Screen Artwork setup and MPNowPlayingInfoCenter hook registration.
+#define SG_LOCKSCREEN_ARTWORK_DIAGNOSTIC_DISABLE_HOOKS 1
 #import "Core/SGCore.h"
 #import "LockScreenArtwork.h"
 #import "SGAppleArtwork.h"
@@ -271,6 +274,10 @@ static SGArtworkWatcher *sg_watcher;
 %end
 
 %ctor {
+#if SG_LOCKSCREEN_ARTWORK_DIAGNOSTIC_DISABLE_HOOKS
+    SGLog(@"lock artwork: diagnostic bypass; hooks not registered");
+    return;
+#endif
     if (!SGAnimatedArtworkAvailable()) {
         SGLog(@"lock artwork: off, animated artwork needs iOS 26");
         return;
