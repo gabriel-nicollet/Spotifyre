@@ -112,11 +112,11 @@ static void pageChanged(BOOL onScreen) {
     UIWindowScene *scene = activeScene();
     for (UIWindow *window in scene.windows) invalidateOrientation(window.rootViewController);
     if (!scene) return;
-    if (!onScreen) {
+    // If the switch is turned off while lyrics are already open, restore portrait immediately too.
+    if (!onScreen || !SGFlag(SGRKeyLyricsLandscape, NO)) {
         requestMask(scene, UIInterfaceOrientationMaskPortrait);
         return;
     }
-    if (!SGFlag(SGRKeyLyricsLandscape, NO)) return;
     UIInterfaceOrientationMask mask = maskForDeviceOrientation();
     if (!mask && UIInterfaceOrientationIsLandscape(scene.interfaceOrientation)) mask = UIInterfaceOrientationMaskLandscape;
     if (mask) requestMask(scene, mask);
@@ -161,5 +161,10 @@ static BOOL containsLyricsFullscreenView(UIView *view) {
     [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
     [NSNotificationCenter.defaultCenter addObserverForName:UIDeviceOrientationDidChangeNotification
         object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) { deviceOrientationChanged(note); }];
+    // Apply the setting immediately even when the full-screen lyrics page is already open.
+    [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            if (sg_pageOnScreen) pageChanged(YES);
+        }];
     dispatch_async(dispatch_get_main_queue(), ^{ installDelegateOrientationHook(); });
 }
