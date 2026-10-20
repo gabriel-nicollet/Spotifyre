@@ -171,7 +171,6 @@ static BOOL playingBy(NSDictionary *info) {
     return !rate || rate.doubleValue > 0;
 }
 
-#if !SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_DISABLE_HOOKS
 %hook MPNowPlayingInfoCenter
 - (void)setNowPlayingInfo:(NSDictionary *)info {
     if (sg_resending) {
@@ -223,17 +222,16 @@ static BOOL playingBy(NSDictionary *info) {
     return info ?: %orig;
 }
 %end
-#endif
 
 %ctor {
     sg_lock = [NSObject new];
-#if !SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_DISABLE_HOOKS
-    %init;
-    SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d",
-          SGFlag(SGKeyLockScreenLyrics, NO),
-          SGFlag(SGKeyLockScreenLyricsCover, NO));
-#else
-    SGLog(@"lock screen lyrics: diagnostic build, hooks disabled");
-#endif
+    if (!SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_DISABLE_HOOKS) {
+        %init;
+        SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d",
+              SGFlag(SGKeyLockScreenLyrics, NO),
+              SGFlag(SGKeyLockScreenLyricsCover, NO));
+    } else {
+        SGLog(@"lock screen lyrics: diagnostic build, hooks not registered");
+    }
 }
 
