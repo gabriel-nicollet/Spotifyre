@@ -27,7 +27,6 @@ static BOOL sg_resending;
 // What the cover was last drawn for: the track and the line's index, or nil with no line.
 static NSString *sg_shownCover;
 static NSTimer *sg_timer;
-static id sg_defaultsObserver;
 
 static NSString *textOf(NSArray<SGKaraokeWord *> *words) {
     SGKaraokeLine *line = [SGKaraokeLine new];
@@ -224,21 +223,6 @@ static BOOL playingBy(NSDictionary *info) {
 %ctor {
     sg_lock = [NSObject new];
     %init;
-    sg_defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
-        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            BOOL enabled = SGFlag(SGKeyLockScreenLyrics, NO) || SGFlag(SGKeyLockScreenLyricsCover, NO);
-            if (!enabled) {
-                setTicking(NO);
-                sg_shownLine = nil;
-                sg_shownCover = nil;
-                return;
-            }
-            NSDictionary *info;
-            @synchronized (sg_lock) { info = sg_spotifyInfo; }
-            BOOL playing = info[MPNowPlayingInfoPropertyElapsedPlaybackTime] && playingBy(info);
-            setTicking(playing);
-            if (playing) tick();
-        }];
     SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d",
           SGFlag(SGKeyLockScreenLyrics, NO),
           SGFlag(SGKeyLockScreenLyricsCover, NO));
