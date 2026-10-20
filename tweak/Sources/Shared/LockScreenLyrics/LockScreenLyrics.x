@@ -5,6 +5,9 @@
 // move, so working it out four times a second only wakes the phone. The lock screen keeps the line it
 // was left on until the sound starts again.
 #import <MediaPlayer/MediaPlayer.h>
+
+// Temporary diagnostic only: preserve Lock Screen Lyrics source while bypassing its Now Playing hooks.
+#define SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH 1
 #import "Core/SGCore.h"
 #import "LockScreenLyrics.h"
 #import "Shared/Lyrics/Lyrics.h"
@@ -170,6 +173,12 @@ static BOOL playingBy(NSDictionary *info) {
 
 %hook MPNowPlayingInfoCenter
 - (void)setNowPlayingInfo:(NSDictionary *)info {
+    // Temporary startup-crash isolation: bypass custom Now Playing processing.
+    // Restore to 0 after confirming whether this hook causes the launch hang.
+#if SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH
+    %orig;
+    return;
+#endif
     if (sg_resending) {
         %orig;
         return;
@@ -212,6 +221,9 @@ static BOOL playingBy(NSDictionary *info) {
 }
 
 - (NSDictionary *)nowPlayingInfo {
+#if SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_PASSTHROUGH
+    return %orig;
+#endif
     NSDictionary *info;
     @synchronized (sg_lock) {
         info = sg_spotifyInfo;
