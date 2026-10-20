@@ -19,6 +19,7 @@
 #import "Redesigned/Kit/SGRKit.h"
 #import "Shared/Player/SpeedPitch.h"
 #import "Shared/Sing/SGSingController.h"
+#import "Shared/Lyrics/Lyrics.h"
 #import "Player.h"
 
 // A sheet this soon after the ⋯'s tap is the player's.
@@ -717,6 +718,30 @@ static UIAction *spatialVoiceAction(SGRPlayerMenuTakeover *t) {
     return action;
 }
 
+static UIAction *lyricsTranslationAction(SGRPlayerMenuTakeover *t) {
+    __weak SGRPlayerMenuTakeover *weak = t;
+    BOOL on = SGFlag(SGKeyLyricsAITranslation, NO);
+    UIAction *action = [UIAction actionWithTitle:@"Lyrics Translation"
+                                           image:symbol(@"translate")
+                                      identifier:nil
+                                         handler:^(UIAction *sender) {
+        BOOL enabled = !SGFlag(SGKeyLyricsAITranslation, NO);
+        SGSetEnabled(SGKeyLyricsAITranslation, enabled);
+
+        SGRPlayerMenuTakeover *strong = weak;
+        if (strong.anchor && strong.shown && !strong.closed) {
+            UIMenu *menu = menuFor(strong);
+            [strong.anchor.contextMenuInteraction
+                updateVisibleMenuWithBlock:^UIMenu *(UIMenu *visible) {
+                return menu;
+            }];
+        }
+    }];
+    action.subtitle = on ? @"On" : @"Off";
+    action.state = on ? UIMenuElementStateOn : UIMenuElementStateOff;
+    return action;
+}
+
 static UIMenu *menuFor(SGRPlayerMenuTakeover *t) {
     NSArray<SGRPlayerMenuSpotifyRow *> *rows = t.rows ?: @[];
     // Tiles in the Music app's order, Share last.
@@ -745,6 +770,7 @@ static UIMenu *menuFor(SGRPlayerMenuTakeover *t) {
     }
     [main addObject:speedAndPitchAction(t)];
     if (SGSingSupported()) [main addObject:spatialVoiceAction(t)];
+    [main addObject:lyricsTranslationAction(t)];
     if (more.count == 1) {
         [feedback addObject:more.firstObject];
     } else if (more.count) {
