@@ -719,15 +719,23 @@ static UIAction *spatialVoiceAction(SGRPlayerMenuTakeover *t) {
 }
 
 static UIAction *lyricsTranslationAction(SGRPlayerMenuTakeover *t) {
+    Class translator = NSClassFromString(@"SGRLyricsTranslator");
+    SEL availableSelector = NSSelectorFromString(@"isAvailable");
+    BOOL available = translator && [translator respondsToSelector:availableSelector]
+        && ((BOOL (*)(id, SEL))objc_msgSend)(translator, availableSelector);
+    if (!available) return nil;
+
     __weak SGRPlayerMenuTakeover *weak = t;
     BOOL on = SGFlag(SGKeyLyricsAITranslation, NO);
-    UIAction *action = [UIAction actionWithTitle:@"Lyrics Translation"
+    UIAction *action = [UIAction actionWithTitle:on ? @"Hide Lyrics Translation" : @"Translate Lyrics"
                                            image:symbol(@"translate")
                                       identifier:nil
                                          handler:^(UIAction *sender) {
         BOOL enabled = !SGFlag(SGKeyLyricsAITranslation, NO);
         SGSetEnabled(SGKeyLyricsAITranslation, enabled);
-        [NSNotificationCenter.defaultCenter postNotificationName:@"spotifyglass.lyricsAITranslationChanged" object:nil];
+        [NSNotificationCenter.defaultCenter postNotificationName:@"SGRLyricsAITranslationDidChangeNotification"
+                                                            object:nil
+                                                          userInfo:@{@"enabled": @(enabled)}];
 
         SGRPlayerMenuTakeover *strong = weak;
         if (strong.anchor && strong.shown && !strong.closed) {
@@ -738,7 +746,6 @@ static UIAction *lyricsTranslationAction(SGRPlayerMenuTakeover *t) {
             }];
         }
     }];
-    action.subtitle = on ? @"On" : @"Off";
     action.state = on ? UIMenuElementStateOn : UIMenuElementStateOff;
     return action;
 }
