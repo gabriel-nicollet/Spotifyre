@@ -1139,7 +1139,7 @@ typedef struct {
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerTransitionChanged:) name:SGPlayerTransitionNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(playerTransitionChanged:) name:SGPlayerTransitionEndedNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(restyle) name:SGRLyricsTextDidChangeNotification object:nil];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(aiTranslationSettingChanged) name:@"spotifyglass.lyricsAITranslationChanged" object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(machineTranslationSettingChanged:) name:@"SGRLyricsAITranslationDidChangeNotification" object:nil];
     // A locked phone leaves the card in its window, so the link has to be put down by the app going
     // away rather than by the view going: see scheduleLink.
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(scheduleLink) name:UIApplicationDidBecomeActiveNotification object:nil];
@@ -1440,10 +1440,12 @@ typedef struct {
 // A switch of the menu or the Lyrics page's order: the song is measured again in the new style off
 // the main thread, as for a new width, but the lines on the page stay until it is in, and then the
 // new ones crossfade over them where they were, so nothing blinks and nothing is lost of the place.
-- (void)aiTranslationSettingChanged {
+- (void)machineTranslationSettingChanged:(NSNotification *)notification {
+    BOOL enabled = [notification.userInfo[@"enabled"] boolValue];
     _machineTranslationGeneration++;
     _machineTranslationAsked = NO;
     [self restyle];
+    if (enabled) [self requestMachineTranslations];
 }
 
 - (void)restyle {
@@ -1535,12 +1537,9 @@ typedef struct {
 
 // The top-right ellipsis holds lyric display options and on-device translation.
 - (void)offerExtras {
-    BOOL aiAvailable = NO;
-    Class translator = NSClassFromString(@"SGRLyricsTranslator");
-    SEL availableSelector = NSSelectorFromString(@"isAvailable");
-    if (translator && [translator respondsToSelector:availableSelector])
-        aiAvailable = ((BOOL (*)(id, SEL))objc_msgSend)(translator, availableSelector);
-    BOOL offered = _lines && (_hasSpoken || _hasTranslation || aiAvailable);
+    // AI translation lives in the player's existing ellipsis menu beside Spatial Voice; this one
+    // keeps pronunciation and translations supplied by the lyric source.
+    BOOL offered = _lines && (_hasSpoken || _hasSourceTranslation);
     if (!offered) {
         _extras.hidden = YES;
         return;
@@ -1579,22 +1578,6 @@ typedef struct {
         [items addObject:[UIAction actionWithTitle:on ? @"Hide Source Translation" : @"Show Source Translation"
                                              image:[UIImage systemImageNamed:@"character.bubble"] identifier:nil
                                            handler:^(UIAction *action) { SGRSetLyricsTextShown(SGRLyricsTextTranslation, !on); }]];
-    }
-    if (aiAvailable) {
-        BOOL on = SGFlag(SGKeyLyricsAITranslation, NO);
-        NSString *languageCode = NSLocale.preferredLanguages.firstObject ?: @"en";
-        NSString *languageName = [[NSLocale currentLocale] displayNameForKey:NSLocaleIdentifier value:languageCode] ?: languageCode;
-        NSString *title = on ? @"Hide AI Translation" : [NSString stringWithFormat:@"Translate to %@", languageName];
-        __weak typeof(self) weakSelf = self;
-        [items addObject:[UIAction actionWithTitle:title image:[UIImage systemImageNamed:@"translate"] identifier:nil handler:^(UIAction *action) {
-            SGRKaraokeView *page = weakSelf;
-            if (!page) return;
-            SGSetEnabled(SGKeyLyricsAITranslation, !on);
-            page->_machineTranslationGeneration++;
-            page->_machineTranslationAsked = NO;
-            [page restyle];
-            if (!on) [page requestMachineTranslations];
-        }]];
     }
     _extras.menu = [UIMenu menuWithChildren:items];
     _extras.hidden = NO;
