@@ -92,7 +92,7 @@ FILES=("$TWEAK_DEB")
 if xcrun --sdk iphoneos --find swiftc >/dev/null 2>&1; then
   EXT_DIR="$ROOT/out/extension"
   unzip -p "$IN" "${APP_DIR}Info.plist" > "$ROOT/out/.info.plist"
-  "$ROOT/scripts/build-extension.sh" "$ROOT/out/.info.plist" "$EXT_DIR"
+  bash "$ROOT/scripts/build-extension.sh" "$ROOT/out/.info.plist" "$EXT_DIR"
   rm -f "$ROOT/out/.info.plist"
   FILES+=("$EXT_DIR/SpotifyGlassLiveActivity.appex")
 else
