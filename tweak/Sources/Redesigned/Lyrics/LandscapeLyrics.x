@@ -163,8 +163,12 @@ static BOOL containsLyricsFullscreenView(UIView *view) {
         object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) { deviceOrientationChanged(note); }];
     // Apply the setting immediately even when the full-screen lyrics page is already open.
     [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
-        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            if (sg_pageOnScreen) pageChanged(YES);
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            // Do not make a defaults-notification poster wait for the main operation queue. Spotify
+            // can synchronously wait on CoreThread during scene creation while that thread posts.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (sg_pageOnScreen) pageChanged(YES);
+            });
         }];
     dispatch_async(dispatch_get_main_queue(), ^{ installDelegateOrientationHook(); });
 }
