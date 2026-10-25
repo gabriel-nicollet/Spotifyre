@@ -1,6 +1,6 @@
 # Spotifyre Flame Icon Integration
 
-This patch adds a smooth, rounded flame + Spotify-style wave artwork to all nine existing `.icon` bundles and updates `scripts/app-icons.sh` to preserve custom artwork.
+This patch adds a smooth, rounded flame silhouette to all nine existing `.icon` bundles and updates `scripts/app-icons.sh` to preserve custom artwork.
 
 ## Changed files
 - `icons/{Blue,Glass,Green,Lime,Orange,Pink,Purple,Spotify,White}.icon/Assets/Logo.svg` (new)
@@ -15,5 +15,5 @@ This patch adds a smooth, rounded flame + Spotify-style wave artwork to all nine
 
 ## Notes
 - The artwork is a single-color vector so the existing Icon Composer JSON tint settings continue to control the variant colors.
-- The flame is intentionally rounded and restrained, with the three wave cutouts centered.
+- The flame is a plain rounded silhouette (one main tongue, one small side tongue), about 600 px tall and centred in the 1024 px canvas; the bundles' 1.22 layer scale brings it to roughly 70% of the tile.
 - This has not been compiled or tested in an iOS IPA in this environment; validate rendering in Icon Composer before distributing.
