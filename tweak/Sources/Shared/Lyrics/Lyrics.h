@@ -18,11 +18,14 @@ SGModRow *SGLockScreenLyricsRow(void);
 SGModRow *SGLockScreenLyricsCoverRow(void);
 SGModRow *SGLyricsTranslationLanguageRow(void);
 SGModRow *SGLyricsWordTimingRow(void);
+SGModRow *SGLyricsSyncRow(void);
 
 // Sweeps a line timed only by the line word by word, on the estimate of when each word is sung, as if
 // the source had timed them. Off, such a line lights up whole as it starts. Off by default: the
 // estimate is a guess dressed up as timing.
 #define SGKeyLyricsSimulateWords @"spotifyglass.lyricsSimulateWords"
+// Whether the redesigned lyrics follow playback timing. Off shows the full lyrics without following the clock.
+#define SGKeyLyricsSync @"spotifyglass.lyricsSync"
 // On-device Apple Intelligence translation, shown beneath the original lyrics when enabled.
 #define SGKeyLyricsAITranslation @"spotifyglass.lyricsAITranslation"
 

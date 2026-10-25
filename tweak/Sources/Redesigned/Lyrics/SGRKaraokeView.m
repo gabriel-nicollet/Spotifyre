@@ -4,9 +4,9 @@
 // lines and the clock are Shared/Lyrics/Lyrics.h's.
 //
 // Only words the source timed are swept. A line timed by the line lights up whole as it starts, as
-// Apple Music lights such a line, unless the Lyrics page's "Simulate word-by-word timing" asks for
-// its estimated words to be swept; lyrics with no timing at all are shown as plain text, every line
-// lit, nothing following the clock.
+// Apple Music lights such a line, unless Lyrics settings' "Simulated timing" asks for its estimated
+// words to be swept. "Sync lyrics" can show every line without following the clock; lyrics with no
+// timing at all are shown the same way.
 #import "Core/SGCore.h"
 #import "SGRKaraokeView.h"
 #import "LyricsText.h"
@@ -1091,7 +1091,7 @@ typedef struct {
     double _clock;
     NSInteger _reported;
     CFTimeInterval _clockTime;
-    BOOL _sweepsEstimates;   // the Lyrics page's "Simulate word-by-word timing", read once like the credit
+    BOOL _sweepsEstimates;   // Lyrics settings' "Simulated timing", read once like the credit
     BOOL _plain;             // the song has no timing at all: every line lit, nothing follows the clock
     NSDictionary<NSNumber *, NSArray<SGLyricsMeaning *> *> *_meanings;   // Genius's, by line
     NSUInteger _meaningsAsked;
@@ -1390,7 +1390,7 @@ typedef struct {
     _breakCount = 0;
     _hasSpoken = _hasTranslation = _hasSourceTranslation = NO;
     _hasTranslation = SGFlag(SGKeyLyricsAITranslation, NO);
-    _plain = SGKaraokeLinesTiming(_lines) == SGKaraokeTimingNone;
+    _plain = !SGFlag(SGKeyLyricsSync, YES) || SGKaraokeLinesTiming(_lines) == SGKaraokeTimingNone;
     NSInteger sungTo = 0;   // the top of the song counts as where the singing before the first line ends
     for (NSUInteger i = 0; i < count; i++) {
         SGKaraokeLine *line = _lines[i];

@@ -1,16 +1,13 @@
 {
   "fill": {
-    "solid": "extended-gray:0.00000,1.00000"
+    "solid": "extended-gray:0.07500,1.00000"
   },
   "fill-specializations": [
     {
-      "appearance": "dark",
       "value": {
-        "linear-gradient": [
-          "extended-gray:0.19200,1.00000",
-          "extended-gray:0.07800,1.00000"
-        ]
-      }
+        "solid": "extended-gray:0.07500,1.00000"
+      },
+      "appearance": "dark"
     }
   ],
   "groups": [
@@ -20,7 +17,7 @@
           "fill": {
             "solid": "display-p3:0.11800,0.84300,0.37600,1.00000"
           },
-          "glass": true,
+          "glass": false,
           "image-name": "Logo.svg",
           "name": "Logo",
           "position": {
@@ -37,8 +34,8 @@
         "opacity": 0.5
       },
       "translucency": {
-        "enabled": true,
-        "value": 0.1
+        "enabled": false,
+        "value": 0.0
       }
     }
   ],

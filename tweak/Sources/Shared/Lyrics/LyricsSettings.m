@@ -40,5 +40,15 @@ SGModRow *SGLyricsTranslationLanguageRow(void) {
 
 // Only the redesign's lyrics view sweeps words.
 SGModRow *SGLyricsWordTimingRow(void) {
-    return SGOptionRow(@"Simulate word timing", nil, SGKeyLyricsSimulateWords);
+    SGModRow *row = SGOptionRow(@"Simulated timing", nil, SGKeyLyricsSimulateWords);
+    row.visible = ^BOOL{ return SGFlag(SGKeyLyricsSync, YES); };
+    row.info = @"Estimates when each word is sung in line-synced lyrics and sweeps them as if the source had timed them.";
+    return row;
+}
+
+SGModRow *SGLyricsSyncRow(void) {
+    SGModRow *row = SGOptionRow(@"Sync lyrics", @"Follow the song as it plays", SGKeyLyricsSync);
+    row.defaultOn = YES;
+    row.info = @"Turn this off to show the full lyrics without following playback timing.";
+    return row;
 }

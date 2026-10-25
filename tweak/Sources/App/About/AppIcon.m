@@ -10,11 +10,15 @@
 // In the order the list shows them: the file in icons/, and the name the list gives it. Spotify is the
 // IPA's own icon, iOS's primary one.
 static NSArray<NSString *> *iconFiles(void) {
-    return @[@"Spotify", @"Glass", @"Green", @"White", @"Pink", @"Blue", @"Purple", @"Orange", @"Lime"];
+    return @[@"Spotify", @"Glass", @"SpotifyGreen", @"SpotifyWhite", @"SpotifyPink", @"SpotifyBlue", @"SpotifyPurple",
+             @"SpotifyOrange", @"SpotifyLime", @"SpotifyreGreen", @"SpotifyreWhite", @"SpotifyrePink", @"SpotifyreBlue",
+             @"SpotifyrePurple", @"SpotifyreOrange", @"SpotifyreLime"];
 }
 
 static NSArray<NSString *> *iconTitles(void) {
-    return @[@"Spotify", @"Liquid Glass", @"Green", @"White", @"Pink", @"Blue", @"Purple", @"Orange", @"Lime"];
+    return @[@"Spotify", @"Liquid Glass", @"Spotify Green", @"Spotify White", @"Spotify Pink", @"Spotify Blue", @"Spotify Purple",
+             @"Spotify Orange", @"Spotify Lime", @"Spotifyre Green", @"Spotifyre White", @"Spotifyre Pink", @"Spotifyre Blue",
+             @"Spotifyre Purple", @"Spotifyre Orange", @"Spotifyre Lime"];
 }
 
 static NSString *alternateName(NSString *file) {
@@ -98,6 +102,8 @@ static UIImage *preview(NSString *file) {
     UITableViewCell *cell = SGDequeueCell(table, @"appicon");
     NSString *file = _files[(NSUInteger)path.row];
     SGFillCell(cell, titleOf(file), nil, nil, nil);
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
     UIListContentConfiguration *content = [(UIListContentConfiguration *)cell.contentConfiguration copy];
     content.image = preview(file);
     content.imageProperties.maximumSize = CGSizeMake(44, 44);
