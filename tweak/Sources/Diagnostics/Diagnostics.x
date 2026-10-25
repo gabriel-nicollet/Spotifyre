@@ -130,13 +130,17 @@ static void startTreeServer(void) {
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         char request[1024];
         recv(client, request, sizeof(request), 0);
-        __block NSString *body = nil;
-        dispatch_sync(dispatch_get_main_queue(), ^{ body = SGScreenTree(); });
-        NSData *data = [body dataUsingEncoding:NSUTF8StringEncoding];
-        NSString *head = [NSString stringWithFormat:@"HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %lu\r\nConnection: close\r\n\r\n", (unsigned long)data.length];
-        sendAll(client, [head dataUsingEncoding:NSUTF8StringEncoding]);
-        sendAll(client, data);
-        close(client);
+        // A screen tree must be read on main, but the listener must never wait for main to
+        // answer: a request can arrive while startup or another synchronous callback holds it.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSData *data = [SGScreenTree() dataUsingEncoding:NSUTF8StringEncoding];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                NSString *head = [NSString stringWithFormat:@"HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %lu\r\nConnection: close\r\n\r\n", (unsigned long)data.length];
+                sendAll(client, [head dataUsingEncoding:NSUTF8StringEncoding]);
+                sendAll(client, data);
+                close(client);
+            });
+        });
     });
     dispatch_resume(source);
     SGLog(@"tree server on 127.0.0.1:%u; on the Mac: iproxy %u:%u, then GET http://127.0.0.1:%u/tree", kTreePort, kTreePort, kTreePort, kTreePort);
