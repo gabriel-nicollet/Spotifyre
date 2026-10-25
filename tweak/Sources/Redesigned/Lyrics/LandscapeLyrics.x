@@ -12,6 +12,8 @@
 #import "LandscapeLyrics.h"
 
 static BOOL sg_pageOnScreen;
+// The switch as pageChanged last applied it, so a defaults write that leaves it alone does nothing.
+static BOOL sg_appliedLandscape;
 
 static BOOL landscapeNow(void) { return sg_pageOnScreen && SGFlag(SGRKeyLyricsLandscape, NO); }
 
@@ -108,6 +110,7 @@ static void deviceOrientationChanged(NSNotification *note) {
 // The page came or went: refresh the whole controller chain and follow the device while it is visible.
 static void pageChanged(BOOL onScreen) {
     sg_pageOnScreen = onScreen;
+    sg_appliedLandscape = SGFlag(SGRKeyLyricsLandscape, NO);
     installDelegateOrientationHook();
     UIWindowScene *scene = activeScene();
     for (UIWindow *window in scene.windows) invalidateOrientation(window.rootViewController);
@@ -167,7 +170,7 @@ static BOOL containsLyricsFullscreenView(UIView *view) {
             // Do not make a defaults-notification poster wait for the main operation queue. Spotify
             // can synchronously wait on CoreThread during scene creation while that thread posts.
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (sg_pageOnScreen) pageChanged(YES);
+                if (sg_pageOnScreen && SGFlag(SGRKeyLyricsLandscape, NO) != sg_appliedLandscape) pageChanged(YES);
             });
         }];
     dispatch_async(dispatch_get_main_queue(), ^{ installDelegateOrientationHook(); });
