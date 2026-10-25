@@ -160,12 +160,14 @@ static void startTreeServer(void) {
 %end
 
 // Startup deadlock diagnostic: record synchronous cross-thread selector waits.
-// Keep this limited to FLEX/debug builds and guard against logging recursively invoking this API.
+// A separate group that %ctor initialises only in FLEX/debug builds, so a normal build never hooks
+// NSObject at all. The flag guards against the log call re-entering this API.
 static __thread BOOL sg_loggingSelectorWait = NO;
 
+%group SelectorWaitDiagnostics
 %hook NSObject
 - (void)performSelector:(SEL)selector onThread:(NSThread *)thread withObject:(id)object waitUntilDone:(BOOL)wait modes:(NSArray<NSString *> *)modes {
-    if (wait && thread && thread != NSThread.currentThread && SGIsDebugBuild() && !sg_loggingSelectorWait) {
+    if (wait && thread && thread != NSThread.currentThread && !sg_loggingSelectorWait) {
         sg_loggingSelectorWait = YES;
         SGLog(@"sync selector wait: %@ targetThread=%@ currentThread=%@", NSStringFromSelector(selector), thread.name ?: @"<unnamed>", NSThread.currentThread.name ?: @"<unnamed>");
         sg_loggingSelectorWait = NO;
@@ -174,7 +176,7 @@ static __thread BOOL sg_loggingSelectorWait = NO;
 }
 
 - (void)performSelector:(SEL)selector onThread:(NSThread *)thread withObject:(id)object waitUntilDone:(BOOL)wait {
-    if (wait && thread && thread != NSThread.currentThread && SGIsDebugBuild() && !sg_loggingSelectorWait) {
+    if (wait && thread && thread != NSThread.currentThread && !sg_loggingSelectorWait) {
         sg_loggingSelectorWait = YES;
         SGLog(@"sync selector wait: %@ targetThread=%@ currentThread=%@", NSStringFromSelector(selector), thread.name ?: @"<unnamed>", NSThread.currentThread.name ?: @"<unnamed>");
         sg_loggingSelectorWait = NO;
@@ -182,12 +184,14 @@ static __thread BOOL sg_loggingSelectorWait = NO;
     %orig;
 }
 %end
+%end
 
 %ctor {
     %init;
     SGRequireClasses(@[@"_TtC21NowPlaying_ScrollImpl23NPVScrollViewController"]);
     SGLog(@"loaded, UIGlassEffect %@", NSClassFromString(@"UIGlassEffect") ? @"available" : @"missing");
     if (SGIsDebugBuild()) {
+        %init(SelectorWaitDiagnostics);
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
             SGDumpScreen(@"on background");
         }];
