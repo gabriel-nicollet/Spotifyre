@@ -99,6 +99,10 @@ Shared:
                   source is on. None of it runs while EeveeSpotify is injected with its own lyrics on (SGLyricsActive()):
                   its hook on the same delegate calls blocks on a lyrics fetch, and LyricsHook calls it from the main
                   queue. The Lyrics page says so
+    (DIAGNOSTIC STATE, unverified on device: LockScreenLyrics/ and LockScreenArtwork/ below are kept in
+                  the tree but their %ctor registers no hook while the startup deadlock is investigated
+                  (SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_DISABLE_HOOKS, SG_LOCKSCREEN_ARTWORK_DIAGNOSTIC_DISABLE_HOOKS
+                  = 1), so neither feature is active in a build until that is set back to 0)
     LockScreenLyrics/ the line being sung in the system's now playing, and as a switch of its own the lyrics on the cover: the
                   artwork is a card of the line, the one before and the one after over the blurred cover
                   (LockScreenLyricsCover.m), a still per line; while it is on the animated artwork is not sent
