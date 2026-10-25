@@ -1161,6 +1161,14 @@ typedef struct {
         return;
     }
     CGPoint point = [tap locationInView:_scroll];
+    // The artist-verified meaning bubble is the only tap target that opens a meaning; bubbleTarget is
+    // null for every other line, so a tap on a lyric, community/editor meaning or not, seeks below.
+    for (SGRKaraokeLineView *view in _shown.allValues) {
+        CGRect target = view.bubbleTarget;
+        if (CGRectIsNull(target) || !CGRectContainsPoint(target, [_scroll convertPoint:point toView:view])) continue;
+        [self explainLine:view];
+        return;
+    }
     if (_plain) return;   // a line with no time has nowhere to seek to
     for (SGRKaraokeLineView *view in _shown.allValues) {
         if (!CGRectContainsPoint(CGRectInset(view.frame, -_margin, -_lineGap / 2), point)) continue;
