@@ -5,6 +5,24 @@
 #import "Settings/SGPageStyle.h"
 #import "LyricsText.h"
 #import "LandscapeLyrics.h"
+#import "Shared/Lyrics/Lyrics.h"
+
+SGModRow *SGRLyricsTranslationRow(void) {
+    SGModRow *row = SGOptionRow(@"Show translations", @"Show translations supplied with the lyrics", SGRKeyLyricsTranslation);
+    row.defaultOn = YES;
+    row.changed = ^(BOOL on) { [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsTextDidChangeNotification object:nil]; };
+    return row;
+}
+
+SGModRow *SGRLyricsAITranslationRow(void) {
+    SGModRow *row = SGOptionRow(@"Translate lyrics on-device", @"Use Apple’s on-device language model", SGKeyLyricsAITranslation);
+    row.info = @"Adds a translation when the lyric source does not provide one. Requires an available Apple on-device language model.";
+    row.changed = ^(BOOL on) {
+        [NSNotificationCenter.defaultCenter postNotificationName:@"SGRLyricsAITranslationDidChangeNotification"
+                                                          object:nil userInfo:@{@"enabled": @(on)}];
+    };
+    return row;
+}
 
 @interface SGRLyricsTextPage : SGPage
 @end
@@ -24,7 +42,7 @@
     [super viewDidLoad];
     _order = [SGRLyricsTextOrder() mutableCopy];
     self.tableView.editing = YES;
-    _footer = SGNote(@"Pronunciation and translation are turned on from the button in the lyrics' corner.");
+    _footer = SGNote(@"Show source translations here, or use the lyrics menu to show pronunciation.");
     self.tableView.tableFooterView = _footer;
 }
 

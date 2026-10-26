@@ -44,7 +44,7 @@ static UIViewController *modSettingsPage(void) {
     if (signing) [warnings addObject:signing];
     if (warnings.count) [sections addObject:SGSection(nil, warnings)];
     SGModRow *mod = pageRow(@"Mod", @"info.circle", ^UIViewController *{ return SGAboutPage(); });
-    mod.value = ^NSString *{ return @(SG_VERSION); };
+    mod.value = ^NSString *{ return SGDisplayedModVersion(); };
     // The audio effects work on the sound, so both looks have them, with what they are doing beside the chevron.
     SGModRow *audioEffects = pageRow(@"Audio effects", @"slider.vertical.3", ^UIViewController *{ return SGDSPSettingsPage(); });
     audioEffects.value = ^NSString *{ return SGDSPSummary(); };
@@ -66,7 +66,7 @@ static UIViewController *modSettingsPage(void) {
     [sections addObject:SGAppearanceSection()];
     // Sing's microphone is the redesigned player's, so Karaoke is the redesign's; its row follows a download.
     if (SGRedesignedUIStored()) {
-        SGModRow *karaoke = pageRow(@"Karaoke", @"music.mic", ^UIViewController *{ return SGRKaraokeSettingsPage(); });
+        SGModRow *karaoke = pageRow(@"Karaoke & Spatial Voice", @"music.mic", ^UIViewController *{ return SGRKaraokeSettingsPage(); });
         karaoke.value = ^NSString *{ return SGRKaraokeSummary(); };
         karaoke.refreshOn = SGSingModelDidChangeNotification;
         [sections addObject:SGSection(nil, @[karaoke])];

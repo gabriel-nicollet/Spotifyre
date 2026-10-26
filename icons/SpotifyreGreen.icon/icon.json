@@ -1,53 +1,82 @@
 {
   "fill": {
-    "solid": "extended-gray:0.96000,1.00000"
+    "linear-gradient": [
+      "display-p3:0.70980,1.00000,0.81569,1.00000",
+      "display-p3:0.47843,0.94902,0.62353,1.00000"
+    ]
   },
   "fill-specializations": [
     {
-      "appearance": "dark",
       "value": {
-        "solid": "extended-gray:0.07500,1.00000"
-      }
-    }
-  ],
-  "groups": [
-    {
-      "layers": [
-        {
-          "fill": {
-            "solid": "display-p3:0.11800,0.84300,0.37600,1.00000"
-          },
-          "glass": false,
-          "image-name": "Logo.svg",
-          "name": "Logo",
-          "position": {
-            "scale": 1.22,
-            "translation-in-points": [
-              0,
-              0
-            ]
-          },
-          "fill-specializations": [
-            {
-              "value": {
-                "solid": "display-p3:0.11800,0.84300,0.37600,1.00000"
-              },
-              "appearance": "dark"
-            }
-          ]
-        }
-      ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.12
+        "linear-gradient": [
+          "display-p3:0.02745,0.08235,0.04706,1.00000",
+          "display-p3:0.07843,0.15294,0.10196,1.00000"
+        ]
       },
-      "translucency": {
-        "enabled": false,
-        "value": 0.0
-      }
+      "appearance": "dark"
     }
   ],
   "supported-platforms": {
     "squares": "shared"
-  }
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "fill-specializations": [
+            {
+              "value": {
+                "automatic-gradient": "display-p3:0.07843,0.89020,0.36078,1.00000"
+              },
+              "appearance": "dark"
+            }
+          ],
+          "glass": false,
+          "fill": {
+            "automatic-gradient": "display-p3:0.07843,0.89020,0.36078,1.00000"
+          },
+          "name": "Logo",
+          "position": {
+            "translation-in-points": [
+              0,
+              0
+            ],
+            "scale": 1.0
+          },
+          "image-name": "Logo.svg"
+        },
+        {
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "display-p3:0.02745,0.08235,0.04706,1.00000"
+              },
+              "appearance": "dark"
+            }
+          ],
+          "glass": false,
+          "fill": {
+            "solid": "display-p3:0.02745,0.32549,0.16078,1.00000"
+          },
+          "name": "Spotify waves",
+          "position": {
+            "translation-in-points": [
+              0,
+              0
+            ],
+            "scale": 1.0
+          },
+          "image-name": "Wave.svg"
+        }
+      ],
+      "shadow": {
+        "opacity": 0.18,
+        "kind": "neutral"
+      },
+      "translucency": {
+        "value": 0.0,
+        "enabled": false
+      }
+    }
+  ]
 }

@@ -6,6 +6,16 @@ static const double kLevelRampSeconds = 0.030;
 static const double kBypassRampSeconds = 0.120;
 static atomic_bool sg_spatialVoice = false;
 static atomic_int sg_spatialAzimuthMilliDegrees = 0;
+static atomic_int sg_spatialReverb = 250, sg_spatialEcho = 100, sg_spatialWidth = 350, sg_spatialDistance = 200;
+
+void SGSingDSPSetSpatialParameters(float reverb, float echo, float width, float distance) {
+    float values[] = {reverb, echo, width, distance};
+    atomic_int *slots[] = {&sg_spatialReverb, &sg_spatialEcho, &sg_spatialWidth, &sg_spatialDistance};
+    for (int i = 0; i < 4; i++) {
+        float v = isfinite(values[i]) ? fmaxf(0.0f, fminf(1.0f, values[i])) : 0.0f;
+        atomic_store_explicit(slots[i], (int)lrintf(v * 1000.0f), memory_order_relaxed);
+    }
+}
 
 void SGSingDSPSetSpatialVoice(bool enabled) {
     atomic_store_explicit(&sg_spatialVoice, enabled, memory_order_relaxed);
@@ -112,8 +122,14 @@ void SGSingMixerProcess(SGSingMixer *m,
     const float azimuthLimit = 1.3090f; // 75 degrees
     const float alpha = (float)(1.0 - exp(-1.0 / (m->sampleRate * 0.020)));
     const uint32_t maxITD = (uint32_t)fmin(31.0, m->sampleRate * 0.00065);
-    const uint32_t roomDelayL = (uint32_t)fmin(1023.0, m->sampleRate * 0.013);
-    const uint32_t roomDelayR = (uint32_t)fmin(1023.0, m->sampleRate * 0.019);
+    // Keep the reflections early so the centered singer reads in front instead of as a late, rear echo.
+    const uint32_t roomDelayL = (uint32_t)fmin(1023.0, m->sampleRate * 0.002);
+    const uint32_t roomDelayR = (uint32_t)fmin(1023.0, m->sampleRate * 0.003);
+    const float reverb = (float)atomic_load_explicit(&sg_spatialReverb, memory_order_relaxed) / 1000.0f;
+    const float echo = (float)atomic_load_explicit(&sg_spatialEcho, memory_order_relaxed) / 1000.0f;
+    const float width = (float)atomic_load_explicit(&sg_spatialWidth, memory_order_relaxed) / 1000.0f;
+    const float distance = (float)atomic_load_explicit(&sg_spatialDistance, memory_order_relaxed) / 1000.0f;
+    const uint32_t echoDelay = (uint32_t)fmin(16383.0, m->sampleRate * (0.10 + 0.20 * echo));
 
     for (uint32_t i = 0; i < frames; i++) {
         if (m->remaining) {
@@ -137,12 +153,13 @@ void SGSingMixerProcess(SGSingMixer *m,
             m->spatialAzimuth += (targetAzimuth - m->spatialAzimuth) * alpha;
             if (m->spatialAzimuth < -azimuthLimit) m->spatialAzimuth = -azimuthLimit;
             if (m->spatialAzimuth > azimuthLimit) m->spatialAzimuth = azimuthLimit;
-            float mono = 0.5f * (vocalL + vocalR) * 0.84f; // slightly farther than dry/center
+            float mono = 0.5f * (vocalL + vocalR) * (0.96f - distance * 0.30f);
+            float side = 0.5f * (vocalL - vocalR) * width;
             float pan = sinf(m->spatialAzimuth) / sinf(azimuthLimit);
             if (pan < -1) pan = -1;
             if (pan > 1) pan = 1;
-            float dryL = mono * sqrtf(0.5f * (1.0f - pan));
-            float dryR = mono * sqrtf(0.5f * (1.0f + pan));
+            float dryL = (mono + side) * sqrtf(0.5f * (1.0f - pan));
+            float dryR = (mono - side) * sqrtf(0.5f * (1.0f + pan));
 
             uint32_t delayL = m->spatialAzimuth > 0 ? maxITD : 0;
             uint32_t delayR = m->spatialAzimuth < 0 ? maxITD : 0;
@@ -162,11 +179,17 @@ void SGSingMixerProcess(SGSingMixer *m,
             uint32_t tapR = (roomAt + 1024 - roomDelayR) & 1023;
             float reflectionL = m->spatialRoomL[tapL];
             float reflectionR = m->spatialRoomR[tapR];
-            m->spatialRoomL[roomAt] = dryL + reflectionL * 0.18f;
-            m->spatialRoomR[roomAt] = dryR + reflectionR * 0.18f;
+            m->spatialRoomL[roomAt] = dryL + reflectionL * (0.12f + reverb * 0.38f);
+            m->spatialRoomR[roomAt] = dryR + reflectionR * (0.12f + reverb * 0.38f);
             m->spatialRoomIndex = (roomAt + 1) & 1023;
-            spatialL = dryL + reflectionL * 0.14f;
-            spatialR = dryR + reflectionR * 0.14f;
+            uint32_t echoAt = m->spatialEchoIndex;
+            uint32_t echoTap = (echoAt + 16384 - echoDelay) & 16383;
+            float echoL = m->spatialEchoL[echoTap], echoR = m->spatialEchoR[echoTap];
+            m->spatialEchoL[echoAt] = dryL + echoL * 0.28f;
+            m->spatialEchoR[echoAt] = dryR + echoR * 0.28f;
+            m->spatialEchoIndex = (echoAt + 1) & 16383;
+            spatialL = dryL + reflectionL * (0.04f + reverb * 0.20f) + echoL * echo * 0.45f;
+            spatialR = dryR + reflectionR * (0.04f + reverb * 0.20f) + echoR * echo * 0.45f;
         }
 
         // Remove the original separated vocal per channel, then add the processed vocal.

@@ -136,6 +136,9 @@ echo "==> adding the alternate app icons"
 # A failure leaves the IPA as it was, without them; Mod > App icon then does not show.
 "$ROOT/scripts/app-icons.sh" "$OUT" || echo "    the app icons failed: building without them"
 
+echo "==> adding the Spatial Voice demo audio"
+bash "$ROOT/scripts/spatial-demo-audio.sh" "$OUT"
+
 if [ -n "${EXT_DIR:-}" ]; then
   echo "==> adding the Live Activity intents to Spotify's App Intents metadata"
   "$ROOT/scripts/merge-appintents.py" "$OUT" "$APP_DIR" "$EXT_DIR/app/Metadata.appintents"

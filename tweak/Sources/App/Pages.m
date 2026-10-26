@@ -69,6 +69,7 @@ UIViewController *SGLyricsSettingsPage(void) {
     if (redesigned) {
         [sections addObject:SGSection(@"Display", @[SGRLyricsStyleCustomizeRow(), SGRLyricsLandscapeRow(), SGLyricsSyncRow(),
                                                       SGLyricsWordTimingRow(), SGLyricsTranslationLanguageRow(), SGLyricsMeaningsRow()])];
+        [sections addObject:SGSection(@"Translations", @[SGRLyricsTranslationRow(), SGRLyricsAITranslationRow()])];
     }
     [sections addObject:SGSection(nil, more)];
     return [[SGModPage alloc] initWithTitle:@"Lyrics" intro:SGRestartNote sections:sections footer:nil];

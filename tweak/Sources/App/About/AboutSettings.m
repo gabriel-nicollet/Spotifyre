@@ -33,12 +33,20 @@ static SGModRow *withSymbol(SGModRow *row, NSString *symbol) {
 }
 
 // Local build details and settings for this Spotifyre installation.
+NSString *SGDisplayedModVersion(void) {
+    NSString *version = @SG_VERSION;
+    NSRange beta = [version rangeOfString:@"-beta" options:NSCaseInsensitiveSearch];
+    if (beta.location != NSNotFound) version = [version substringToIndex:beta.location];
+    NSRange prerelease = [version rangeOfString:@"-" options:NSBackwardsSearch];
+    return prerelease.location == NSNotFound ? version : [version substringToIndex:prerelease.location];
+}
+
 UIViewController *SGAboutPage(void) {
     SGModRow *reset = withSymbol(SGActionRow(@"Reset all settings", nil, ^{ confirmReset(); }), @"trash");
     reset.color = SGRed();
     NSString *spotify = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown";
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObject:SGSection(nil, @[
-        SGStatRow(@"Version", ^NSString *{ return @(SG_VERSION); }),
+        SGStatRow(@"Version", ^NSString *{ return SGDisplayedModVersion(); }),
         SGStatRow(@"Spotify", ^NSString *{ return spotify; }),
     ])];
     SGModRow *appIcon = SGAppIconRow();

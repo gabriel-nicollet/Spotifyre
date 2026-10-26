@@ -122,7 +122,11 @@ static UIImage *preview(NSString *file) {
 - (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)path {
     [table deselectRowAtIndexPath:path animated:YES];
     NSString *file = _files[(NSUInteger)path.row];
-    if ([file isEqualToString:currentFile()]) return;
+    // Compare the value iOS actually stores. A stale icon name can make currentFile() fall back
+    // to Spotify and used to block the tap needed to switch back to the primary icon.
+    NSString *wantedName = alternateName(file);
+    NSString *currentName = UIApplication.sharedApplication.alternateIconName;
+    if ((wantedName == nil && currentName == nil) || [wantedName isEqualToString:currentName]) return;
     __weak UITableView *weakTable = table;
     [UIApplication.sharedApplication setAlternateIconName:alternateName(file) completionHandler:^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{

@@ -1436,7 +1436,7 @@ typedef struct {
 - (SGRKaraokeStyle *)styleNow {
     return [[SGRKaraokeStyle alloc] initWithSize:_fontSize order:SGRLyricsTextOrder()
                                    pronunciation:_hasSpoken && SGFlag(SGRKeyLyricsPronunciation, NO)
-                                     translation:_hasTranslation && (SGFlag(SGRKeyLyricsTranslation, NO) || SGFlag(SGKeyLyricsAITranslation, NO))];
+                                     translation:_hasTranslation && (SGFlag(SGRKeyLyricsTranslation, YES) || SGFlag(SGKeyLyricsAITranslation, NO))];
 }
 
 // A switch of the menu or the Lyrics page's order: the song is measured again in the new style off
@@ -1576,7 +1576,7 @@ typedef struct {
                                            handler:^(UIAction *action) { SGRSetLyricsTextShown(SGRLyricsTextPronunciation, !on); }]];
     }
     if (_hasSourceTranslation) {
-        BOOL on = SGFlag(SGRKeyLyricsTranslation, NO);
+        BOOL on = SGFlag(SGRKeyLyricsTranslation, YES);
         [items addObject:[UIAction actionWithTitle:on ? @"Hide Source Translation" : @"Show Source Translation"
                                              image:[UIImage systemImageNamed:@"character.bubble"] identifier:nil
                                            handler:^(UIAction *action) { SGRSetLyricsTextShown(SGRLyricsTextTranslation, !on); }]];

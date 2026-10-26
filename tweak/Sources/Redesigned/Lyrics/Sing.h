@@ -13,6 +13,7 @@ void SGRSingApplySwitch(void);
 void SGRSingApplyVocalsOnly(void);
 // The Spatial Voice switch, handed over the same way.
 void SGRSingApplySpatialVoice(void);
+void SGRSpatialVoiceApplySettings(void);
 
 // SingSettings.m: Mod Settings > Karaoke, with the switch and the voice model's download, and what its row on
 // the main page says beside the chevron (Off, On, No model, the download's percentage).

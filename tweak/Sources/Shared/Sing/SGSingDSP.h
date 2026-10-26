@@ -16,6 +16,8 @@ typedef struct {
     uint32_t spatialITDIndex;
     float spatialRoomL[1024], spatialRoomR[1024];
     uint32_t spatialRoomIndex;
+    float spatialEchoL[16384], spatialEchoR[16384];
+    uint32_t spatialEchoIndex;
 } SGSingMixer;
 
 void SGSingMixerInit(SGSingMixer *mixer, double sampleRate, float level);
@@ -28,3 +30,4 @@ void SGSingDSPSetSpatialVoice(bool enabled);
 // Relative source azimuth in degrees: negative is left, positive is right. Thread-safe.
 void SGSingDSPSetSpatialAzimuthDegrees(float degrees);
 bool SGSingDSPSpatialVoice(void);
+void SGSingDSPSetSpatialParameters(float reverb, float echo, float width, float distance);

@@ -82,3 +82,4 @@ void SGImportSettings(void);
 SGModRow *SGAppIconRow(void);
 
 UIViewController *SGAboutPage(void);   // the Mod page
+NSString *SGDisplayedModVersion(void);
