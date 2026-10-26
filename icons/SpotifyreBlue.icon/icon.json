@@ -44,34 +44,11 @@
             "scale": 1.0
           },
           "image-name": "Logo.svg"
-        },
-        {
-          "fill-specializations": [
-            {
-              "value": {
-                "solid": "display-p3:0.02745,0.07451,0.13725,1.00000"
-              },
-              "appearance": "dark"
-            }
-          ],
-          "glass": false,
-          "fill": {
-            "solid": "display-p3:0.02353,0.23922,0.44314,1.00000"
-          },
-          "name": "Spotify waves",
-          "position": {
-            "translation-in-points": [
-              0,
-              0
-            ],
-            "scale": 1.0
-          },
-          "image-name": "Wave.svg"
         }
       ],
       "shadow": {
-        "opacity": 0.18,
-        "kind": "neutral"
+        "opacity": 0.2,
+        "kind": "layer-color"
       },
       "translucency": {
         "value": 0.0,

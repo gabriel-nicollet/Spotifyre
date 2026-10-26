@@ -82,6 +82,15 @@ static UIViewController *modSettingsPage(void) {
             mod,
         ]),
     ]];
+    SGModRow *appIcon = SGAppIconRow();
+    if (appIcon) {
+        NSUInteger privacyIndex = [sections indexOfObjectPassingTest:^BOOL(SGModSection *section, NSUInteger idx, BOOL *stop) {
+            return [section.rows indexOfObjectPassingTest:^BOOL(SGModRow *row, NSUInteger rowIndex, BOOL *rowStop) {
+                return [row.title isEqualToString:@"Privacy & clutter"];
+            }] != NSNotFound;
+        }];
+        [sections insertObject:SGSection(nil, @[SGWithSymbol(appIcon, @"app")]) atIndex:privacyIndex + 1];
+    }
     return [[SGModPage alloc] initWithTitle:@"Spotifyre" intro:nil sections:sections footer:nil];
 }
 

@@ -49,8 +49,6 @@ UIViewController *SGAboutPage(void) {
         SGStatRow(@"Version", ^NSString *{ return SGDisplayedModVersion(); }),
         SGStatRow(@"Spotify", ^NSString *{ return spotify; }),
     ])];
-    SGModRow *appIcon = SGAppIconRow();
-    if (appIcon) [sections addObject:SGSection(nil, @[withSymbol(appIcon, @"app")])];
     [sections addObjectsFromArray:@[
         SGSection(nil, @[
             withSymbol(SGPageRow(@"Licenses", ^UIViewController *{ return SGLicensesPage(); }), @"doc.text"),

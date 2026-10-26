@@ -1,11 +1,14 @@
 // Mod > App icon: the icon on the home screen, picked from the ones scripts/app-icons.sh put into the IPA
 // (icons/*.icon, listed under CFBundleAlternateIcons as SGAppIcon<Name>). iOS keeps the choice itself, so
-// nothing is stored here and Reset all settings leaves it, and iOS says that it changed in an alert of its
-// own. The icons are Liquid Glass stacks only, which nothing before iOS 26 draws, so below 26 the row says
-// so. The name under the icon is the signature's to set, not the app's.
+// UIKit is the source of truth for the current choice; a saved last selection is only a fallback if its
+// alternate-icon name is unknown. iOS confirms each change in its own alert. The icons are Liquid Glass
+// stacks only, which nothing before iOS 26 draws, so below 26 the row says so. The name under the icon is
+// the signature's to set, not the app's.
 #import "Core/SGCore.h"
 #import "Settings/SGPageStyle.h"
 #import "About.h"
+
+static NSString *const SGAppIconSelectionKey = @"spotifyglass.appIcon.selection";
 
 // In the order the list shows them: the file in icons/, and the name the list gives it. Spotify is the
 // IPA's own icon, iOS's primary one.
@@ -35,10 +38,13 @@ static NSArray<NSString *> *availableFiles(void) {
 }
 
 static NSString *currentFile(void) {
+    NSArray<NSString *> *available = availableFiles();
     NSString *name = UIApplication.sharedApplication.alternateIconName;
-    for (NSString *file in iconFiles())
+    for (NSString *file in available)
         if ((!name && !alternateName(file)) || [alternateName(file) isEqualToString:name]) return file;
-    return iconFiles().firstObject;
+    NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:SGAppIconSelectionKey];
+    if ([available containsObject:saved]) return saved;
+    return @"Spotify";
 }
 
 static NSString *titleOf(NSString *file) {
@@ -131,6 +137,7 @@ static UIImage *preview(NSString *file) {
     [UIApplication.sharedApplication setAlternateIconName:alternateName(file) completionHandler:^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             SGLog(@"app icon: %@ -> %@", file, error ?: @"set");
+            if (!error) [NSUserDefaults.standardUserDefaults setObject:file forKey:SGAppIconSelectionKey];
             [weakTable reloadData];
             if (!error) return;
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"The icon did not change"

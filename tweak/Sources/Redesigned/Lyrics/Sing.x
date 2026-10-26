@@ -1,6 +1,7 @@
 #import "Core/SGCore.h"
 #import "Sing.h"
 #import "Shared/Sing/SGSingController.h"
+#import "Shared/Sing/SGSingModel.h"
 
 // Only the running look is told: a redesign switched on in Appearance but not yet restarted into takes the
 // switch as it finds it at its launch.
@@ -16,7 +17,7 @@ void SGRSingApplyVocalsOnly(void) {
 
 void SGRSingApplySpatialVoice(void) {
     if (!SGRedesignedUI()) return;
-    SGSingSetSpatialVoice(SGFlag(SGRKeySingSpatialVoice, NO));
+    SGSingSetSpatialVoice(SGFlag(SGRKeySingSpatialVoice, NO) && SGSingModelCurrentState() == SGSingModelInstalled);
     SGRSpatialVoiceApplySettings();
 }
 

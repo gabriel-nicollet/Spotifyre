@@ -30,6 +30,8 @@
 // tapped or the page comes back from a choice's list: the row fades in or out where it sits, and a section
 // whose rows are all hidden goes with its header and footer. Nil shows it always.
 @property (nonatomic, copy) BOOL (^visible)(void);
+// A switch may remain visible but unavailable until a requirement is met; tapping its disabled row explains why.
+@property (nonatomic, copy) BOOL (^enabled)(void);
 // A row of a list picked from on the page itself (SGChoiceListRows): a checkmark while this answers YES.
 @property (nonatomic, copy) BOOL (^checked)(void);
 // A row that is a view of its own, `height` tall, on no card (SGViewRow).

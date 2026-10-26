@@ -775,6 +775,7 @@ static void showProgress(UITableViewCell *cell, SGModRow *row, BOOL animated) {
         if (locked) SGLockedFlagValue(row.key, &beats);
         BOOL showsLock = locked && (beats || !SGFlagOverride(row.key));
         BOOL on = row.flag ? (showsLock ? lockedRowOn(row) : flagRowOn(row)) : SGFlag(row.key, row.defaultOn);
+        BOOL switchEnabled = !row.enabled || row.enabled();
         UIControl *toggle;
         if (row.glows) {
             SGGlowSwitch *glow = [SGGlowSwitch new];
@@ -787,18 +788,27 @@ static void showProgress(UITableViewCell *cell, SGModRow *row, BOOL animated) {
             plain.on = on;
             toggle = plain;
         }
-        toggle.enabled = !locked;
+        toggle.enabled = !locked && switchEnabled;
         // A disabled switch would swallow the tap; letting it through is what gets the row asked.
-        toggle.userInteractionEnabled = !locked;
+        toggle.userInteractionEnabled = !locked && switchEnabled;
         [toggle addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = row.info ? [self infoButtonBeside:toggle] : toggle;
-        cell.selectionStyle = locked ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+        cell.selectionStyle = (locked || !switchEnabled) ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
     }
     return cell;
 }
 
 - (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)path {
     SGModRow *row = [self rowAt:path];
+    if (row.key && row.enabled && !row.enabled()) {
+        [table deselectRowAtIndexPath:path animated:YES];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:row.title
+            message:row.info ?: @"This setting is unavailable until its requirements are met."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
     if (flagRowLocked(row)) {
         [table deselectRowAtIndexPath:path animated:YES];
         [self explainLock];
@@ -844,6 +854,7 @@ static void showProgress(UITableViewCell *cell, SGModRow *row, BOOL animated) {
     NSIndexPath *path = [self pathOf:toggle];
     if (!path) return;
     SGModRow *row = [self rowAt:path];
+    if (row.enabled && !row.enabled()) { [self.tableView reloadData]; return; }
     if (row.flag) SGSetFlagOverride(row.key, on ? @(!row.forceOff) : nil);
     else SGSetEnabled(row.key, on);
     if (row.changed) row.changed(on);

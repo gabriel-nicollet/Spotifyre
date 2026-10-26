@@ -23,7 +23,11 @@ static void tell(NSString *title, NSString *message);
 #define SGRKeySpatialEcho @"spotifyglass.redesign.spatialEcho"
 #define SGRKeySpatialWidth @"spotifyglass.redesign.spatialWidth"
 #define SGRKeySpatialDistance @"spotifyglass.redesign.spatialDistance"
-#define SGRKeySpatialPreset @"spotifyglass.redesign.spatialPreset"
+#define SGRKeySpatialGainDB @"spotifyglass.redesign.spatialGainDB"
+#define SGRKeySpatialEQ @"spotifyglass.redesign.spatialEQ"
+#define SGRKeySpatialEQLowDB @"spotifyglass.redesign.spatialEQLowDB"
+#define SGRKeySpatialEQMidDB @"spotifyglass.redesign.spatialEQMidDB"
+#define SGRKeySpatialEQHighDB @"spotifyglass.redesign.spatialEQHighDB"
 
 static double spatialValue(NSString *key, double fallback) {
     id value = [NSUserDefaults.standardUserDefaults objectForKey:key];
@@ -35,6 +39,11 @@ static void applySpatialValues(void) {
                                   (float)spatialValue(SGRKeySpatialEcho, 0.08),
                                   (float)spatialValue(SGRKeySpatialWidth, 0.35),
                                   (float)spatialValue(SGRKeySpatialDistance, 0.18));
+    SGSingDSPSetVocalGainDB((float)spatialValue(SGRKeySpatialGainDB, 0.0));
+    SGSingDSPSetVocalEQ(SGFlag(SGRKeySpatialEQ, NO),
+                        (float)spatialValue(SGRKeySpatialEQLowDB, 0.0),
+                        (float)spatialValue(SGRKeySpatialEQMidDB, 0.0),
+                        (float)spatialValue(SGRKeySpatialEQHighDB, 0.0));
     [[NSNotificationCenter defaultCenter] postNotificationName:@"SGSpatialVoiceDemoSettingsDidChange" object:nil];
 }
 
@@ -42,24 +51,6 @@ void SGRSpatialVoiceApplySettings(void) { applySpatialValues(); }
 
 static void setSpatialValue(NSString *key, double value) {
     [NSUserDefaults.standardUserDefaults setDouble:value forKey:key];
-    applySpatialValues();
-}
-
-static NSArray<NSString *> *spatialPresets(void) {
-    return @[@"Room", @"Hall", @"Garage", @"Studio", @"Cathedral"];
-}
-
-static void selectSpatialPreset(NSInteger index) {
-    static const double values[][4] = {
-        {0.26, 0.08, 0.35, 0.18}, {0.72, 0.22, 0.22, 0.38}, {0.12, 0.46, 0.72, 0.08},
-        {0.18, 0.03, 0.20, 0.05}, {0.90, 0.34, 0.18, 0.45}
-    };
-    if (index < 0 || index >= (NSInteger)(sizeof(values) / sizeof(values[0]))) return;
-    [NSUserDefaults.standardUserDefaults setInteger:index forKey:SGRKeySpatialPreset];
-    [NSUserDefaults.standardUserDefaults setDouble:values[index][0] forKey:SGRKeySpatialReverb];
-    [NSUserDefaults.standardUserDefaults setDouble:values[index][1] forKey:SGRKeySpatialEcho];
-    [NSUserDefaults.standardUserDefaults setDouble:values[index][2] forKey:SGRKeySpatialWidth];
-    [NSUserDefaults.standardUserDefaults setDouble:values[index][3] forKey:SGRKeySpatialDistance];
     applySpatialValues();
 }
 
@@ -77,6 +68,7 @@ static void selectSpatialPreset(NSInteger index) {
     AVAudioPlayerNode *_vocals, *_soundtrack;
     AVAudioUnitReverb *_reverb;
     AVAudioUnitDelay *_delay;
+    AVAudioUnitEQ *_eq;
     AVAudioEnvironmentNode *_environment;
     BOOL _resumeSpotify;
 }
@@ -102,16 +94,20 @@ static void selectSpatialPreset(NSInteger index) {
     AVAudioFile *musicFile = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:musicPath] error:&error];
     if (!voiceFile || !musicFile) { tell(@"Could not open demo audio", error.localizedDescription ?: @"The demo tracks could not be read."); return; }
     _engine = [AVAudioEngine new]; _vocals = [AVAudioPlayerNode new]; _soundtrack = [AVAudioPlayerNode new];
-    _reverb = [AVAudioUnitReverb new]; _delay = [AVAudioUnitDelay new];
-    [_engine attachNode:_vocals]; [_engine attachNode:_soundtrack]; [_engine attachNode:_reverb]; [_engine attachNode:_delay];
+    _reverb = [AVAudioUnitReverb new]; _delay = [AVAudioUnitDelay new]; _eq = [[AVAudioUnitEQ alloc] initWithNumberOfBands:3];
+    [_engine attachNode:_vocals]; [_engine attachNode:_soundtrack]; [_engine attachNode:_eq]; [_engine attachNode:_reverb]; [_engine attachNode:_delay];
     _environment = _engine.mainMixerNode ? [AVAudioEnvironmentNode new] : nil;
     if (_environment) {
         [_engine attachNode:_environment];
         _environment.outputType = AVAudioEnvironmentOutputTypeHeadphones;
         _environment.listenerPosition = AVAudioMake3DPoint(0, 0, 0);
+        _environment.listenerVectorOrientation = AVAudioMake3DVectorOrientation(AVAudioMake3DVector(0, 0, -1),
+                                                                                   AVAudioMake3DVector(0, 1, 0));
+        // AVAudioEnvironmentNode faces along -Z; a source at -Z is in front of the listener.
         _vocals.position = AVAudioMake3DPoint(0, 0, -1);
         _vocals.renderingAlgorithm = AVAudio3DMixingRenderingAlgorithmHRTF;
-        [_engine connect:_vocals to:_reverb format:voiceFile.processingFormat];
+        [_engine connect:_vocals to:_eq format:voiceFile.processingFormat];
+        [_engine connect:_eq to:_reverb format:voiceFile.processingFormat];
         [_engine connect:_reverb to:_delay format:voiceFile.processingFormat];
         [_engine connect:_delay to:_environment format:voiceFile.processingFormat];
         [_engine connect:_environment to:_engine.mainMixerNode format:nil];
@@ -134,7 +130,7 @@ static void selectSpatialPreset(NSInteger index) {
 - (void)stop {
     BOOL resume = _resumeSpotify;
     [_vocals stop]; [_soundtrack stop]; [_engine stop];
-    _vocals = nil; _soundtrack = nil; _reverb = nil; _delay = nil; _environment = nil; _engine = nil;
+    _vocals = nil; _soundtrack = nil; _reverb = nil; _delay = nil; _eq = nil; _environment = nil; _engine = nil;
     _resumeSpotify = NO;
     if (resume) [(id<SPTPlayer>)SGKaraokePlayer() resume:nil];
 }
@@ -144,6 +140,14 @@ static void selectSpatialPreset(NSInteger index) {
     _delay.delayTime = 0.12 + spatialValue(SGRKeySpatialEcho, 0.08) * 0.28;
     _delay.feedback = (float)(spatialValue(SGRKeySpatialEcho, 0.08) * 65.0);
     _delay.wetDryMix = (float)(spatialValue(SGRKeySpatialEcho, 0.08) * 70.0);
+    double gains[] = {spatialValue(SGRKeySpatialEQLowDB, 0.0), spatialValue(SGRKeySpatialEQMidDB, 0.0), spatialValue(SGRKeySpatialEQHighDB, 0.0)};
+    for (NSUInteger i = 0; i < 3; i++) {
+        AVAudioUnitEQFilterParameters *band = _eq.bands[i];
+        band.filterType = i == 0 ? AVAudioUnitEQFilterTypeLowShelf : (i == 2 ? AVAudioUnitEQFilterTypeHighShelf : AVAudioUnitEQFilterTypeParametric);
+        band.frequency = i == 0 ? 180 : (i == 1 ? 1200 : 5000);
+        band.bandwidth = 1.0; band.gain = (float)gains[i]; band.bypass = !SGFlag(SGRKeySpatialEQ, NO);
+    }
+    _vocals.volume = powf(10.0f, (float)spatialValue(SGRKeySpatialGainDB, 0.0) / 20.0f);
     double distance = spatialValue(SGRKeySpatialDistance, 0.18);
     _vocals.position = AVAudioMake3DPoint(0, 0, (float)(-1.0 - distance * 4.0));
     if (_environment.distanceAttenuationParameters)
@@ -267,14 +271,10 @@ static SGModRow *unavailableRow(void) {
 }
 
 static SGModSection *karaokeSection(void) {
-    if (!SGSingSupported()) return SGNotedSection(@"Karaoke & Spatial Voice", @[unavailableRow()], footer());
+    if (!SGSingSupported()) return SGNotedSection(@"Karaoke", @[unavailableRow()], footer());
     applySpatialValues();
     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
-    SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep the vocals focused in front", SGRKeySingSpatialVoice);
-    spatial.info = @"Keeps the voice anchored in front as you turn your head, when compatible headphone motion is available. "
-                   @"Reverb, echo, width and distance change the vocal stem; the Sing slider still controls the mix from 0 to 110 percent.";
-    spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); };
     SGModRow *model = SGStatActionRow(@"Voice model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
     model.progress = ^double {
         return SGSingModelCurrentState() == SGSingModelDownloading ? (double)SGSingModelReceived() / SGSingModelSize() : -1;
@@ -295,9 +295,21 @@ static SGModSection *karaokeSection(void) {
         SGSingModelState state = SGSingModelCurrentState();
         return state == SGSingModelInstalled || (state == SGSingModelMissing && SGSingModelReceived() > 0);
     };
-    SGModRow *preset = SGChoiceRow(@"Room preset", nil, SGRKeySpatialPreset, spatialPresets(), 0);
-    preset.choiceFooter = @"Sets a starting point for the room controls. You can then fine-tune each effect.";
-    preset.chosen = ^(NSInteger index) { selectSpatialPreset(index); };
+    return SGNotedSection(@"Karaoke", @[sing, model, download, cancel, remove], footer());
+}
+
+static SGModSection *spatialVoiceSection(void) {
+    if (!SGSingSupported()) return SGSection(@"Spatial Voice", @[]);
+    BOOL installed = SGSingModelCurrentState() == SGSingModelInstalled;
+    NSString *gatingInfo = @"Download the Sing voice model above to enable Spatial Voice. Tuning works with any headphones; AirPods are required only for head tracking.";
+    SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep vocals focused in front", SGRKeySingSpatialVoice);
+    spatial.info = installed ? @"Adjust the vocal stem's position and character. AirPods are needed for head tracking; effect tuning works with other headphones." : gatingInfo;
+    spatial.enabled = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled; };
+    spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); applySpatialValues(); };
+    SGModRow *gain = SGSliderRow(@"Vocal level", @"Relative vocal gain", -12, 6, 0.5,
+        ^double { return spatialValue(SGRKeySpatialGainDB, 0.0); },
+        ^(double value) { setSpatialValue(SGRKeySpatialGainDB, value); },
+        ^NSString *(double value) { return [NSString stringWithFormat:@"%+.1f dB", value]; });
     SGModRow *reverb = SGSliderRow(@"Reverb", @"Room reflections", 0, 1, 0.01,
         ^double { return spatialValue(SGRKeySpatialReverb, 0.26); },
         ^(double value) { setSpatialValue(SGRKeySpatialReverb, value); },
@@ -314,13 +326,34 @@ static SGModSection *karaokeSection(void) {
         ^double { return spatialValue(SGRKeySpatialDistance, 0.18); },
         ^(double value) { setSpatialValue(SGRKeySpatialDistance, value); },
         ^NSString *(double value) { return [NSString stringWithFormat:@"%d%%", (int)lrint(value * 100)]; });
+    SGModRow *eq = SGOptionRow(@"Voice EQ", @"Shape the vocal tone", SGRKeySpatialEQ);
+    eq.changed = ^(BOOL on) { applySpatialValues(); };
+    SGModRow *low = SGSliderRow(@"Low", @"Warmth and body", -6, 6, 0.5,
+        ^double { return spatialValue(SGRKeySpatialEQLowDB, 0.0); },
+        ^(double value) { setSpatialValue(SGRKeySpatialEQLowDB, value); },
+        ^NSString *(double value) { return [NSString stringWithFormat:@"%+.1f dB", value]; });
+    SGModRow *mid = SGSliderRow(@"Mid", @"Vocal presence", -6, 6, 0.5,
+        ^double { return spatialValue(SGRKeySpatialEQMidDB, 0.0); },
+        ^(double value) { setSpatialValue(SGRKeySpatialEQMidDB, value); },
+        ^NSString *(double value) { return [NSString stringWithFormat:@"%+.1f dB", value]; });
+    SGModRow *high = SGSliderRow(@"High", @"Clarity and air", -6, 6, 0.5,
+        ^double { return spatialValue(SGRKeySpatialEQHighDB, 0.0); },
+        ^(double value) { setSpatialValue(SGRKeySpatialEQHighDB, value); },
+        ^NSString *(double value) { return [NSString stringWithFormat:@"%+.1f dB", value]; });
     SGModRow *demo = SGActionRow(@"Play Spatial Voice demo", @"Hear the supplied vocal and soundtrack stems", ^{ promptDemo(); });
     demo.value = ^NSString *{ return [[SGSpatialVoiceDemo shared] isPlaying] ? @"Playing · Tap to stop" : @"Preview"; };
-    return SGNotedSection(@"Karaoke & Spatial Voice", @[sing, spatial, preset, reverb, echo, width, distance, demo, model, download, cancel, remove], footer());
+    NSArray<SGModRow *> *tunedRows = @[gain, reverb, echo, width, distance, eq];
+    for (SGModRow *row in tunedRows) row.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled && SGFlag(SGRKeySingSpatialVoice, NO); };
+    low.visible = mid.visible = high.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled && SGFlag(SGRKeySingSpatialVoice, NO) && SGFlag(SGRKeySpatialEQ, NO); };
+    demo.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled && SGFlag(SGRKeySingSpatialVoice, NO); };
+    spatial.visible = ^BOOL { return YES; };
+    return SGNotedSection(@"Spatial Voice", @[spatial, gain, reverb, echo, width, distance, eq, low, mid, high, demo],
+        @"AirPods are required for head tracking. Effect tuning works with other headphones.");
 }
 
 UIViewController *SGRKaraokeSettingsPage(void) {
-    return [[SGModPage alloc] initWithTitle:@"Karaoke & Spatial Voice" intro:nil sections:@[karaokeSection()] footer:nil];
+    NSArray<SGModSection *> *sections = SGSingSupported() ? @[karaokeSection(), spatialVoiceSection()] : @[karaokeSection()];
+    return [[SGModPage alloc] initWithTitle:@"Karaoke & Spatial Voice" intro:nil sections:sections footer:nil];
 }
 
 // Beside the main page's row: what Sing would do now, or how far its model has come.

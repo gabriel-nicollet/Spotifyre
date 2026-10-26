@@ -7,7 +7,7 @@
 # IPA only as a fallback for a template without a custom mark. actool compiles the icons, car-tool.m merges their
 # Liquid Glass stacks into Spotify's Assets.car (no flattened fallbacks, so iOS 26 and up draws them),
 # CFBundleAlternateIcons lists them, and a 60 pt picture of each goes to SGAppIconPreviews/ for the list.
-# Spotify.icon supplies the green Spotify-mark preview for the primary app icon.
+# The primary icon is never compiled as an alternate or written back; its preview uses Spotify's own mark.
 #
 # Without Xcode 26's Icon Composer, or without the logo in a later Spotify, the IPA is left as it was and
 # the setting is not offered.
@@ -40,8 +40,10 @@ for TEMPLATE in "$ROOT"/icons/*.icon; do
   NAME="$(basename "$TEMPLATE" .icon)"
   cp -R "$TEMPLATE" "$WORK/art/$NAME.icon"
   mkdir -p "$WORK/art/$NAME.icon/Assets"
-  # Keep each icon bundle’s custom Spotifyre artwork when supplied; only fall back to Spotify’s logo for templates without one.
-  if [ -f "$TEMPLATE/Assets/Logo.svg" ]; then
+  # Keep custom artwork for alternates. Show Spotify's actual mark in the primary-icon preview.
+  if [ "$NAME" = Spotify ]; then
+    cp "$WORK/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
+  elif [ -f "$TEMPLATE/Assets/Logo.svg" ]; then
     cp "$TEMPLATE/Assets/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
   else
     cp "$WORK/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"

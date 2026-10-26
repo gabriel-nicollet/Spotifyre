@@ -7,6 +7,25 @@ static const double kBypassRampSeconds = 0.120;
 static atomic_bool sg_spatialVoice = false;
 static atomic_int sg_spatialAzimuthMilliDegrees = 0;
 static atomic_int sg_spatialReverb = 250, sg_spatialEcho = 100, sg_spatialWidth = 350, sg_spatialDistance = 200;
+static atomic_bool sg_vocalEQEnabled = false;
+static atomic_int sg_eqLowMilliDB = 0, sg_eqMidMilliDB = 0, sg_eqHighMilliDB = 0, sg_vocalGainMilliDB = 0;
+
+static int decibelsMilli(float value, float minimum, float maximum) {
+    if (!isfinite(value)) value = 0;
+    value = fmaxf(minimum, fminf(maximum, value));
+    return (int)lrintf(value * 1000.0f);
+}
+
+void SGSingDSPSetVocalEQ(bool enabled, float lowDB, float midDB, float highDB) {
+    atomic_store_explicit(&sg_eqLowMilliDB, decibelsMilli(lowDB, -12, 12), memory_order_relaxed);
+    atomic_store_explicit(&sg_eqMidMilliDB, decibelsMilli(midDB, -12, 12), memory_order_relaxed);
+    atomic_store_explicit(&sg_eqHighMilliDB, decibelsMilli(highDB, -12, 12), memory_order_relaxed);
+    atomic_store_explicit(&sg_vocalEQEnabled, enabled, memory_order_relaxed);
+}
+
+void SGSingDSPSetVocalGainDB(float decibels) {
+    atomic_store_explicit(&sg_vocalGainMilliDB, decibelsMilli(decibels, -18, 12), memory_order_relaxed);
+}
 
 void SGSingDSPSetSpatialParameters(float reverb, float echo, float width, float distance) {
     float values[] = {reverb, echo, width, distance};
@@ -129,6 +148,13 @@ void SGSingMixerProcess(SGSingMixer *m,
     const float echo = (float)atomic_load_explicit(&sg_spatialEcho, memory_order_relaxed) / 1000.0f;
     const float width = (float)atomic_load_explicit(&sg_spatialWidth, memory_order_relaxed) / 1000.0f;
     const float distance = (float)atomic_load_explicit(&sg_spatialDistance, memory_order_relaxed) / 1000.0f;
+    const bool eqEnabled = spatial && atomic_load_explicit(&sg_vocalEQEnabled, memory_order_relaxed);
+    const float lowGain = eqEnabled ? powf(10.0f, (float)atomic_load_explicit(&sg_eqLowMilliDB, memory_order_relaxed) / 20000.0f) : 1.0f;
+    const float midGain = eqEnabled ? powf(10.0f, (float)atomic_load_explicit(&sg_eqMidMilliDB, memory_order_relaxed) / 20000.0f) : 1.0f;
+    const float highGain = eqEnabled ? powf(10.0f, (float)atomic_load_explicit(&sg_eqHighMilliDB, memory_order_relaxed) / 20000.0f) : 1.0f;
+    const float vocalGain = spatial ? powf(10.0f, (float)atomic_load_explicit(&sg_vocalGainMilliDB, memory_order_relaxed) / 20000.0f) : 1.0f;
+    const float eqLowAlpha = (float)(1.0 - exp(-2.0 * 3.14159265358979323846 * 250.0 / m->sampleRate));
+    const float eqHighAlpha = (float)(1.0 - exp(-2.0 * 3.14159265358979323846 * 3000.0 / m->sampleRate));
     const uint32_t echoDelay = (uint32_t)fmin(16383.0, m->sampleRate * (0.10 + 0.20 * echo));
 
     for (uint32_t i = 0; i < frames; i++) {
@@ -146,6 +172,18 @@ void SGSingMixerProcess(SGSingMixer *m,
         float vocalL = isfinite(vocals[(size_t)i * 2]) ? vocals[(size_t)i * 2] : 0;
         float vocalR = isfinite(vocals[(size_t)i * 2 + 1]) ? vocals[(size_t)i * 2 + 1] : 0;
         float spatialL = vocalL, spatialR = vocalR;
+
+        if (eqEnabled) {
+            m->eqLowL += eqLowAlpha * (vocalL - m->eqLowL);
+            m->eqLowR += eqLowAlpha * (vocalR - m->eqLowR);
+            m->eqHighL += eqHighAlpha * (vocalL - m->eqHighL);
+            m->eqHighR += eqHighAlpha * (vocalR - m->eqHighR);
+            float midL = m->eqHighL - m->eqLowL, midR = m->eqHighR - m->eqLowR;
+            float highL = vocalL - m->eqHighL, highR = vocalR - m->eqHighR;
+            vocalL = m->eqLowL * lowGain + midL * midGain + highL * highGain;
+            vocalR = m->eqLowR * lowGain + midR * midGain + highR * highGain;
+            spatialL = vocalL; spatialR = vocalR;
+        }
 
         if (spatial) {
             // Smooth head motion to avoid zipper noise. A mono source is panned in the
@@ -194,8 +232,8 @@ void SGSingMixerProcess(SGSingMixer *m,
 
         // Remove the original separated vocal per channel, then add the processed vocal.
         // This keeps the instrumental's stereo image intact instead of centering its side signal.
-        float valueL = m->instrumental * (sourceL - vocalL) + m->gain * spatialL;
-        float valueR = m->instrumental * (sourceR - vocalR) + m->gain * spatialR;
+        float valueL = m->instrumental * (sourceL - (eqEnabled ? (isfinite(vocals[(size_t)i * 2]) ? vocals[(size_t)i * 2] : 0) : vocalL)) + m->gain * vocalGain * spatialL;
+        float valueR = m->instrumental * (sourceR - (eqEnabled ? (isfinite(vocals[(size_t)i * 2 + 1]) ? vocals[(size_t)i * 2 + 1] : 0) : vocalR)) + m->gain * vocalGain * spatialR;
         out[(size_t)i * 2] = fmaxf(-1, fminf(1, valueL));
         out[(size_t)i * 2 + 1] = fmaxf(-1, fminf(1, valueR));
     }

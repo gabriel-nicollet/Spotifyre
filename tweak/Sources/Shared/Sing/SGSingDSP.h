@@ -18,6 +18,7 @@ typedef struct {
     uint32_t spatialRoomIndex;
     float spatialEchoL[16384], spatialEchoR[16384];
     uint32_t spatialEchoIndex;
+    float eqLowL, eqLowR, eqHighL, eqHighR;
 } SGSingMixer;
 
 void SGSingMixerInit(SGSingMixer *mixer, double sampleRate, float level);
@@ -31,3 +32,5 @@ void SGSingDSPSetSpatialVoice(bool enabled);
 void SGSingDSPSetSpatialAzimuthDegrees(float degrees);
 bool SGSingDSPSpatialVoice(void);
 void SGSingDSPSetSpatialParameters(float reverb, float echo, float width, float distance);
+void SGSingDSPSetVocalEQ(bool enabled, float lowDB, float midDB, float highDB);
+void SGSingDSPSetVocalGainDB(float decibels);
