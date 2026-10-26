@@ -108,8 +108,8 @@ static void selectSpatialPreset(NSInteger index) {
     if (_environment) {
         [_engine attachNode:_environment];
         _environment.outputType = AVAudioEnvironmentOutputTypeHeadphones;
-        _environment.listenerPosition = AVAudio3DPointMake(0, 0, 0);
-        _vocals.position = AVAudio3DPointMake(0, 0, -1);
+        _environment.listenerPosition = AVAudioMake3DPoint(0, 0, 0);
+        _vocals.position = AVAudioMake3DPoint(0, 0, -1);
         _vocals.renderingAlgorithm = AVAudio3DMixingRenderingAlgorithmHRTF;
         [_engine connect:_vocals to:_reverb format:voiceFile.processingFormat];
         [_engine connect:_reverb to:_delay format:voiceFile.processingFormat];
@@ -145,7 +145,7 @@ static void selectSpatialPreset(NSInteger index) {
     _delay.feedback = (float)(spatialValue(SGRKeySpatialEcho, 0.08) * 65.0);
     _delay.wetDryMix = (float)(spatialValue(SGRKeySpatialEcho, 0.08) * 70.0);
     double distance = spatialValue(SGRKeySpatialDistance, 0.18);
-    _vocals.position = AVAudio3DPointMake(0, 0, (float)(-1.0 - distance * 4.0));
+    _vocals.position = AVAudioMake3DPoint(0, 0, (float)(-1.0 - distance * 4.0));
     if (_environment.distanceAttenuationParameters)
         _environment.distanceAttenuationParameters.rolloffFactor = (float)(0.25 + distance * 2.5);
 }
