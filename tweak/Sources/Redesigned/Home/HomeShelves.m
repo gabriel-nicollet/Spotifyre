@@ -144,3 +144,34 @@ NSString *SGRHomeTopPicksFrom(void) {
     NSString *from = [NSUserDefaults.standardUserDefaults stringForKey:SGRKeyHomeTopPicksFrom];
     return from.length ? from : nil;
 }
+
+void SGRHomeMeasureAgain(UIView *view) {
+    UIView *ancestor = view;
+    while (ancestor && ![ancestor isKindOfClass:UICollectionViewCell.class]) ancestor = ancestor.superview;
+    UICollectionView *list = (UICollectionView *)ancestor.superview;
+    while (list && ![list isKindOfClass:UICollectionView.class]) list = (UICollectionView *)list.superview;
+    if (!list) return;
+    [list.collectionViewLayout invalidateLayout];
+    [list setNeedsLayout];
+}
+
+void SGRHomeTintForCover(UIImage *image, void (^completion)(UIColor *color)) {
+    if (!completion) return;
+    static NSMapTable<UIImage *, UIColor *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSMapTable weakToStrongObjectsMapTable]; });
+    UIColor *known = [cache objectForKey:image];
+    if (known) {
+        completion(known);
+        return;
+    }
+    [SGRPalette tintForImage:image surface:SGRElevated(UIColor.blackColor) strong:YES completion:^(UIColor *color) {
+        if (color && image) [cache setObject:color forKey:image];
+        completion(color);
+    }];
+}
+
+// Vitrine's Home header has no page-tint treatment; Top picks still colors each card itself.
+void SGRHomeSetPageTint(UIColor *color) {
+    (void)color;
+}
