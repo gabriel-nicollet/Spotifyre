@@ -1910,11 +1910,15 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
 // The button shows only for a song with a pronunciation or a translation to show, and its menu only
 // what the song has: a switch for each, reading what tapping it will do.
 - (void)offerExtras {
+    // In the redesigned player's lyrics view, translation lives in the player's top-right ⋯ menu.
+    // Keep this corner control for pronunciation only there; the full-screen Lyrics page retains
+    // its complete translation menu.
+    BOOL playerOwnsTranslation = self.keepsSing;
     NSString *language = SGLyricsGeminiLanguage();
     BOOL gemini = SGGeminiKeySet(), onDevice = SGOnDeviceTranslation.translationAvailable;
     BOOL intelligence = [SGOnDeviceTranslation appleIntelligenceAvailable:language];
     // A translator is offered only for a song in another language than the one it would translate into.
-    BOOL translatable = (_foreign || SGHidden(SGKeyLyricsTranslateEverySong)) && _untranslated && (gemini || onDevice || intelligence);
+    BOOL translatable = !playerOwnsTranslation && (_foreign || SGHidden(SGKeyLyricsTranslateEverySong)) && _untranslated && (gemini || onDevice || intelligence);
     BOOL offered = _lines && !_sample && (_hasSpoken || _hasTranslation || translatable);
     if (!offered) {
         _extrasBox.hidden = YES;
@@ -1927,7 +1931,7 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
         _extrasBox = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kExtrasSide, kExtrasSide)];
         _extrasBox.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
-        config.image = [UIImage systemImageNamed:@"translate"];
+        config.image = [UIImage systemImageNamed:playerOwnsTranslation ? @"character.phonetic" : @"translate"];
         config.preferredSymbolConfigurationForImage = [UIImageSymbolConfiguration configurationWithPointSize:kExtrasGlyph weight:UIImageSymbolWeightSemibold];
         config.baseForegroundColor = UIColor.whiteColor;
         _extras = [UIButton buttonWithConfiguration:config primaryAction:nil];
@@ -1935,7 +1939,7 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
         _extras.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         _extras.showsMenuAsPrimaryAction = YES;
         _extras.preferredMenuElementOrder = UIContextMenuConfigurationElementOrderFixed;
-        _extras.accessibilityLabel = @"Pronunciation and translation";
+        _extras.accessibilityLabel = playerOwnsTranslation ? @"Pronunciation" : @"Pronunciation and translation";
         [_extrasBox addSubview:_extras];
         [self addSubview:_extrasBox];
         self.extrasHidden = _extrasHidden;
@@ -1955,7 +1959,7 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
                                              image:[UIImage systemImageNamed:@"character.phonetic"] identifier:nil
                                            handler:^(UIAction *action) { SGRSetLyricsTextShown(SGRLyricsTextPronunciation, !on); }]];
     }
-    if (_hasTranslation) {
+    if (_hasTranslation && !playerOwnsTranslation) {
         BOOL on = SGFlag(SGRKeyLyricsTranslation, NO);
         [items addObject:[UIAction actionWithTitle:on ? @"Hide Translation" : @"Show Translation"
                                              image:[UIImage systemImageNamed:@"character.bubble"] identifier:nil
