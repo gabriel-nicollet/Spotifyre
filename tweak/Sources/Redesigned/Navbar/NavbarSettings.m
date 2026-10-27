@@ -1,5 +1,5 @@
 #import "Core/SGCore.h"
-#import "Core/SGSFSymbolCatalog.h"
+#import "Shared/Navigation/TabIcons.h"
 #import "Settings/SGPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Redesigned/NowPlayingBar/NowPlayingBar.h"
@@ -410,6 +410,14 @@ static NSArray<NSString *> *symbolNames(void) {
     _encore = encoreIconNames();
     _symbols = symbolNames();
     self.title = @"Choose an Icon";
+    __weak typeof(self) weakSelf = self;
+    SGLoadSymbolNames(^(NSArray<NSString *> *names) {
+        typeof(self) page = weakSelf;
+        if (!page) return;
+        page->_symbols = names;
+        [page refreshIconResults];
+        [page.tableView reloadData];
+    });
     return self;
 }
 
@@ -527,7 +535,7 @@ static NSArray<NSString *> *symbolNames(void) {
     }
     BOOL symbols = [self showsSymbols];
     NSMutableArray<NSString *> *matches = [NSMutableArray array];
-    for (NSString *name in symbols ? SGSFSymbolCatalog() : _encore) {
+    for (NSString *name in symbols ? _symbols : _encore) {
         if ([name rangeOfString:query options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
         // The catalog runs ahead of older systems, and asking about every name of a one letter query
         // held the page for seconds, so the list stops at the first few hundred.
