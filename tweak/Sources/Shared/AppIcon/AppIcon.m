@@ -12,7 +12,19 @@ static NSArray<NSString *> *iconNames(void) {
 }
 
 static NSString *label(NSString *name) {
-    return name ? [name stringByReplacingOccurrencesOfString:@"_" withString:@" "] : @"Default";
+    if (!name) return @"Default";
+    if ([name hasPrefix:@"SGAppIcon"]) name = [name substringFromIndex:@"SGAppIcon".length];
+    name = [name stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    // Icon Composer names are compact identifiers (SpotifyreAmberFlame); show them as ordinary words.
+    NSMutableString *readable = [NSMutableString string];
+    for (NSUInteger i = 0; i < name.length; i++) {
+        unichar c = [name characterAtIndex:i];
+        if (i && [[NSCharacterSet uppercaseLetterCharacterSet] characterIsMember:c] &&
+            [[NSCharacterSet lowercaseLetterCharacterSet] characterIsMember:[name characterAtIndex:i - 1]])
+            [readable appendString:@" "];
+        [readable appendFormat:@"%C", c];
+    }
+    return readable;
 }
 
 static void setIcon(NSString *icon) {

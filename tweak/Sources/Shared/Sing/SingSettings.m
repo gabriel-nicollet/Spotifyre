@@ -46,16 +46,12 @@ static NSString *bytes(long long count) {
     return [NSByteCountFormatter stringFromByteCount:count countStyle:NSByteCountFormatterCountStyleFile];
 }
 
-// The row's state: with the old model, its update reads as the model's download, worded as an update.
 static SGSingModelState rowState(void) {
-    if (SGSingModelUpdateDownloading()) return SGSingModelDownloading;
-    if (SGSingModelUpdateAvailable()) return SGSingModelMissing;
     return SGSingModelCurrentState();
 }
 
 static NSString *modelValue(void) {
     if (!SGSingOSSupported()) return @"Unavailable";
-    BOOL update = SGSingModelUpdateAvailable();
     switch (rowState()) {
         case SGSingModelDownloading:
             if (SGSingModelChecking()) return @"Checking…";
@@ -63,11 +59,11 @@ static NSString *modelValue(void) {
             return [NSString stringWithFormat:@"%.0f%%", SGSingModelProgress() * 100];
         case SGSingModelReady: return [NSString stringWithFormat:@"Downloaded · %@", SGSingModelSizeText()];
         case SGSingModelMissing:
-            if (SGSingModelError()) return update ? @"Update failed, try again" : @"Failed, try again";
+            if (SGSingModelError()) return @"Failed, try again";
             if (SGSingModelPausedBytes()) {
-                return [NSString stringWithFormat:@"%@ · %@ of %@", update ? @"Update paused" : @"Paused", bytes(SGSingModelPausedBytes()), SGSingModelSizeText()];
+                return [NSString stringWithFormat:@"Paused · %@ of %@", bytes(SGSingModelPausedBytes()), SGSingModelSizeText()];
             }
-            return [NSString stringWithFormat:update ? @"Update available · %@" : @"Download, %@", SGSingModelSizeText()];
+            return [NSString stringWithFormat:@"Download, %@", SGSingModelSizeText()];
     }
     return @"";
 }
@@ -79,18 +75,15 @@ static void modelTapped(UITableViewController *page) {
     }
     switch (rowState()) {
         case SGSingModelMissing: {
-            BOOL update = SGSingModelUpdateAvailable();
-            NSString *message = [NSString stringWithFormat:@"%@%@%@ from Hugging Face. It waits for Wi-Fi unless you let it use cellular. It stays on this iPhone, and no audio leaves it.",
+            NSString *message = [NSString stringWithFormat:@"%@%@ from Hugging Face. It waits for Wi-Fi unless you let it use cellular. It stays on this iPhone, and no audio leaves it.",
                                  SGSingModelError() ? [NSString stringWithFormat:@"The last try failed: %@\n\n", SGSingModelError()] : @"",
-                                 update ? @"The new voice model runs on the Neural Engine, faster and cooler, and Karaoke keeps the one it has until it is in. " : @"",
                                  SGSingModelSizeText()];
             if (untestedChip()) {
                 message = [message stringByAppendingString:SGSingChosenModel() == SGSingModelLight
                     ? @"\n\nKaraoke is tested on the iPhone 15 Pro. On iPhones older than the iPhone 12 it may not keep up, even with the light model."
                     : @"\n\nKaraoke is tested on the iPhone 15 Pro. On iPhones older than the iPhone 12 it may not keep up; the light model has a better chance."];
             }
-            NSString *title = SGSingModelPausedBytes() ? (update ? @"Carry on with the update?" : @"Carry on with the download?")
-                                                       : (update ? @"Download the update?" : @"Download the voice model?");
+            NSString *title = SGSingModelPausedBytes() ? @"Carry on with the download?" : @"Download the voice model?";
             ask(title, message, @"Download", NO, ^{ SGSingDownloadModel(); });
             break;
         }
@@ -228,7 +221,7 @@ UIViewController *SGSingSettingsPage(void) {
     });
     remove.color = SGRed();
     remove.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelReady || SGSingModelPausedBytes() > 0; };
-    // The two models, picked on the page: the rows below follow the one with the checkmark.
+    // The three models, picked on the page: the rows below follow the one with the checkmark.
     SGModRow *(^choice)(NSString *, NSString *, SGSingModelKind) = ^SGModRow *(NSString *title, NSString *format, SGSingModelKind kind) {
         SGModRow *row = SGActionRow(title, [NSString stringWithFormat:format, SGSingModelSizeTextOf(kind)], ^{
             if (SGSingChosenModel() == kind) return;
@@ -237,20 +230,20 @@ UIViewController *SGSingSettingsPage(void) {
                 [page.tableView reloadData];
                 [page refreshVisibility];
             };
-            BOOL downloading = SGSingModelCurrentState() == SGSingModelDownloading || SGSingModelUpdateDownloading();
+            BOOL downloading = SGSingModelCurrentState() == SGSingModelDownloading;
             if (!downloading) choose();
             else ask(@"Stop the download?", @"The voice model coming in stops, and what has come in is kept for when you choose it again.", @"Switch", NO, choose);
         });
         row.checked = ^BOOL { return SGSingChosenModel() == kind; };
         return row;
     };
-    SGModRow *full = choice(@"Best quality", @"The full model, %@: the cleanest result, for recent iPhones", SGSingModelFull);
+    SGModRow *original = choice(@"Original", @"The original model, %@: the most complete vocals, runs on the CPU", SGSingModelOriginal);
+    SGModRow *full = choice(@"Neural Engine", @"Fast and cool, %@: nearly the same quality as the original", SGSingModelFull);
     SGModRow *light = choice(@"Light", @"A small model, %@, for older iPhones: more of the voice is left in, and the music dips under it",
                              SGSingModelLight);
-    SGModRow *other = SGStatActionRow(@"Remove the other model", nil, ^NSString *{ return bytes(SGSingOtherModelBytes()); }, ^{
-        NSString *name = SGSingChosenModel() == SGSingModelFull ? @"Light" : @"Best quality";
-        ask(@"Remove the other model?", [NSString stringWithFormat:@"%@ is not in use. Removing it frees %@, and choosing it again downloads it again.",
-                                         name, bytes(SGSingOtherModelBytes())],
+    SGModRow *other = SGStatActionRow(@"Remove other models", nil, ^NSString *{ return bytes(SGSingOtherModelBytes()); }, ^{
+        ask(@"Remove the other models?", [NSString stringWithFormat:@"The models that are not selected are not in use. Removing them frees %@; choosing one again downloads it again.",
+                                         bytes(SGSingOtherModelBytes())],
             @"Remove", YES, ^{
                 SGSingDeleteOtherModel();
                 [page refreshVisibility];
@@ -275,7 +268,7 @@ UIViewController *SGSingSettingsPage(void) {
                                     @"Readies the Neural Engine in the background after Vitrine or iOS updates, so Karaoke starts at full speed", SGKeySingPrepareAhead);
     SGSingPage *made = [[SGSingPage alloc] initWithTitle:@"Karaoke" intro:nil sections:@[
         SGSection(nil, @[sing, button, heat, memory]),
-        SGNotedSection(@"Voice model", @[full, light, model, remove, other],
+        SGNotedSection(@"Voice model", @[original, full, light, model, remove, other],
                        @"Each model is downloaded and kept on its own, and Karaoke needs only the chosen one. A switch takes effect "
                        @"without restarting Spotify: the model loads in a few seconds, and the song plays as it is until it is in."),
         SGSection(nil, @[spatial]),

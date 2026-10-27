@@ -1,21 +1,16 @@
-// The voice model on the phone (Sing.h): the one Voice model chooses (SGKeySingModel), the full separator-ane.mlmodelc
+// The voice model on the phone (Sing.h): the original separator.mlmodelc, the Neural Engine separator-ane.mlmodelc,
 // or the light separator-light.mlmodelc, each the five files of a compiled model, downloaded one by one from the
 // Hugging Face repo's folder of that name, each kept only once its size and SHA-256 are the ones pinned here, then
-// moved together into Application Support/Vitrine/Sing/<folder>, which backups leave out (210 or 31 MB that can be
-// downloaded again). Each model has its own staging folder, resume data and paused bytes, so either can be on the
+// moved together into Application Support/Vitrine/Sing/<folder>, which backups leave out (489, 210 or 31 MB that can be
+// downloaded again). Each model has its own staging folder, resume data and paused bytes, so all three can be on the
 // iPhone, downloaded or removed without the other. A dropped connection carries on from where it stopped, three times
 // per file, and a stopped download keeps the file it was in the middle of (NSURLSession's resume data, kept beside the
 // staging folder) for the next one to carry on from. A resumed request is answered 206, with the whole file handed
 // over all the same. On a FLEX build a copy put in Sing/dev/<folder> by hand comes first.
 //
-// The model Karaoke downloaded before (separator.mlmodelc, 489 MB, the same checkpoint with operations in float32 that
-// the Neural Engine does not run) is kept and loaded until this one is in, so Karaoke works through the update: it is
-// then the model, on the CPU alone, and this one's download an update (SGSingModelUpdateAvailable). Once this one is in,
-// at launch or as its download ends, the old one is deleted (SGSingRemoveOldModel); what its own download left goes at
-// launch either way.
-//
-// Threading: main thread, but for SGSingRemoveOldModel; the session's delegate runs on a queue of its own and hands
-// back to the main thread.
+// The original 489 MB model is retained as a user-selectable choice; it is never removed when either smaller model
+// downloads. Existing installations migrate to the model they already have if the original is no longer present.
+// Threading: main thread; the session's delegate runs on a queue of its own and hands back to the main thread.
 #import <CommonCrypto/CommonDigest.h>
 #import "Core/SGCore.h"
 #import "Sing.h"
@@ -49,35 +44,59 @@ static const SGSingFile kLightFiles[kFileCount] = {
     {@"model.mil", 715945, "d3b62a7972344d1a8eec5de8a21130a19272738bce1135871d8bab098585a841"},
     {@"weights/weight.bin", 30040968, "ad460549f68898eab7fe946e9675efaa2551d37b93f73796958c73d4881897fc"},
 };
+// The original float32 export already downloaded by earlier Spotifyre and Vitrine builds.
+static const SGSingFile kOriginalFiles[kFileCount] = {
+    {@"metadata.json", 2431, "52a8d5e3f09e33236d495dbed5bbce1c75bac6f2a6b6097637cf214f37c1de53"},
+    {@"coremldata.bin", 507, "2090acaf7a6df72ec83857cb88d101654023a6baad222a25d0173827d3347e28"},
+    {@"analytics/coremldata.bin", 243, "f7ee4ec9b5cc1c97171bd5aad93af61e183aa0db1451ef3b775bd4e77f0b7cfd"},
+    {@"model.mil", 669061, "966560ed5125174a98f19b94f5de04450a7112ade0e731f2236c202c0280a623"},
+    {@"weights/weight.bin", 488986336, "970a99fb4b15724bf76d2918ceb177df592c69265d3e2fabaab6e5ba72738e62"},
+};
 
 typedef struct {
     NSString *__unsafe_unretained folder;      // the compiled model, in the repo and in Sing/
+    NSString *__unsafe_unretained repoFolder;  // empty for the original model stored at the repo root
     NSString *__unsafe_unretained staging;     // its download's folder in Sing/, and its resume data's prefix
     NSString *__unsafe_unretained pausedKey;   // bytes a stopped download kept, for the row that offers to carry on
     const SGSingFile *files;
 } SGSingModelFiles;
 
-// Indexed by SGSingModelKind. The full model's names are the ones it had before there was a choice.
+// Indexed by SGSingModelKind.
 static const SGSingModelFiles kModels[] = {
-    {@"separator-ane.mlmodelc", @"download-ane", @"spotifyglass.sing.downloadPaused", kFullFiles},
-    {@"separator-light.mlmodelc", @"download-light", @"spotifyglass.sing.light.downloadPaused", kLightFiles},
-};
-// The old model's, checked by size only: it was checked as it came in.
-static const SGSingFile kOldFiles[] = {
-    {@"metadata.json", 2431, NULL},
-    {@"coremldata.bin", 507, NULL},
-    {@"analytics/coremldata.bin", 243, NULL},
-    {@"model.mil", 669061, NULL},
-    {@"weights/weight.bin", 488986336, NULL},
+    {@"separator.mlmodelc", @"", @"download-original", @"spotifyglass.sing.original.downloadPaused", kOriginalFiles},
+    {@"separator-light.mlmodelc", @"separator-light.mlmodelc", @"download-light", @"spotifyglass.sing.light.downloadPaused", kLightFiles},
+    {@"separator-ane.mlmodelc", @"separator-ane.mlmodelc", @"download-ane", @"spotifyglass.sing.downloadPaused", kFullFiles},
 };
 
 NSString *const SGSingChangedNotification = @"SGSingChangedNotification";
 
 // Counts the changes to the model's folder, so SGSingModelURL checks it again only after one.
 static NSUInteger sg_modelGeneration;
+static BOOL complete(const SGSingModelFiles *model);
+static BOOL completeWith(NSURL *folder, const SGSingFile *files, int count);
 
 SGSingModelKind SGSingChosenModel(void) {
-    return [NSUserDefaults.standardUserDefaults integerForKey:SGKeySingModel] == SGSingModelLight ? SGSingModelLight : SGSingModelFull;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    static NSString *const migrationKey = @"spotifyglass.sing.modelChoiceMigrated";
+    if (![defaults boolForKey:migrationKey]) {
+        id previousChoice = [defaults objectForKey:SGKeySingModel];
+        SGSingModelKind choice = SGSingModelOriginal;
+        if (previousChoice) {
+            NSInteger previous = [previousChoice integerValue];
+            if (previous == 1) choice = SGSingModelLight;
+            else if (previous == 2) choice = SGSingModelFull;
+            else if (previous == 0 && !complete(&kModels[SGSingModelOriginal]) && complete(&kModels[SGSingModelFull]))
+                choice = SGSingModelFull; // previous Vitrine installs used 0 for its 210 MB default
+        } else if (!complete(&kModels[SGSingModelOriginal])) {
+            if (complete(&kModels[SGSingModelFull])) choice = SGSingModelFull;
+            else if (complete(&kModels[SGSingModelLight])) choice = SGSingModelLight;
+        }
+        [defaults setInteger:choice forKey:SGKeySingModel];
+        [defaults setBool:YES forKey:migrationKey];
+        return choice;
+    }
+    NSInteger choice = [defaults integerForKey:SGKeySingModel];
+    return choice >= SGSingModelOriginal && choice <= SGSingModelFull ? (SGSingModelKind)choice : SGSingModelOriginal;
 }
 
 static const SGSingModelFiles *chosen(void) {
@@ -96,16 +115,19 @@ static NSURL *singFolder(void) {
 }
 
 static NSURL *modelFolder(const SGSingModelFiles *model) {
-    return [singFolder() URLByAppendingPathComponent:model->folder isDirectory:YES];
+    NSURL *folder = [singFolder() URLByAppendingPathComponent:model->folder isDirectory:YES];
+    if (!completeWith(folder, model->files, kFileCount)) {
+        NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
+        NSURL *previousRoot = [[support URLByAppendingPathComponent:@"spoti.pw" isDirectory:YES] URLByAppendingPathComponent:@"Sing" isDirectory:YES];
+        NSURL *previous = [previousRoot URLByAppendingPathComponent:model->folder isDirectory:YES];
+        if (completeWith(previous, model->files, kFileCount)) return previous;
+    }
+    return folder;
 }
 
 // A FLEX build's hand-put copy of `model` (SGSingModelURL).
 static NSURL *devFolder(const SGSingModelFiles *model) {
     return [[singFolder() URLByAppendingPathComponent:@"dev" isDirectory:YES] URLByAppendingPathComponent:model->folder isDirectory:YES];
-}
-
-static NSURL *oldFolder(void) {
-    return [singFolder() URLByAppendingPathComponent:@"separator.mlmodelc" isDirectory:YES];
 }
 
 static NSURL *stagingFolder(const SGSingModelFiles *model) {
@@ -132,10 +154,6 @@ static BOOL completeWith(NSURL *folder, const SGSingFile *files, int count) {
 
 static BOOL complete(const SGSingModelFiles *model) {
     return completeWith(modelFolder(model), model->files, kFileCount);
-}
-
-static BOOL oldComplete(void) {
-    return completeWith(oldFolder(), kOldFiles, sizeof kOldFiles / sizeof kOldFiles[0]);
 }
 
 // The file's SHA-256, read a megabyte at a time: the weights are too big to read whole.
@@ -180,7 +198,7 @@ static BOOL sg_waitingForNetwork;   // offline, or on cellular unless allowed: t
 static BOOL sg_cellular;            // the download may use cellular and Low Data Mode networks
 static BOOL sg_checking;            // the weights' checksum is being read
 // Removals of each model (kModels' order), main thread: a stopped download's late resume data checks it.
-static NSUInteger sg_removals[2];
+static NSUInteger sg_removals[3];
 
 @implementation SGSingDownloader {
     NSURLSession *_session;
@@ -239,7 +257,10 @@ static NSUInteger sg_removals[2];
 }
 
 - (NSURL *)fileURL {
-    return [NSURL URLWithString:[NSString stringWithFormat:@"%@%@/%@", kRepo, self.model->folder, self.model->files[self.file].path]];
+    NSString *relative = self.model->repoFolder.length
+        ? [NSString stringWithFormat:@"%@/%@", self.model->repoFolder, self.model->files[self.file].path]
+        : self.model->files[self.file].path;
+    return [NSURL URLWithString:[kRepo stringByAppendingString:relative]];
 }
 
 // The first file not already in the staging folder from an earlier try, or the move into place.
@@ -280,8 +301,6 @@ static NSUInteger sg_removals[2];
         sg_waitingForNetwork = NO;
         sg_lastError = error;
         if (!error) [NSUserDefaults.standardUserDefaults removeObjectForKey:self.model->pausedKey];
-        // The update in: the old model goes now, and Sing.x loads this one the next time it wants the model.
-        if (!error) SGSingRemoveOldModel();
         sg_modelGeneration++;
         announce();
     });
@@ -384,15 +403,14 @@ static NSUInteger sg_removals[2];
 #pragma mark - what Sing asks
 
 SGSingModelState SGSingModelCurrentState(void) {
-    // The old model works on while its update downloads.
-    if (sg_downloader && !SGSingModelUpdateAvailable()) return SGSingModelDownloading;
+    if (sg_downloader && sg_downloader.model == chosen()) return SGSingModelDownloading;
     return SGSingModelURL() ? SGSingModelReady : SGSingModelMissing;
 }
 
 NSURL *SGSingModelURL(void) {
     // Checked by size once a launch, and again after a download, a delete or a switch changes it, or the key changes by
     // another way (a settings import): a folder not checked could be missing a file, which crashes Core ML.
-    static int known = -1, oldKnown = -1;
+    static int known = -1;
     static NSURL *dev;
     static NSUInteger knownGeneration = NSUIntegerMax;
     static const SGSingModelFiles *knownModel;
@@ -401,8 +419,6 @@ NSURL *SGSingModelURL(void) {
         knownGeneration = sg_modelGeneration;
         knownModel = model;
         known = complete(model);
-        // The old model stands in for the full one alone: it is the full one's earlier export.
-        oldKnown = model == &kModels[SGSingModelFull] && oldComplete();
         // FLEX builds only (Diagnostics' SGIsDebugBuild, which the harnesses do not link): a copy of the chosen model
         // put in Sing/dev/ by hand, for a model not on Hugging Face yet, neither downloaded nor checked. Core ML crashes
         // the process on a compiled model with a file missing (model.mil, weights/weight.bin; a short file fails
@@ -416,11 +432,11 @@ NSURL *SGSingModelURL(void) {
         if (present && !there) SGLog(@"sing: the dev model in %@ has %d of its %d files, so it is not loaded", folder.path, present, kFileCount);
         dev = there && flex ? folder : nil;
     }
-    return dev ?: known ? modelFolder(model) : oldKnown ? oldFolder() : nil;
+    return dev ?: known ? modelFolder(model) : nil;
 }
 
 void SGSetSingChosenModel(SGSingModelKind kind) {
-    if (kind == SGSingChosenModel()) return;
+    if (kind < SGSingModelOriginal || kind > SGSingModelFull || kind == SGSingChosenModel()) return;
     // The other model's download stops, keeping what came in under its own name for when it is chosen again.
     if (sg_downloader) SGSingCancelModelDownload();
     [NSUserDefaults.standardUserDefaults setInteger:kind forKey:SGKeySingModel];
@@ -434,7 +450,7 @@ void SGSetSingChosenModel(SGSingModelKind kind) {
 
 // This model in place, the dev copy or the download: nothing to download.
 static BOOL hasModel(void) {
-    return SGSingModelURL() && !SGSingModelUpdateAvailable();
+    return SGSingModelURL() != nil;
 }
 
 double SGSingModelProgress(void) {
@@ -544,28 +560,19 @@ static BOOL removeAll(NSArray<NSURL *> *urls, long long *freed) {
     return found;
 }
 
-// What the old model's download left: its staging folder and resume data, one per file (named one by one:
-// download-ane-N.resume and download-light-N.resume are the two models' own).
+// Partial files from the older single-model downloader, retained for cleanup when the original model is removed.
 static NSArray<NSURL *> *oldLeftovers(void) {
     NSMutableArray<NSURL *> *leftovers = [NSMutableArray arrayWithObject:[singFolder() URLByAppendingPathComponent:@"download"]];
     for (int i = 0; i < 5; i++) [leftovers addObject:[singFolder() URLByAppendingPathComponent:[NSString stringWithFormat:@"download-%d.resume", i]]];
     return leftovers;
 }
 
-// Everything of `model` in Sing/: the compiled model, its download's folder and resume data and a FLEX build's copy,
-// and for the full model the old one it replaced, with what that one's download left.
+// Everything of `model` in Sing/: the compiled model, its download's folder and resume data and a FLEX build's copy.
 static NSArray<NSURL *> *filesOf(const SGSingModelFiles *model) {
     NSMutableArray<NSURL *> *urls = [NSMutableArray arrayWithObjects:modelFolder(model), stagingFolder(model), devFolder(model), nil];
     for (int i = 0; i < kFileCount; i++) [urls addObject:resumeFile(model, i)];
-    if (model == &kModels[SGSingModelFull]) {
-        [urls addObject:oldFolder()];
-        [urls addObjectsFromArray:oldLeftovers()];
-    }
+    if (model == &kModels[SGSingModelOriginal]) [urls addObjectsFromArray:oldLeftovers()];
     return urls;
-}
-
-static const SGSingModelFiles *unchosen(void) {
-    return &kModels[SGSingChosenModel() == SGSingModelFull ? SGSingModelLight : SGSingModelFull];
 }
 
 static void removeModel(const SGSingModelFiles *model) {
@@ -586,51 +593,26 @@ void SGSingDeleteModel(void) {
 long long SGSingOtherModelBytes(void) {
     NSFileManager *files = NSFileManager.defaultManager;
     long long bytes = 0;
-    for (NSURL *url in filesOf(unchosen())) {
-        if ([files fileExistsAtPath:url.path]) bytes += bytesIn(url);
+    const SGSingModelFiles *selected = chosen();
+    for (NSUInteger i = 0; i < sizeof kModels / sizeof *kModels; i++) {
+        const SGSingModelFiles *model = &kModels[i];
+        if (model == selected) continue;
+        for (NSURL *url in filesOf(model)) {
+            if ([files fileExistsAtPath:url.path]) bytes += bytesIn(url);
+        }
     }
     return bytes;
 }
 
 // No download of it runs: choosing the other model stopped it.
 void SGSingDeleteOtherModel(void) {
-    removeModel(unchosen());
-}
-
-void SGSingRemoveOldModel(void) {
-    // The bytes a stopped download kept were the old model's.
-    const SGSingModelFiles *full = &kModels[SGSingModelFull];
-    long long freed = 0;
-    BOOL left = removeAll(oldLeftovers(), &freed);
-    if (left) [NSUserDefaults.standardUserDefaults removeObjectForKey:full->pausedKey];
-    // The old model itself only once the full model is in: until then Karaoke runs on it. The light model is left alone.
-    BOOL there = [NSFileManager.defaultManager fileExistsAtPath:oldFolder().path], replaced = complete(full);
-    BOOL old = there && replaced && removeAll(@[oldFolder()], &freed);
-    NSString *size = [NSByteCountFormatter stringFromByteCount:freed countStyle:NSByteCountFormatterCountStyleFile];
-    if (old) SGLog(@"sing: the old voice model (separator.mlmodelc) is deleted, %@ freed; the full model is separator-ane.mlmodelc", size);
-    else if (left) SGLog(@"sing: what the old voice model's download left is deleted, %@ freed", size);
-    // Which model is in use: a FLEX build's dev copy of the new one comes before the old, and Light needs neither.
-    if (there && !replaced) {
-        SGLog(SGSingModelUpdateAvailable()
-              ? @"sing: the old voice model (separator.mlmodelc) is kept until separator-ane.mlmodelc is downloaded, and Karaoke runs on it, on the CPU alone"
-              : SGSingChosenModel() == SGSingModelLight
-              ? @"sing: the old voice model (separator.mlmodelc) is kept until separator-ane.mlmodelc is downloaded; Voice model is Light, so it is not in use"
-              : @"sing: the old voice model (separator.mlmodelc) is kept until separator-ane.mlmodelc is downloaded; the dev copy is in use");
-    }
-}
-
-BOOL SGSingModelUpdateAvailable(void) {
-    return [SGSingModelURL() isEqual:oldFolder()];
-}
-
-BOOL SGSingModelUpdateDownloading(void) {
-    return sg_downloader && SGSingModelUpdateAvailable();
+    const SGSingModelFiles *selected = chosen();
+    for (NSUInteger i = 0; i < sizeof kModels / sizeof *kModels; i++)
+        if (&kModels[i] != selected) removeModel(&kModels[i]);
 }
 
 NSString *SGSingModelInUseSizeText(void) {
-    long long total = 0;
-    for (size_t i = 0; i < sizeof kOldFiles / sizeof kOldFiles[0]; i++) total += kOldFiles[i].size;
-    return [NSByteCountFormatter stringFromByteCount:SGSingModelUpdateAvailable() ? total : totalBytes(chosen()) countStyle:NSByteCountFormatterCountStyleFile];
+    return [NSByteCountFormatter stringFromByteCount:totalBytes(chosen()) countStyle:NSByteCountFormatterCountStyleFile];
 }
 
 NSArray<NSString *> *SGSingComputeUnitNames(void) {

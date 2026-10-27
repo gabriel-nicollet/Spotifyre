@@ -280,10 +280,10 @@ static BOOL hasNeuralEngine(void) {
     return has;
 }
 
-// Runs on is Automatic, the iPhone has a Neural Engine, its copy has not failed in this launch, and the model is not the
-// old one, which the Neural Engine does not run.
+// Runs on is Automatic, the iPhone has a Neural Engine, its copy has not failed in this launch, and the original
+// float32 model (which the Neural Engine does not run) is not selected.
 static BOOL neuralWanted(void) {
-    return runsOn() != 1 && hasNeuralEngine() && !sg_neuralFailed && !SGSingModelUpdateAvailable();
+    return runsOn() != 1 && hasNeuralEngine() && !sg_neuralFailed && SGSingChosenModel() != SGSingModelOriginal;
 }
 
 // What Core ML keeps the compiled model for: this iOS, this install and the model's folder.
@@ -665,10 +665,7 @@ NSString *SGSingStatusText(void) {
 
 // Where the model runs now, for the details of a working Sing.
 static NSString *runsOnNote(void) {
-    if (SGSingModelUpdateAvailable()) {
-        return [NSString stringWithFormat:@"Karaoke runs on the CPU with the voice model it had before. Its update (%@, on the Voice model row) runs "
-                                          @"on the Neural Engine, faster and cooler.", SGSingModelSizeText()];
-    }
+    if (SGSingChosenModel() == SGSingModelOriginal) return @"The original voice model runs on the CPU. Choose the Neural Engine model for faster, cooler processing.";
     if (runsOn() == 1) return @"Karaoke runs on the CPU alone, as Runs on says.";
     if (!hasNeuralEngine()) return @"This iPhone has no Neural Engine Karaoke can use, so it runs on the CPU.";
     if (sg_neuralFailed) {
@@ -1269,8 +1266,6 @@ static void readHeat(void) {
     if (runsOn() > 1) SGLog(@"sing: Runs on was %ld, which is gone, so it is Automatic", (long)runsOn());
     if (runsOn() != 1) [defaults removeObjectForKey:SGKeySingComputeUnits];
     for (NSString *key in @[SGKeySingComputeUnitsBefore, @"spotifyglass.sing.gpuStuckOn", @"spotifyglass.sing.oneModel"]) [defaults removeObjectForKey:key];
-    // The 489 MB model this one replaces, deleted off the main thread once this one is in (kept and run until then).
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ SGSingRemoveOldModel(); });
     dispatch_async(dispatch_get_main_queue(), ^{
         static SGSingTrackWatcher *watcher;
         watcher = [SGSingTrackWatcher new];

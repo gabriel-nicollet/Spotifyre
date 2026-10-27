@@ -135,12 +135,13 @@ UIViewController *SGSingSettingsPage(void);
 
 #pragma mark - the model (SGSingModel.m)
 
-// Which voice model Karaoke downloads and runs, an SGSingModelKind: the full one until Light is chosen. Read live, so
-// a switch loads the other model for what plays next, without a restart.
+// Which voice model Karaoke downloads and runs. The original 489 MB model stays the default when it is installed;
+// the Neural Engine and Light exports are independent choices and downloads.
 #define SGKeySingModel @"spotifyglass.sing.model"
 typedef NS_ENUM(NSInteger, SGSingModelKind) {
-    SGSingModelFull,    // separator-ane.mlmodelc, 210 MB: the cleanest separation
-    SGSingModelLight,   // separator-light.mlmodelc, 31 MB: Mini-BS-RoFormer-18M's vocals, for older iPhones
+    SGSingModelOriginal, // separator.mlmodelc, 489 MB: the original, highest-quality model
+    SGSingModelLight,    // separator-light.mlmodelc, 31 MB: Mini-BS-RoFormer-18M's vocals, for older iPhones
+    SGSingModelFull,     // separator-ane.mlmodelc, 210 MB: Neural Engine export, nearly the same quality
 };
 SGSingModelKind SGSingChosenModel(void);
 // Stored, a running download stopped (it keeps what came in for when its model is chosen again), and announced.
@@ -178,19 +179,11 @@ NSString *SGSingModelSizeText(void);
 void SGSingDownloadModel(void);
 void SGSingCancelModelDownload(void);
 void SGSingDeleteModel(void);
-// The chosen model's compiled folder once it is downloaded and checked; for the full model, else the old model
-// (separator.mlmodelc) where it is still on the iPhone; else nil. On a FLEX build a copy put in Application
-// Support/Vitrine/Sing/dev/<separator-ane or separator-light>.mlmodelc by hand comes first, unchecked.
+// The chosen model's compiled folder once it is downloaded and checked; nil if missing. On a FLEX build, a copy put
+// in Application Support/Vitrine/Sing/dev/<chosen folder> by hand comes first, unchecked.
 NSURL *SGSingModelURL(void);
-// The model is the old one: it runs on the CPU alone, and the download is its update.
-BOOL SGSingModelUpdateAvailable(void);
-// That update downloading (SGSingModelProgress and the rest say how far).
-BOOL SGSingModelUpdateDownloading(void);
 // The size of the model on the iPhone now, for the row that removes it.
 NSString *SGSingModelInUseSizeText(void);
-// Deletes what the old model's download left, and the old model (separator.mlmodelc) itself once separator-ane.mlmodelc
-// is in, logging the space freed; from any thread, at launch and as the download ends. The light model is not touched.
-void SGSingRemoveOldModel(void);
 NSArray<NSString *> *SGSingComputeUnitNames(void);
 // Whether this OS can load the model (iOS 18). Memory is checked as the model loads (SGSingLoader.m).
 BOOL SGSingOSSupported(void);

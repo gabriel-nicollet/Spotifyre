@@ -174,6 +174,10 @@ else
   echo "    no WidgetExtension.appex in this IPA"
 fi
 
+# Compile Spotifyre's layered Icon Composer variants before the PNG pass appends Vitrine.png's entry.
+# app-icons.sh replaces the alternate-icon dictionary with its own names; the PNG pass then adds Vitrine back.
+"$ROOT/scripts/app-icons.sh" "$OUT"
+
 shopt -s nullglob
 ICONS=("$ROOT"/icons/*.png)
 shopt -u nullglob
