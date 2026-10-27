@@ -583,8 +583,8 @@ static void nameScrollView(void) {
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     if (@available(iOS 26.0, *)) {
         self.tabBarMinimizeBehavior = UITabBarMinimizeBehaviorOnScrollDown;
-        self.accessory = [[UITabAccessory alloc] initWithContentView:SGRMakeMiniPlayer()];
-        [self.accessory.contentView registerForTraitChanges:@[UITraitTabAccessoryEnvironment.class] withTarget:self action:@selector(minimizedChanged)];
+        // The hybrid uses Vitrine's existing now playing bar, so this unused alternate controller
+        // does not install a second mini player as a tab accessory.
     }
     SGAddPlayerStateObserver(self);
     // Setting the controller up above can load its view, so viewDidLoad may have run with no accessory yet.
@@ -1000,7 +1000,7 @@ static void itemDidLayOut(UIView *item) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    if (@available(iOS 26.0, *)) sg_inline = SGRInlinePlayer();
+    // Keep the alternate UIKit mini-player controller disabled; Vitrine owns player/minimize behavior.
     %init;
     if (sg_inline) %init(SGRInlinePlayerScroll);
     SGRequireClasses(@[
