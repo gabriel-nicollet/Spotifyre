@@ -15,6 +15,7 @@
 #import "Headers/SPTPlayer.h"
 #import "Sing.h"
 #import <AVFoundation/AVFoundation.h>
+#import <CoreMotion/CoreMotion.h>
 #include <math.h>
 
 static void tell(NSString *title, NSString *message);
@@ -54,12 +55,14 @@ static void setSpatialValue(NSString *key, double value) {
     applySpatialValues();
 }
 
-@interface SGSpatialVoiceDemo : NSObject
+@interface SGSpatialVoiceDemo : NSObject <SGPlayerStateObserver, CMHeadphoneMotionManagerDelegate>
 + (instancetype)shared;
 - (BOOL)isPlaying;
 - (void)play;
-- (void)playResumingSpotify;
+- (void)pauseSpotifyAndPlay;
+- (void)startDemoAfterSpotifyPauses;
 - (void)stop;
+- (void)stopWithoutResumingSpotify;
 - (void)updateEffects;
 @end
 
@@ -70,7 +73,16 @@ static void setSpatialValue(NSString *key, double value) {
     AVAudioUnitDelay *_delay;
     AVAudioUnitEQ *_eq;
     AVAudioEnvironmentNode *_environment;
+    AVAudioPCMBuffer *_voiceBuffer;
+    CMHeadphoneMotionManager *_motionManager;
+    NSOperationQueue *_motionQueue;
     BOOL _resumeSpotify;
+    BOOL _stopOnPlayback;
+    BOOL _waitingForSpotifyPause;
+    BOOL _hasHeadReference;
+    double _referenceYaw;
+    NSUInteger _generation;
+    NSUInteger _pauseAttempt;
 }
 + (instancetype)shared {
     static SGSpatialVoiceDemo *demo; static dispatch_once_t once;
@@ -80,9 +92,110 @@ static void setSpatialValue(NSString *key, double value) {
     if (!(self = [super init])) return nil;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateEffects)
                                                 name:@"SGSpatialVoiceDemoSettingsDidChange" object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(stopWithoutResumingSpotify)
+                                                name:UIApplicationWillResignActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(stopWithoutResumingSpotify)
+                                                name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioInterrupted:)
+                                                name:AVAudioSessionInterruptionNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioRouteChanged:)
+                                                name:AVAudioSessionRouteChangeNotification object:nil];
+    SGAddPlayerStateObserver(self);
     return self;
 }
 - (BOOL)isPlaying { return _engine.isRunning; }
+- (void)playerStateDidChange:(SPTPlayerState *)state {
+    if (_waitingForSpotifyPause) {
+        [self startDemoAfterSpotifyPauses];
+        return;
+    }
+    if (!_engine.isRunning) return;
+    if (!state.isPlaying || state.isPaused) {
+        _stopOnPlayback = YES;
+        return;
+    }
+    if (_stopOnPlayback) {
+        // The user resumed Spotify while the demo was holding it. Do not resume it again
+        // from stop; Spotify is already playing.
+        _resumeSpotify = NO;
+        [self stop];
+    }
+}
+- (void)audioInterrupted:(NSNotification *)note {
+    if ([note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] == AVAudioSessionInterruptionTypeBegan)
+        [self stopWithoutResumingSpotify];
+}
+- (void)audioRouteChanged:(NSNotification *)note {
+    [self stopWithoutResumingSpotify];
+}
+- (AVAudioPCMBuffer *)monoBufferForFile:(AVAudioFile *)file error:(NSError **)error {
+    AVAudioFormat *sourceFormat = file.processingFormat;
+    AVAudioFormat *monoFormat = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sourceFormat.sampleRate channels:1];
+    if (!monoFormat || file.length <= 0 || file.length > UINT32_MAX) return nil;
+    AVAudioPCMBuffer *source = [[AVAudioPCMBuffer alloc] initWithPCMFormat:sourceFormat
+                                                              frameCapacity:(AVAudioFrameCount)file.length];
+    if (![file readIntoBuffer:source frameCount:(AVAudioFrameCount)file.length error:error]) return nil;
+    AVAudioConverter *converter = [AVAudioConverter converterFromFormat:sourceFormat toFormat:monoFormat];
+    if (!converter) return nil;
+    AVAudioPCMBuffer *mono = [[AVAudioPCMBuffer alloc] initWithPCMFormat:monoFormat frameCapacity:source.frameLength];
+    __block BOOL supplied = NO;
+    AVAudioConverterOutputStatus status = [converter convertToBuffer:mono error:error withInputFromBlock:^AVAudioBuffer *(AVAudioPacketCount packets, AVAudioConverterInputStatus *inputStatus) {
+        if (supplied) { *inputStatus = AVAudioConverterInputStatus_EndOfStream; return nil; }
+        supplied = YES;
+        *inputStatus = AVAudioConverterInputStatus_HaveData;
+        return source;
+    }];
+    return status == AVAudioConverterOutputStatus_Error || mono.frameLength == 0 ? nil : mono;
+}
+- (void)startHeadTracking {
+    id usage = NSBundle.mainBundle.infoDictionary[@"NSMotionUsageDescription"];
+    CMAuthorizationStatus authorization = CMHeadphoneMotionManager.authorizationStatus;
+    if (![usage isKindOfClass:NSString.class] || ![(NSString *)usage length] ||
+        authorization == CMAuthorizationStatusDenied || authorization == CMAuthorizationStatusRestricted) return;
+    if (!_motionManager) {
+        _motionManager = [CMHeadphoneMotionManager new];
+        _motionManager.delegate = self;
+        _motionQueue = [NSOperationQueue new];
+        _motionQueue.name = @"spotifyglass.spatialvoice.preview-motion";
+        _motionQueue.maxConcurrentOperationCount = 1;
+        _motionQueue.qualityOfService = NSQualityOfServiceUserInitiated;
+    }
+    if (!_motionManager.isDeviceMotionAvailable) return;
+    _hasHeadReference = NO;
+    __weak typeof(self) weakSelf = self;
+    [_motionManager startDeviceMotionUpdatesToQueue:_motionQueue withHandler:^(CMDeviceMotion *motion, NSError *error) {
+        if (error || !motion) return;
+        double yaw = motion.attitude.yaw;
+        if (!isfinite(yaw)) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            typeof(self) self = weakSelf;
+            if (!self || !self->_engine.isRunning || !self->_vocals) return;
+            if (!self->_hasHeadReference) {
+                self->_referenceYaw = yaw;
+                self->_hasHeadReference = YES;
+            }
+            double relative = yaw - self->_referenceYaw;
+            while (relative > M_PI) relative -= 2.0 * M_PI;
+            while (relative < -M_PI) relative += 2.0 * M_PI;
+            double radius = 1.0 + spatialValue(SGRKeySpatialDistance, 0.18) * 4.0;
+            self->_vocals.position = AVAudioMake3DPoint((float)-sin(relative) * (float)radius, 0,
+                                                        (float)-cos(relative) * (float)radius);
+        });
+    }];
+}
+- (void)stopHeadTracking {
+    [_motionManager stopDeviceMotionUpdates];
+    _hasHeadReference = NO;
+}
+- (void)headphoneMotionManagerDidDisconnect:(CMHeadphoneMotionManager *)manager {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self->_hasHeadReference = NO;
+        [self updateEffects];
+    });
+}
+- (void)headphoneMotionManagerDidConnect:(CMHeadphoneMotionManager *)manager {
+    dispatch_async(dispatch_get_main_queue(), ^{ if (self->_engine.isRunning) [self startHeadTracking]; });
+}
 - (void)play {
     [self stop];
     NSString *directory = @"SpotifyreDemo.bundle";
@@ -93,6 +206,9 @@ static void setSpatialValue(NSString *key, double value) {
     AVAudioFile *voiceFile = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:voicePath] error:&error];
     AVAudioFile *musicFile = [[AVAudioFile alloc] initForReading:[NSURL fileURLWithPath:musicPath] error:&error];
     if (!voiceFile || !musicFile) { tell(@"Could not open demo audio", error.localizedDescription ?: @"The demo tracks could not be read."); return; }
+    AVAudioPCMBuffer *voiceBuffer = [self monoBufferForFile:voiceFile error:&error];
+    if (!voiceBuffer) { tell(@"Could not prepare demo audio", error.localizedDescription ?: @"The vocal stem could not be converted for spatial playback."); return; }
+    _voiceBuffer = voiceBuffer;
     _engine = [AVAudioEngine new]; _vocals = [AVAudioPlayerNode new]; _soundtrack = [AVAudioPlayerNode new];
     _reverb = [AVAudioUnitReverb new]; _delay = [AVAudioUnitDelay new]; _eq = [[AVAudioUnitEQ alloc] initWithNumberOfBands:3];
     [_engine attachNode:_vocals]; [_engine attachNode:_soundtrack]; [_engine attachNode:_eq]; [_engine attachNode:_reverb]; [_engine attachNode:_delay];
@@ -105,23 +221,46 @@ static void setSpatialValue(NSString *key, double value) {
                                                                                    AVAudioMake3DVector(0, 1, 0));
         // AVAudioEnvironmentNode faces along -Z; a source at -Z is in front of the listener.
         _vocals.position = AVAudioMake3DPoint(0, 0, -1);
+        _vocals.sourceMode = AVAudio3DMixingSourceModeSpatializeIfMono;
         _vocals.renderingAlgorithm = AVAudio3DMixingRenderingAlgorithmHRTF;
-        [_engine connect:_vocals to:_eq format:voiceFile.processingFormat];
-        [_engine connect:_eq to:_reverb format:voiceFile.processingFormat];
-        [_engine connect:_reverb to:_delay format:voiceFile.processingFormat];
-        [_engine connect:_delay to:_environment format:voiceFile.processingFormat];
+        // AVAudioEnvironmentNode only spatializes mono inputs. The supplied vocal file is
+        // stereo, so feed the downmixed mono buffer through the HRTF source chain.
+        [_engine connect:_vocals to:_eq format:voiceBuffer.format];
+        [_engine connect:_eq to:_reverb format:voiceBuffer.format];
+        [_engine connect:_reverb to:_delay format:voiceBuffer.format];
+        [_engine connect:_delay to:_environment format:voiceBuffer.format];
         [_engine connect:_environment to:_engine.mainMixerNode format:nil];
     }
     [_engine connect:_soundtrack to:_engine.mainMixerNode format:musicFile.processingFormat];
     [self updateEffects];
     if (![_engine startAndReturnError:&error]) { tell(@"Could not start demo", error.localizedDescription ?: @"Audio could not be started."); [self stop]; return; }
-    [_vocals scheduleFile:voiceFile atTime:nil completionHandler:^{ dispatch_async(dispatch_get_main_queue(), ^{ [self demoFinished]; }); }];
+    NSUInteger generation = ++_generation;
+    [_vocals scheduleBuffer:voiceBuffer atTime:nil options:0 completionHandler:^{
+        dispatch_async(dispatch_get_main_queue(), ^{ if (generation == self->_generation) [self demoFinished]; });
+    }];
     [_soundtrack scheduleFile:musicFile atTime:nil completionHandler:nil];
     [_vocals play]; [_soundtrack play];
+    [self startHeadTracking];
 }
-- (void)playResumingSpotify {
+- (void)pauseSpotifyAndPlay {
+    [self stop];
+    _waitingForSpotifyPause = YES;
+    NSUInteger attempt = ++_pauseAttempt;
+    [(id<SPTPlayer>)SGKaraokePlayer() pause:nil];
+    [self startDemoAfterSpotifyPauses];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!self->_waitingForSpotifyPause || self->_pauseAttempt != attempt) return;
+        self->_waitingForSpotifyPause = NO;
+        tell(@"Spotify is still playing", @"The demo stayed stopped because Spotify did not confirm that playback paused.");
+    });
+}
+- (void)startDemoAfterSpotifyPauses {
+    if (!_waitingForSpotifyPause) return;
+    SPTPlayerState *state = SGPlayerState();
+    if (state.isPlaying && !state.isPaused) return;
+    _waitingForSpotifyPause = NO;
     [self play];
-    if (_engine.isRunning) _resumeSpotify = YES;
+    if (_engine.isRunning) { _resumeSpotify = YES; _stopOnPlayback = YES; }
     else [(id<SPTPlayer>)SGKaraokePlayer() resume:nil];
 }
 - (void)demoFinished {
@@ -129,10 +268,18 @@ static void setSpatialValue(NSString *key, double value) {
 }
 - (void)stop {
     BOOL resume = _resumeSpotify;
+    ++_generation;
+    ++_pauseAttempt;
+    _waitingForSpotifyPause = NO;
+    [self stopHeadTracking];
     [_vocals stop]; [_soundtrack stop]; [_engine stop];
-    _vocals = nil; _soundtrack = nil; _reverb = nil; _delay = nil; _eq = nil; _environment = nil; _engine = nil;
-    _resumeSpotify = NO;
+    _vocals = nil; _soundtrack = nil; _reverb = nil; _delay = nil; _eq = nil; _environment = nil; _engine = nil; _voiceBuffer = nil;
+    _resumeSpotify = NO; _stopOnPlayback = NO;
     if (resume) [(id<SPTPlayer>)SGKaraokePlayer() resume:nil];
+}
+- (void)stopWithoutResumingSpotify {
+    _resumeSpotify = NO;
+    [self stop];
 }
 - (void)updateEffects {
     if (!_reverb || !_delay) return;
@@ -149,7 +296,8 @@ static void setSpatialValue(NSString *key, double value) {
     }
     _vocals.volume = powf(10.0f, (float)spatialValue(SGRKeySpatialGainDB, 0.0) / 20.0f);
     double distance = spatialValue(SGRKeySpatialDistance, 0.18);
-    _vocals.position = AVAudioMake3DPoint(0, 0, (float)(-1.0 - distance * 4.0));
+    if (!_hasHeadReference)
+        _vocals.position = AVAudioMake3DPoint(0, 0, (float)(-1.0 - distance * 4.0));
     if (_environment.distanceAttenuationParameters)
         _environment.distanceAttenuationParameters.rolloffFactor = (float)(0.25 + distance * 2.5);
 }
@@ -166,9 +314,7 @@ static void promptDemo(void) {
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Keep Spotify Playing" style:UIAlertActionStyleDefault handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Pause & Play Demo" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        id<SPTPlayer> player = (id<SPTPlayer>)SGKaraokePlayer();
-        [player pause:nil];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [demo playResumingSpotify]; });
+        [demo pauseSpotifyAndPlay];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
@@ -351,9 +497,20 @@ static SGModSection *spatialVoiceSection(void) {
         @"AirPods are required for head tracking. Effect tuning works with other headphones.");
 }
 
+@interface SGRKaraokeSettingsPageController : SGModPage
+@end
+
+@implementation SGRKaraokeSettingsPageController
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    if (self.isMovingFromParentViewController || self.isBeingDismissed)
+        [[SGSpatialVoiceDemo shared] stop];
+}
+@end
+
 UIViewController *SGRKaraokeSettingsPage(void) {
     NSArray<SGModSection *> *sections = SGSingSupported() ? @[karaokeSection(), spatialVoiceSection()] : @[karaokeSection()];
-    return [[SGModPage alloc] initWithTitle:@"Karaoke & Spatial Voice" intro:nil sections:sections footer:nil];
+    return [[SGRKaraokeSettingsPageController alloc] initWithTitle:@"Karaoke & Spatial Voice" intro:nil sections:sections footer:nil];
 }
 
 // Beside the main page's row: what Sing would do now, or how far its model has come.

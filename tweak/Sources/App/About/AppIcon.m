@@ -14,14 +14,16 @@ static NSString *const SGAppIconSelectionKey = @"spotifyglass.appIcon.selection"
 // IPA's own icon, iOS's primary one.
 static NSArray<NSString *> *iconFiles(void) {
     return @[@"Spotify", @"Glass", @"SpotifyGreen", @"SpotifyWhite", @"SpotifyPink", @"SpotifyBlue", @"SpotifyPurple",
-             @"SpotifyOrange", @"SpotifyLime", @"SpotifyreGreen", @"SpotifyreWhite", @"SpotifyrePink", @"SpotifyreBlue",
-             @"SpotifyrePurple", @"SpotifyreOrange", @"SpotifyreLime"];
+             @"SpotifyOrange", @"SpotifyLime", @"SpotifyreOriginalFlame", @"SpotifyreOriginalFlat",
+             @"SpotifyreAmberFlame", @"SpotifyreAmberFlat", @"SpotifyreBlueFlame", @"SpotifyreBlueFlat",
+             @"SpotifyrePinkFlame", @"SpotifyrePinkFlat", @"SpotifyrePurpleFlame", @"SpotifyrePurpleFlat"];
 }
 
 static NSArray<NSString *> *iconTitles(void) {
     return @[@"Spotify", @"Liquid Glass", @"Spotify Green", @"Spotify White", @"Spotify Pink", @"Spotify Blue", @"Spotify Purple",
-             @"Spotify Orange", @"Spotify Lime", @"Spotifyre Green", @"Spotifyre White", @"Spotifyre Pink", @"Spotifyre Blue",
-             @"Spotifyre Purple", @"Spotifyre Orange", @"Spotifyre Lime"];
+             @"Spotify Orange", @"Spotify Lime", @"Spotifyre Original · Flame", @"Spotifyre Original · Flat",
+             @"Spotifyre Amber · Flame", @"Spotifyre Amber · Flat", @"Spotifyre Blue · Flame", @"Spotifyre Blue · Flat",
+             @"Spotifyre Pink · Flame", @"Spotifyre Pink · Flat", @"Spotifyre Purple · Flame", @"Spotifyre Purple · Flat"];
 }
 
 static NSString *alternateName(NSString *file) {

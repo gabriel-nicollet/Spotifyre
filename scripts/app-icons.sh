@@ -3,7 +3,7 @@
 #
 #   scripts/app-icons.sh <out.ipa>   (pipeline.sh runs it)
 #
-# Each icon is an Icon Composer document with its vector artwork in Assets/. Spotify's logo is read from the
+# Each icon is an Icon Composer document with its artwork in Assets/. Spotify's logo is read from the
 # IPA only as a fallback for a template without a custom mark. actool compiles the icons, car-tool.m merges their
 # Liquid Glass stacks into Spotify's Assets.car (no flattened fallbacks, so iOS 26 and up draws them),
 # CFBundleAlternateIcons lists them, and a 60 pt picture of each goes to SGAppIconPreviews/ for the list.
@@ -40,12 +40,11 @@ for TEMPLATE in "$ROOT"/icons/*.icon; do
   NAME="$(basename "$TEMPLATE" .icon)"
   cp -R "$TEMPLATE" "$WORK/art/$NAME.icon"
   mkdir -p "$WORK/art/$NAME.icon/Assets"
-  # Keep custom artwork for alternates. Show Spotify's actual mark in the primary-icon preview.
+  # Keep each bundle's artwork (SVG or PNG). Show Spotify's actual mark in the primary-icon preview.
+  ARTWORK="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["groups"][0]["layers"][0]["image-name"])' "$TEMPLATE/icon.json")"
   if [ "$NAME" = Spotify ]; then
     cp "$WORK/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
-  elif [ -f "$TEMPLATE/Assets/Logo.svg" ]; then
-    cp "$TEMPLATE/Assets/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
-  else
+  elif [ "$ARTWORK" = Logo.svg ] && [ ! -f "$TEMPLATE/Assets/Logo.svg" ]; then
     cp "$WORK/Logo.svg" "$WORK/art/$NAME.icon/Assets/Logo.svg"
   fi
   "$ICTOOL" "$WORK/art/$NAME.icon" --export-image --output-file "$PREVIEWS/$NAME.png" --platform iOS \

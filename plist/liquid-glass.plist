@@ -9,7 +9,7 @@
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
 	<key>NSMotionUsageDescription</key>
-	<string>Spotify reads the head movement of your AirPods so a nod or a shake of the head can pause, skip and more.</string>
+	<string>Spotify reads the head movement of your AirPods for head gestures and to keep Spatial Voice preview audio anchored in front of you.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_spotify-ln-check._tcp</string>
