@@ -132,7 +132,7 @@ static void refresh(UIView *tile) {
     objc_setAssociatedObject(tile, &kShownKey, image, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     __weak UIView *weakTile = tile;
-    [SGRPalette tintForImage:image surface:untinted() completion:^(UIColor *color) {
+    [SGRPalette tintForImage:image surface:untinted() strong:NO completion:^(UIColor *color) {
         UIView *strongTile = weakTile;
         if (color) [tints() setObject:color forKey:image];
         // A tile reused for another cover in the meantime has asked for that one.
