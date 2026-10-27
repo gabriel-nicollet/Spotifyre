@@ -172,7 +172,7 @@ static UIView *iconAccessory(NSString *name) {
 - (UIView *)tableView:(UITableView *)table viewForHeaderInSection:(NSInteger)section {
     return SGSectionHeader(table, section == 0 ? @"Name" : @"Customize");
 }
-- (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section { return SGSectionHeaderHeight; }
+- (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section { return SGSectionHeaderHeight(); }
 - (CGFloat)tableView:(UITableView *)table heightForFooterInSection:(NSInteger)section { return CGFLOAT_MIN; }
 - (CGFloat)tableView:(UITableView *)table heightForRowAtIndexPath:(NSIndexPath *)path { return path.section == 0 ? 56 : UITableViewAutomaticDimension; }
 
@@ -267,7 +267,7 @@ static UIView *iconAccessory(NSString *name) {
 - (UIView *)tableView:(UITableView *)table viewForHeaderInSection:(NSInteger)section {
     return SGSectionHeader(table, section == 0 ? @"Spotify's pages" : @"Custom link");
 }
-- (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section { return SGSectionHeaderHeight; }
+- (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section { return SGSectionHeaderHeight(); }
 - (CGFloat)tableView:(UITableView *)table heightForFooterInSection:(NSInteger)section { return CGFLOAT_MIN; }
 
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
@@ -650,7 +650,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
 }
 
 - (NSInteger)tableView:(UITableView *)table numberOfRowsInSection:(NSInteger)section {
-    if (section == SGRNavbarSectionSwitch) return 3;
+    if (section == SGRNavbarSectionSwitch) return 2;
     return section == SGRNavbarSectionTabs ? (NSInteger)_entries.count : 1;
 }
 
@@ -664,7 +664,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section {
-    if ([self headerFor:section]) return SGSectionHeaderHeight;
+    if ([self headerFor:section]) return SGSectionHeaderHeight();
     return [self tableView:table numberOfRowsInSection:section] ? SGSectionGap : CGFLOAT_MIN;
 }
 
@@ -676,13 +676,12 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
     UITableViewCell *cell = SGDequeueCell(table, @"navbar");
     switch (path.section) {
         case SGRNavbarSectionSwitch: {
-            BOOL labels = path.row == 1, inlinePlayer = path.row == 2;
-            if (inlinePlayer) SGFillCell(cell, @"Apple Music style player", @"Moves in beside the tabs on scroll. Restart to apply", nil, nil);
-            else SGFillCell(cell, labels ? @"Hide labels" : @"Custom navbar", labels ? @"Icons only" : nil, nil, nil);
+            BOOL labels = path.row == 1;
+            SGFillCell(cell, labels ? @"Hide labels" : @"Custom navbar", labels ? @"Icons only" : nil, nil, nil);
             UISwitch *toggle = [UISwitch new];
             toggle.onTintColor = SGGreen();
             toggle.tag = path.row;
-            toggle.on = inlinePlayer ? SGHidden(SGRKeyInlinePlayer) : labels ? SGHidden(SGRKeyNavbarHideLabels) : SGEnabled(SGRKeyNavbar);
+            toggle.on = labels ? SGHidden(SGRKeyNavbarHideLabels) : SGEnabled(SGRKeyNavbar);
             [toggle addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = toggle;
             break;
@@ -755,11 +754,6 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
 }
 
 - (void)toggled:(UISwitch *)toggle {
-    // The mini player is read at launch.
-    if (toggle.tag == 2) {
-        SGSetEnabled(SGRKeyInlinePlayer, toggle.on);
-        return;
-    }
     SGSetEnabled(toggle.tag == 1 ? SGRKeyNavbarHideLabels : SGRKeyNavbar, toggle.on);
     SGRRefreshTabBar();
 }
