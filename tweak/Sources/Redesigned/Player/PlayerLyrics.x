@@ -45,7 +45,7 @@ static const CGFloat kLyricsBottom = 8;        // above the progress bar
 // The lines are a surface arriving, not something moving: they come up from just under full size as the
 // room for them opens, and go at once when it closes. An exit the eye waits through reads as a stall.
 static const CGFloat kLyricsEnterScale = 0.96;
-static const NSTimeInterval kLyricsIn = 0.3, kLyricsInDelay = 0.12, kLyricsOut = 0.16;
+static const NSTimeInterval kLyricsIn = 0.3, kLyricsInDelay = 0.12, kLyricsOut = 0.24;
 // A track that changes while the lines are up has this long to bring its own before they are put away. A
 // look for them still running then is waited out, since a local file's sources are asked one after another,
 // up to 6 s each, with a Musixmatch token fetched first the first time.
