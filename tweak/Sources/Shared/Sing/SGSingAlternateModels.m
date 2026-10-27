@@ -55,7 +55,7 @@ static void stopTasksFor(NSString *sid) {
     [tasks()[sid] removeAllObjects];
 }
 static NSString *hexHash(NSURL *url) {
-    NSFileHandle *handle = [NSFileHandle fileForReadingFromURL:url error:nil]; if (!handle) return nil;
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:url.path]; if (!handle) return nil;
     CC_SHA256_CTX ctx; CC_SHA256_Init(&ctx);
     for (;;) { @autoreleasepool { NSData *data = [handle readDataOfLength:1 << 20]; if (!data.length) break; CC_SHA256_Update(&ctx, data.bytes, (CC_LONG)data.length); } }
     [handle closeFile]; unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256_Final(digest, &ctx);
