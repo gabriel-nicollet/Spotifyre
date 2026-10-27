@@ -135,7 +135,7 @@ static void setSpatialValue(NSString *key, double value) {
     AVAudioPCMBuffer *source = [[AVAudioPCMBuffer alloc] initWithPCMFormat:sourceFormat
                                                               frameCapacity:(AVAudioFrameCount)file.length];
     if (![file readIntoBuffer:source frameCount:(AVAudioFrameCount)file.length error:error]) return nil;
-    AVAudioConverter *converter = [AVAudioConverter converterFromFormat:sourceFormat toFormat:monoFormat];
+    AVAudioConverter *converter = [[AVAudioConverter alloc] initFromFormat:sourceFormat toFormat:monoFormat];
     if (!converter) return nil;
     AVAudioPCMBuffer *mono = [[AVAudioPCMBuffer alloc] initWithPCMFormat:monoFormat frameCapacity:source.frameLength];
     __block BOOL supplied = NO;
