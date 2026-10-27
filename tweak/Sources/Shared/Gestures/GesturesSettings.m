@@ -54,7 +54,7 @@ static NSString *cellLabel(SGGestureAction action) {
     }
     while (_labels.count < zones.count) {
         UILabel *label = [UILabel new];
-        label.font = SGSubtitleFont();
+        label.font = SGCappedFont(SGSubtitleFont(), 15);   // inside a drawing of the screen, of fixed size
         label.textColor = UIColor.whiteColor;
         label.textAlignment = NSTextAlignmentCenter;
         label.numberOfLines = 2;
@@ -178,7 +178,7 @@ static NSString *cellLabel(SGGestureAction action) {
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section {
-    return section == 1 || section == 2 ? SGSectionHeaderHeight : SGSectionGap;
+    return section == 1 || section == 2 ? SGSectionHeaderHeight() : SGSectionGap;
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForFooterInSection:(NSInteger)section {

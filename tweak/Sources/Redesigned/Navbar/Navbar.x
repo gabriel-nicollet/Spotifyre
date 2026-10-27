@@ -11,23 +11,29 @@
 // the stack, past that count, and take a slot with the rest. A tap on one goes through Spotify's
 // link dispatcher, the same route the app takes for a link it opens itself, so any URI works.
 //
+// The page that link pushes is the tab's: the glass bar lights the tab while that page is on its stack and
+// the stack is on screen, and a second tap goes back to the page rather than opening the link again, the
+// way a second tap on one of Spotify's tabs goes back to its root.
+//
 // Tree (trees/home.txt): NavigationUI_TabBarImpl.TabBarView > TabBarCompactView > UIStackView
 //   402x49 of four ElementContentView<TabBarItemElement> 100x49, each an SPTEncoreIconView 24x24
 //   at y 12.5 over an SPTEncoreLabel at y 35.
 #import "Core/SGCore.h"
 #import "Navbar.h"
-#import "Headers/SPTEncoreIconView.h"
 #import "Shared/Navigation/Links.h"
+#import "Shared/Navigation/TabIcons.h"
 #import <objc/message.h>
 
 static const CGFloat kIconSize = 24;
 static const CGFloat kIconTop = 12.5;
 static const CGFloat kLabelTop = 35;
 static const CGFloat kLabelHeight = 14;
-static char kCustomKey, kOrderKey;
+static char kCustomKey, kOrderKey, kApartKey;
+// Between the main group and the split tabs (Split tabs), when both have something on the bar.
+static const CGFloat kSplitGap = 10;
 
 // Where Spotify's own items keep their icon and label, read off one of them every pass, so an item of
-// the mod's own sits on the same line as its neighbours.
+// the mod's own sits on the same line as its neighbors.
 static CGRect sg_iconBox = {{0, kIconTop}, {kIconSize, kIconSize}};
 static CGRect sg_labelBox = {{0, kLabelTop}, {0, kLabelHeight}};
 
@@ -38,40 +44,29 @@ static UIFont *sg_tabFont;
 // Spotify's own tabs in Spotify's order, from the first layout pass of this launch, before
 // anything below has moved them.
 static NSMutableArray<NSString *> *sg_stockOrder;
+// How many tabs at the end of the row are split off from the rest, 0 for one group.
+static NSUInteger sg_apartCount;
 
 static UIColor *itemColor(void) { return [UIColor colorWithWhite:0xB3 / 255.0 alpha:1]; }
 
+// A page pushed this soon after a tap on a tab of the mod's own is the page the tab opened.
+static const CFTimeInterval kTabPush = 1;
+static __weak UIView *sg_tappedTab, *sg_pageTab;
+static CFTimeInterval sg_tappedAt;
+static __weak UIViewController *sg_tabPage;
+
+static BOOL tabPageShowing(void) {
+    UIViewController *page = sg_tabPage;
+    UINavigationController *nav = page.navigationController;
+    return sg_pageTab && nav.viewIfLoaded.window && [nav.viewControllers containsObject:page];
+}
+
 #pragma mark - the mod's own items
 
-// One of the 538 glyphs SPTEncoreIcon exposes, one class method each ("podcasts", "heart"), so an
-// item of the mod's own is drawn the same way as Spotify's, or `sf:` and an SF Symbol's name. A star
-// stands in for a name that is neither.
-static UIView *iconView(NSString *name) {
-    if ([name hasPrefix:@"sf:"]) {
-        NSString *symbol = [name substringFromIndex:3];
-        UIImage *image = [UIImage systemImageNamed:symbol withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:19 weight:UIImageSymbolWeightSemibold]];
-        UIImageView *view = [[UIImageView alloc] initWithImage:image];
-        view.tintColor = itemColor();
-        view.contentMode = UIViewContentModeCenter;
-        return view;
-    }
-    Class icon = NSClassFromString(@"SPTEncoreIcon");
-    Class view = NSClassFromString(@"SPTEncoreIconView");
-    SEL glyphSel = NSSelectorFromString(name.length ? name : @"star");
-    if (icon && view && [icon respondsToSelector:glyphSel]) {
-        id (*glyphFor)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
-        id glyph = glyphFor(icon, glyphSel);
-        SPTEncoreIconView *encore = glyph ? [[view alloc] initWithIcon:glyph] : nil;
-        if (encore) {
-            [encore setForegroundColor:itemColor()];
-            return encore;
-        }
-    }
-    UIImage *image = [UIImage systemImageNamed:@"star.fill" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:19 weight:UIImageSymbolWeightSemibold]];
-    UIImageView *fallback = [[UIImageView alloc] initWithImage:image];
-    fallback.tintColor = itemColor();
-    fallback.contentMode = UIViewContentModeCenter;
-    return fallback;
+// Drawn the way Spotify's own are, an Encore glyph or an SF Symbol at the glyphs' size
+// (Shared/Navigation/TabIcons.h).
+static UIView *iconView(NSDictionary *entry) {
+    return SGTabIconView(entry[SGRNavbarIcon], [entry[SGRNavbarIconSet] isEqual:SGTabIconSetSymbols], itemColor());
 }
 
 @interface SGRTabItemView : UIControl
@@ -79,22 +74,6 @@ static UIView *iconView(NSString *name) {
 - (instancetype)initWithEntry:(NSDictionary *)entry;
 - (void)applyEntry:(NSDictionary *)entry;
 @end
-
-// A tab of the mod's own pushes its page onto the stack of the tab Spotify is on, so the glass bar is
-// told which one to light for as long as that page stays on the stack Spotify shows.
-static __weak SGRTabItemView *sg_opening;
-static CFTimeInterval sg_openedAt;
-static __weak SGRTabItemView *sg_currentItem;
-static __weak UIViewController *sg_currentPage;
-
-UIView *SGRCurrentModTab(void) {
-    UIViewController *page = sg_currentPage;
-    return page.navigationController.viewIfLoaded.window ? sg_currentItem : nil;
-}
-
-void SGRTabPicked(UIView *item) {
-    if (![item isKindOfClass:SGRTabItemView.class]) sg_currentPage = nil;
-}
 
 @implementation SGRTabItemView {
     NSString *_iconName;
@@ -116,18 +95,19 @@ void SGRTabPicked(UIView *item) {
 - (void)applyEntry:(NSDictionary *)entry {
     self.uri = entry[SGRNavbarURI];
     _title.text = entry[SGRNavbarTitle];
-    NSString *name = entry[SGRNavbarIcon] ?: @"star";
+    // The set is part of the name: "star" is a glyph in one and a symbol in the other.
+    NSString *name = [NSString stringWithFormat:@"%@ %@", entry[SGRNavbarIconSet] ?: @"encore", entry[SGRNavbarIcon] ?: @"star"];
     if ([name isEqualToString:_iconName]) return;
     [_icon removeFromSuperview];
     _iconName = [name copy];
-    _icon = iconView(name);
+    _icon = iconView(entry);
     // Encore's views lay themselves out from constraints; this one is placed by frame.
     _icon.translatesAutoresizingMaskIntoConstraints = YES;
     [self addSubview:_icon];
 }
 
-// Both boxes come off a neighbour, so whatever Spotify does to the row's line-up is copied rather than
-// guessed at; only the horizontal centring is the item's own.
+// Both boxes come off a neighbor, so whatever Spotify does to the row's line-up is copied rather than
+// guessed at; only the horizontal centering is the item's own.
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat width = self.bounds.size.width;
@@ -153,14 +133,19 @@ void SGRTabPicked(UIView *item) {
 // Through the app's own link dispatcher (Shared/Navigation/Links.h). What the dispatcher makes of the
 // URI goes to the log first, so a tab that ends in Spotify's "Couldn't open link" says why.
 - (void)open {
-    // Tapped again while its page is on the stack, it goes back to that page as a tab of Spotify's would.
-    UIViewController *page = sg_currentPage;
-    if (SGRCurrentModTab() == self) {
-        [page.navigationController popToViewController:page animated:YES];
+    UIViewController *page = sg_tabPage;
+    if (sg_pageTab == self && tabPageShowing()) {
+        UINavigationController *nav = page.navigationController;
+        if (nav.topViewController != page) [nav popToViewController:page animated:YES];
+        SGLog(@"navbar: back to the tab's page %@", NSStringFromClass(page.class));
         return;
     }
-    sg_opening = self;
-    sg_openedAt = CACurrentMediaTime();
+    sg_tappedTab = self;
+    sg_tappedAt = CACurrentMediaTime();
+    // A link that pushes no page leaves the light where Spotify has it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((kTabPush + 0.05) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        SGRRefreshTabBar();
+    });
     NSURL *url = SGRNavbarTabURL(self.uri);
     NSString *via = nil;
     SGLinkRoute route = SGSpotifyURIRoute(url, &via);
@@ -225,6 +210,8 @@ void SGRComposeTabBar(UIView *tabBar) {
     NSMutableArray<UIView *> *wanted = [NSMutableArray array];
     NSMutableSet<NSString *> *placed = [NSMutableSet set];
     NSMutableSet<NSString *> *keep = [NSMutableSet set];
+    NSSet<NSString *> *split = SGEnabled(SGRKeyNavbar) ? [NSSet setWithArray:SGRNavbarSplit()] : nil;
+    NSMutableSet<UIView *> *apart = [NSMutableSet set];
 
     if (SGEnabled(SGRKeyNavbar)) {
         for (NSDictionary *entry in SGRNavbarLayout()) {
@@ -239,9 +226,11 @@ void SGRComposeTabBar(UIView *tabBar) {
                 else custom[ident] = item = [[SGRTabItemView alloc] initWithEntry:entry];
                 [keep addObject:ident];
                 [wanted addObject:item];
+                if ([split containsObject:ident]) [apart addObject:item];
             } else if (stockViews[ident]) {
                 stockViews[ident].hidden = hidden;
                 [wanted addObject:stockViews[ident]];
+                if ([split containsObject:ident]) [apart addObject:stockViews[ident]];
             }
         }
     }
@@ -252,6 +241,7 @@ void SGRComposeTabBar(UIView *tabBar) {
         if (!item || [wanted containsObject:item]) continue;
         item.hidden = NO;
         [wanted addObject:item];
+        if ([split containsObject:ident]) [apart addObject:item];
     }
     for (NSString *ident in custom.allKeys) {
         if ([keep containsObject:ident]) continue;
@@ -269,34 +259,48 @@ void SGRComposeTabBar(UIView *tabBar) {
     for (UIView *item in wanted) {
         if ([item isKindOfClass:SGRTabItemView.class] && item.superview != stack) [stack addArrangedSubview:item];
     }
-    NSMutableArray<UIView *> *order = [NSMutableArray array];
-    for (UIView *item in wanted) if (!item.hidden && item.superview == stack) [order addObject:item];
+    // Split tabs go to the end, each group in the list's order. With nothing left in the main group they
+    // are the bar's one group.
+    NSMutableArray<UIView *> *order = [NSMutableArray array], *trailing = [NSMutableArray array];
+    for (UIView *item in wanted) {
+        if (item.hidden || item.superview != stack) continue;
+        [([apart containsObject:item] ? trailing : order) addObject:item];
+    }
+    NSUInteger apartCount = order.count ? trailing.count : 0;
+    [order addObjectsFromArray:trailing];
+    [order enumerateObjectsUsingBlock:^(UIView *item, NSUInteger i, BOOL *stop) {
+        objc_setAssociatedObject(item, &kApartKey, i + apartCount >= order.count ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }];
     sg_row = stack;
-    if (![order isEqualToArray:objc_getAssociatedObject(stack, &kOrderKey)]) {
+    if (![order isEqualToArray:objc_getAssociatedObject(stack, &kOrderKey)] || apartCount != sg_apartCount) {
+        sg_apartCount = apartCount;
         objc_setAssociatedObject(stack, &kOrderKey, order, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [stack setNeedsLayout];
     }
 }
 
 // Spotify placed the icon and the label for the width it measured (trees/test5.txt: x 28 in a
-// 134pt slot, the centre of the 80pt it had with five tabs) and lays the item out no further
-// once the slot changes. Assigning the centres back sends them through the hooks below.
+// 134pt slot, the center of the 80pt it had with five tabs) and lays the item out no further
+// once the slot changes. Assigning the centers back sends them through the hooks below.
 static void centreContents(UIView *item) {
     SGForEachView(item, ^(UIView *v) {
         if ([v isKindOfClass:%c(SPTEncoreIconView)] || [v isKindOfClass:%c(SPTEncoreLabel)]) v.center = v.center;
     });
 }
 
-// Equal slots across the bar, in the order composed above. The frames go on after the stack's
-// own pass, so Spotify's own widths never decide whether a fifth item fits.
+// Equal slots across the bar, in the order composed above, the split tabs' after a gap. The frames go on
+// after the stack's own pass, so Spotify's own widths never decide whether a fifth item fits.
 static void placeRow(UIStackView *stack) {
     NSArray<UIView *> *order = objc_getAssociatedObject(stack, &kOrderKey);
     UIView *bar = sg_navbarRoot;
     if (!order.count || !bar) return;
-    CGFloat width = bar.bounds.size.width / order.count;
+    CGFloat gap = sg_apartCount ? kSplitGap : 0;
+    CGFloat width = (bar.bounds.size.width - gap) / order.count;
     CGFloat height = stack.bounds.size.height;
+    NSUInteger firstApart = order.count - sg_apartCount;
     [order enumerateObjectsUsingBlock:^(UIView *item, NSUInteger i, BOOL *stop) {
-        CGFloat x = [bar convertPoint:CGPointMake(i * width, 0) toView:stack].x;
+        CGFloat left = i * width + (i >= firstApart ? gap : 0);
+        CGFloat x = [bar convertPoint:CGPointMake(left, 0) toView:stack].x;
         CGRect frame = CGRectMake(x, 0, width, height);
         if (!CGAffineTransformIsIdentity(item.transform)) item.transform = CGAffineTransformIdentity;
         if (!CGRectEqualToRect(item.frame, frame)) item.frame = frame;
@@ -314,7 +318,7 @@ static void placeRow(UIStackView *stack) {
 // Spotify's element layout places the icon and the label from the width it measured, not from
 // the slot above (trees/test5.txt: x 38 in a 134pt element in a 126pt slot), and a view placed by
 // its parent gets no layout pass of its own. So the placement itself is bent: on the bar, whatever
-// x Spotify sets, the view lands centred on its slot.
+// x Spotify sets, the view lands centered on its slot.
 static CGFloat slotCentreX(UIView *view) {
     UIStackView *row = sg_row;
     if (!row) return NAN;
@@ -350,6 +354,40 @@ static CGFloat slotCentreX(UIView *view) {
 }
 %end
 
+UIView *SGRNavbarLitTab(void) {
+    if (tabPageShowing()) return sg_pageTab;
+    // From the tap until its page comes, so the bar does not go back to Spotify's tab in between.
+    return CACurrentMediaTime() - sg_tappedAt < kTabPush ? sg_tappedTab : nil;
+}
+
+void SGRNavbarForgetTab(void) {
+    sg_tappedTab = sg_pageTab = nil;
+    sg_tabPage = nil;
+}
+
+%hook SPNavigationController
+- (void)pushViewController:(UIViewController *)page animated:(BOOL)animated {
+    UIView *tab = sg_tappedTab;
+    if (tab && CACurrentMediaTime() - sg_tappedAt < kTabPush) {
+        sg_pageTab = tab;
+        sg_tabPage = page;
+        sg_tappedTab = nil;
+        SGLog(@"navbar: %@ is the tab's page", NSStringFromClass(page.class));
+    }
+    %orig;
+}
+
+// A push, a pop or a swipe back: the bar looks again at whether the tab's page is still up.
+- (void)navigationController:(UINavigationController *)controller didShowViewController:(UIViewController *)page animated:(BOOL)animated {
+    %orig;
+    if (sg_pageTab) SGRRefreshTabBar();
+}
+%end
+
+BOOL SGRTabIsApart(UIView *item) {
+    return objc_getAssociatedObject(item, &kApartKey) != nil;
+}
+
 void SGRRefreshTabBar(void) {
     [sg_navbarRoot setNeedsLayout];
 }
@@ -359,17 +397,6 @@ void SGRRefreshTabBar(void) {
 void SGRLogTabBarRow(UIView *tabBar) {
     UIStackView *stack = SGRowIn(tabBar);
     if (!stack) return;
-    // It runs on every pass of the bar, so the description is only built when the frames moved.
-    NSMutableData *frames = [NSMutableData data];
-    CGRect own[] = {tabBar.frame, stack.frame};
-    [frames appendBytes:own length:sizeof(own)];
-    for (UIView *item in stack.arrangedSubviews) {
-        CGRect frame = item.hidden ? CGRectNull : item.frame;
-        [frames appendBytes:&frame length:sizeof(frame)];
-    }
-    static NSData *lastFrames;
-    if ([frames isEqualToData:lastFrames]) return;
-    lastFrames = frames;
     NSMutableString *out = [NSMutableString stringWithFormat:@"row in %@ %@, icon %@ label %@, stack %@ axis %ld dist %ld align %ld spacing %.1f autolayout %d",
                             NSStringFromClass(tabBar.class), NSStringFromCGRect(tabBar.frame),
                             NSStringFromCGRect(sg_iconBox), NSStringFromCGRect(sg_labelBox), NSStringFromCGRect(stack.frame),
@@ -394,19 +421,6 @@ void SGRLogTabBarRow(UIView *tabBar) {
     SGLogLong(@"navbar", out);
 }
 
-// The dispatcher pushes the page a tab of the mod's own opens straight from the tap, well inside a second.
-%hook SPNavigationController
-- (void)pushViewController:(UIViewController *)page animated:(BOOL)animated {
-    SGRTabItemView *item = sg_opening;
-    sg_opening = nil;
-    if (item && CACurrentMediaTime() - sg_openedAt < 1) {
-        sg_currentItem = item;
-        sg_currentPage = page;
-    }
-    %orig;
-}
-%end
-
 // Whether Spotify reads its own item list through this ObjC bridge decides whether the bar can be
 // composed at the model level, where the order, the taps and the widths would all follow by
 // themselves, instead of by moving views about. Silence in the log says it cannot.
@@ -428,10 +442,10 @@ void SGRLogTabBarRow(UIView *tabBar) {
     if (!SGRedesignedUI()) return;
     %init;
     SGRequireClasses(@[
+        @"SPNavigationController",
         @"SPTEncoreIcon",
         @"SPTEncoreIconView",
         @"SPTEncoreLabel",
-        @"SPNavigationController",
         @"_TtC28NavigationUI_TabBarItemsImpl29TabBarItemsNavigationListImpl",
     ]);
 }

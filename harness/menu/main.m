@@ -1,25 +1,27 @@
-// Spotify's context menu sheet mocked under its class name, presented from a now playing controller,
-// so SpeedPitchMenu.x's hook adds Speed and pitch the way it would on the phone.
+// Spotify's context menu sheet mocked under its class name, presented from a now playing controller on a tap
+// of the player's more button, so SpeedPitchMenu.x's hook adds Speed and pitch the way it would on the phone.
+// `sleep` opens a second sheet from the first, as the ⋯ card's Sleep timer does, and `notap` one with no tap:
+// neither may get the block.
 //
 //     THEOS=$HOME/theos ./build.sh && xcrun simctl install <udid> build/MenuHarness.app
-//     xcrun simctl launch --console-pty <udid> com.vojta.menuharness [footer] [nospeed] [loading] [stuck] [open] [follow]
+//     xcrun simctl launch --console-pty <udid> com.vojta.menuharness [footer] [nospeed] [loading] [stuck] [open] [animated] [sleep] [notap] [minute]
 //
-// The plain run opens the menu at 1 s, opens the block at 3 s, moves both sliders at 5 s and closes the
-// block at 7 s. `loading` builds the sheet the way Spotify's is (the ivars of ContextMenuViewController in
+// The plain run opens the menu at 1 s, opens the block at 3 s, moves the sliders at 5 s, checks what the
+// block says at 6 s (PASS or FAIL lines), closes the block at 7 s and checks its row at 8 s. `loading` builds the sheet the way Spotify's is (the ivars of ContextMenuViewController in
 // 9.1.78: a header, a content container holding a ContextMenuTableView whose height follows its
 // contentSize by KVO, a loading spinner) and hands it its rows only 4 s after it is up, as Spotify does
 // once its item factories have answered; `stuck` never hands them over. `open` opens the block on a first
-// menu, closes it, and brings up a second one with the block open, as it stays for the session. `follow`
-// opens the block, sets 1.25x and turns pitch following speed on and off again, reporting the block and
-// the sheet each time and drawing the screen into the app's tmp. Every frame of the first second the block is on screen
-// is checked for a colour of the system tint on anything it draws, and what the sheet shows is reported.
+// menu, closes it, and brings up a second one with the block open, as it stays for the session. Every frame of the first second the block is on screen
+// is checked for a color of the system tint on anything it draws, and what the sheet shows is reported.
+// `animated` offers the redesign's Animated artwork switch: it is flipped, then the block opened and
+// closed, and where the switch's row sits is reported each time.
 #import <UIKit/UIKit.h>
 
 #pragma mark - what SpeedPitchMenu.x calls
 
 static double sg_speed = 1;
 static float sg_pitch;
-static BOOL sg_speedAllowed = YES, sg_follows;
+static BOOL sg_speedAllowed = YES;
 void SGPlayFeedback(NSInteger feedback) { NSLog(@"[harness] feedback %ld", (long)feedback); }
 void SGPrepareFeedback(NSInteger feedback) {}
 double SGPlayerSpeed(void) { return sg_speed; }
@@ -28,15 +30,28 @@ void SGSetPlayerSpeed(double speed) { sg_speed = speed; NSLog(@"[harness] speed 
 float SGPlayerPitch(void) { return sg_pitch; }
 void SGSetPlayerPitch(float semitones) { sg_pitch = semitones; NSLog(@"[harness] pitch %.0f", semitones); }
 BOOL SGPlayerPitchAvailable(void) { return YES; }
-BOOL SGPlayerPitchFollowsSpeed(void) { return sg_follows && sg_speedAllowed; }
-void SGSetPlayerPitchFollowsSpeed(BOOL follows) {
-    sg_follows = follows;
-    if (follows) sg_pitch = 0;
-    NSLog(@"[harness] pitch follows speed %d", follows);
-}
+static BOOL sg_follows = YES;
+BOOL SGPlayerPitchFollowsSpeed(void) { return sg_follows; }
+void SGSetPlayerPitchFollowsSpeed(BOOL follows) { sg_follows = follows; NSLog(@"[harness] pitch follows speed %d", follows); }
+static BOOL sg_animated;
+BOOL SGPlayerMenuOffersAnimatedArtwork(void) { return [NSProcessInfo.processInfo.arguments containsObject:@"animated"]; }
+BOOL SGPlayerMenuAnimatedArtwork(void) { return sg_animated; }
+void SGPlayerMenuSetAnimatedArtwork(BOOL on) { sg_animated = on; NSLog(@"[harness] animated artwork %d", on); }
+// The redesign's system menu, which never takes this sheet over here (harness/system-menu has it).
+BOOL SGPlayerMenuReplaced(UIViewController *menu) { return NO; }
+// The audio effects' settings, kept in a dictionary: the reverb slider reads and writes them.
+static NSMutableDictionary *sg_dsp;
+BOOL SGDSPSwitch(NSString *key) { return [sg_dsp[key] boolValue]; }
+void SGDSPSetSwitch(NSString *key, BOOL on) { if (!sg_dsp) sg_dsp = [NSMutableDictionary dictionary]; sg_dsp[key] = @(on); NSLog(@"[harness] %@ %d", key, on); }
+double SGDSPNumber(NSString *key) { return [sg_dsp[key] doubleValue]; }
+void SGDSPSetNumber(NSString *key, double value) { if (!sg_dsp) sg_dsp = [NSMutableDictionary dictionary]; sg_dsp[key] = @(value); NSLog(@"[harness] %@ %.0f", key, value); }
 
 static BOOL argument(NSString *name) {
     return [NSProcessInfo.processInfo.arguments containsObject:name];
+}
+
+static void check(BOOL ok, NSString *what) {
+    NSLog(@"[harness] %@ %@", ok ? @"PASS" : @"FAIL", what);
 }
 
 static NSArray<NSArray<NSString *> *> *spotifyRows(void) {
@@ -177,13 +192,36 @@ static NSArray<NSArray<NSString *> *> *spotifyRows(void) {
 
 #pragma mark - the player
 
+// The player's header row (NowPlaying_ModesImpl.HeaderElementsUnit), its more button an Encore button with
+// the identifier "Context menu" (trees/lyrics.txt:183), which SpeedPitchMenu.x finds and watches.
+@interface _TtC20NowPlaying_ModesImpl18HeaderElementsUnit : UIViewController
+@property (nonatomic, strong) UIButton *more;
+@end
+
+@implementation _TtC20NowPlaying_ModesImpl18HeaderElementsUnit
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.more = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.more setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];
+    self.more.frame = CGRectMake(330, 0, 48, 48);
+    self.more.accessibilityIdentifier = @"Context menu";
+    [self.view addSubview:self.more];
+}
+@end
+
 @interface NowPlayingHarnessViewController : UIViewController
+@property (nonatomic, strong) _TtC20NowPlaying_ModesImpl18HeaderElementsUnit *header;
 @end
 
 @implementation NowPlayingHarnessViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithRed:0.25 green:0.1 blue:0.2 alpha:1];
+    self.header = [_TtC20NowPlaying_ModesImpl18HeaderElementsUnit new];
+    [self addChildViewController:self.header];
+    self.header.view.frame = CGRectMake(0, 60, 402, 48);
+    [self.view addSubview:self.header.view];
+    [self.header didMoveToParentViewController:self];
 }
 @end
 
@@ -205,7 +243,7 @@ static NSArray<UISlider *> *sliders(UIView *root) {
 
 #pragma mark - the tint check
 
-// A colour is the system tint's when it resolves, in the view's own traits, to the system blue.
+// A color is the system tint's when it resolves, in the view's own traits, to the system blue.
 static BOOL isTint(UIColor *color, UIView *view) {
     if (!color) return NO;
     UIColor *resolved = [color resolvedColorWithTraitCollection:view.traitCollection];
@@ -215,7 +253,7 @@ static BOOL isTint(UIColor *color, UIView *view) {
     return a > 0.05 && fabs(r - br) < 0.08 && fabs(g - bg) < 0.08 && fabs(b - bb) < 0.08;
 }
 
-// Everything the block draws in a colour of its own: labels' text, buttons' titles, and whatever takes the
+// Everything the block draws in a color of its own: labels' text, buttons' titles, and whatever takes the
 // tint (templated glyphs, sliders' thumbs and tracks).
 static void tintedViews(UIView *view, NSMutableArray<NSString *> *out) {
     if (view.isHidden || view.alpha < 0.01) return;
@@ -224,7 +262,7 @@ static void tintedViews(UIView *view, NSMutableArray<NSString *> *out) {
     if ([view isKindOfClass:UIImageView.class]) {
         UIImage *image = ((UIImageView *)view).image;
         // Drawn in the tint when templated, or left automatic on a symbol; a bitmap left automatic keeps
-        // its own colours (the sliders' end images).
+        // its own colors (the sliders' end images).
         BOOL templated = image.renderingMode == UIImageRenderingModeAlwaysTemplate
             || (image.renderingMode == UIImageRenderingModeAutomatic && image.isSymbolImage);
         if (templated && isTint(view.tintColor, view)) [out addObject:[name stringByAppendingString:@" glyph"]];
@@ -275,6 +313,46 @@ static void report(_TtC24ContextMenu_InternalImpl25ContextMenuViewController *me
           table.tableHeaderView == block ? @"header" : table.tableFooterView == block ? @"footer" : @"nowhere");
 }
 
+#pragma mark - the sleep timer's cells
+
+// Spotify's two cells that list the sleep timer's durations, under their class names (MinuteLabel.x).
+@interface _TtC24ContextMenu_InternalImpl24ContextMenuTableViewCell : UITableViewCell
+@end
+@implementation _TtC24ContextMenu_InternalImpl24ContextMenuTableViewCell
+@end
+@interface _TtC30PlaybackControl_SleepTimerImpl10OptionCell : UICollectionViewCell
+@end
+@implementation _TtC30PlaybackControl_SleepTimerImpl10OptionCell
+@end
+
+// `minute`: a label reading "1 minutes" in each cell reads "1 minute" once laid out, in the font it had; "5
+// minutes", another language's text and a label outside those cells stay as they were.
+static void checkMinute(UIWindow *window) {
+    UIFont *font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    UILabel *(^label)(UIView *, NSString *) = ^UILabel *(UIView *host, NSString *text) {
+        UILabel *made = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 200, 30)];
+        made.attributedText = [[NSAttributedString alloc] initWithString:text attributes:@{NSFontAttributeName: font}];
+        [host addSubview:made];
+        return made;
+    };
+    UIView *row = [[_TtC24ContextMenu_InternalImpl24ContextMenuTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    UIView *option = [[_TtC30PlaybackControl_SleepTimerImpl10OptionCell alloc] initWithFrame:CGRectMake(0, 100, 300, 50)];
+    UIView *elsewhere = [[UIView alloc] initWithFrame:CGRectMake(0, 200, 300, 50)];
+    UILabel *inRow = label(((UITableViewCell *)row).contentView, @"1 minutes"), *five = label(((UITableViewCell *)row).contentView, @"5 minutes");
+    UILabel *inOption = label(((UICollectionViewCell *)option).contentView, @"1 minutes"), *other = label(((UICollectionViewCell *)option).contentView, @"1 minuto");
+    UILabel *outside = label(elsewhere, @"1 minutes");
+    row.frame = CGRectMake(0, 0, 300, 50);
+    for (UIView *view in @[row, option, elsewhere]) {
+        [window addSubview:view];
+        [view setNeedsLayout];
+        [view layoutIfNeeded];
+    }
+    check([inRow.text isEqualToString:@"1 minute"] && [inRow.font isEqual:font], [NSString stringWithFormat:@"the context menu row reads \"%@\" in its own font", inRow.text]);
+    check([inOption.text isEqualToString:@"1 minute"] && [inOption.font isEqual:font], [NSString stringWithFormat:@"the options cell reads \"%@\" in its own font", inOption.text]);
+    check([five.text isEqualToString:@"5 minutes"] && [other.text isEqualToString:@"1 minuto"] && [outside.text isEqualToString:@"1 minutes"],
+          [NSString stringWithFormat:@"the rest is left alone (\"%@\", \"%@\", \"%@\" outside the cells)", five.text, other.text, outside.text]);
+}
+
 #pragma mark - the run
 
 @interface SGHarnessApp : UIResponder <UIApplicationDelegate>
@@ -298,42 +376,6 @@ static void tapRow(UIViewController *menu) {
     [row sendActionsForControlEvents:UIControlEventTouchUpInside];
 }
 
-static UISwitch *findSwitch(UIView *root) {
-    if ([root isKindOfClass:UISwitch.class]) return (UISwitch *)root;
-    for (UIView *child in root.subviews) {
-        UISwitch *found = findSwitch(child);
-        if (found) return found;
-    }
-    return nil;
-}
-
-// The block's parts that show: what each is and where, in the block.
-static void describeBlock(UIView *block, NSString *when) {
-    NSMutableArray<NSString *> *shown = [NSMutableArray array];
-    UIView *panel = block.subviews.count > 1 ? block.subviews[1] : nil;
-    for (UIView *view in panel.subviews) {
-        if (view.alpha < 0.01) continue;
-        CGRect frame = [view convertRect:view.bounds toView:block];
-        if (CGRectGetMinY(frame) >= block.bounds.size.height) continue;
-        NSString *what = [view isKindOfClass:UILabel.class] ? [NSString stringWithFormat:@"\"%@\"", ((UILabel *)view).text]
-                       : [view isKindOfClass:UIButton.class] ? [NSString stringWithFormat:@"[%@]", [(UIButton *)view titleForState:UIControlStateNormal]]
-                       : [view isKindOfClass:UISwitch.class] ? (((UISwitch *)view).on ? @"switch on" : @"switch off")
-                       : [view isKindOfClass:UISlider.class] ? [NSString stringWithFormat:@"slider %.2f", ((UISlider *)view).value] : NSStringFromClass(view.class);
-        [shown addObject:[NSString stringWithFormat:@"%@ at y %.0f", what, CGRectGetMinY(frame)]];
-    }
-    NSLog(@"[harness] %@: block %.0f tall showing %@", when, block.bounds.size.height, [shown componentsJoinedByString:@", "]);
-}
-
-static void drawScreen(UIWindow *window, NSString *name) {
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:window.bounds];
-    UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-        [window drawViewHierarchyInRect:window.bounds afterScreenUpdates:YES];
-    }];
-    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:[name stringByAppendingString:@".png"]];
-    [UIImagePNGRepresentation(image) writeToFile:path atomically:YES];
-    NSLog(@"[harness] drew %@", path);
-}
-
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     sg_speedAllowed = !argument(@"nospeed");
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
@@ -344,7 +386,10 @@ static void drawScreen(UIWindow *window, NSString *name) {
     static SGHarnessFrameWatch *watch;
     __block _TtC24ContextMenu_InternalImpl25ContextMenuViewController *menu;
     BOOL loading = argument(@"loading"), stuck = argument(@"stuck");
+    // Spotify's ⋯ card, put up by a tap on the player's more button: the tap first, as a finger lifting off it.
     void (^present)(void) = ^{
+        [player.header.more sendActionsForControlEvents:UIControlEventTouchDown];
+        [player.header.more sendActionsForControlEvents:UIControlEventTouchUpInside];
         menu = [_TtC24ContextMenu_InternalImpl25ContextMenuViewController new];
         UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:menu];
         navigation.navigationBarHidden = YES;
@@ -354,47 +399,64 @@ static void drawScreen(UIWindow *window, NSString *name) {
         [[CADisplayLink displayLinkWithTarget:watch selector:@selector(tick:)] addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
         [player presentViewController:navigation animated:YES completion:nil];
     };
-    if (argument(@"follow")) {
+    if (argument(@"minute")) {
+        after(1, ^{ checkMinute(self.window); });
+        return;
+    }
+    if (argument(@"sleep") || argument(@"notap")) {
+        // `sleep`: the ⋯ card's Sleep timer row opens a context menu sheet of its own in the card, with no tap
+        // on the more button; it must stay Spotify's. `notap`: a sheet the player puts up with no tap at all.
+        BOOL sleep = argument(@"sleep");
+        after(1, ^{
+            if (sleep) {
+                present();
+                return;
+            }
+            menu = [_TtC24ContextMenu_InternalImpl25ContextMenuViewController new];
+            [player presentViewController:[[UINavigationController alloc] initWithRootViewController:menu] animated:YES completion:nil];
+        });
+        if (!sleep) {
+            after(3, ^{ check(!findBlock(menu.view), @"a sheet the player put up with no tap on ⋯ has no Speed and pitch"); });
+            return;
+        }
+        __block UIViewController *card;
+        after(3, ^{
+            card = menu;
+            check(findBlock(card.view) != nil, @"the ⋯ card has Speed and pitch");
+            menu = [_TtC24ContextMenu_InternalImpl25ContextMenuViewController new];
+            [card.navigationController pushViewController:menu animated:YES];
+        });
+        after(5, ^{
+            check(menu.view.window && menu.navigationController.presentingViewController == player, @"the sleep timer sheet is up, presented from the player");
+            check(!findBlock(menu.view), @"the sleep timer sheet has no Speed and pitch");
+        });
+        return;
+    }
+    if (argument(@"animated")) {
+        void (^where)(NSString *) = ^(NSString *when) {
+            UIView *block = findBlock(menu.view);
+            UISwitch *toggle = nil;
+            for (UIView *row in block.subviews) {
+                for (UIView *view in row.subviews) {
+                    if ([view isKindOfClass:UISwitch.class] && [view.accessibilityLabel isEqualToString:@"Animated artwork"]) toggle = (UISwitch *)view;
+                }
+            }
+            CGRect row = [toggle.superview convertRect:toggle.superview.bounds toView:block];
+            BOOL inside = CGRectContainsRect(block.bounds, row) && row.size.height > 0;
+            NSLog(@"[harness] %@: block %.0f tall, the Animated artwork row at %.0f (%@), switch %@ -- %@", when,
+                  block.bounds.size.height, row.origin.y, inside ? @"inside the block" : @"cut off", toggle.on ? @"on" : @"off",
+                  toggle && inside && toggle.on == sg_animated ? @"PASS" : @"FAIL");
+            if (toggle && ![when isEqualToString:@"closed"]) {
+                toggle.on = !toggle.on;
+                [toggle sendActionsForControlEvents:UIControlEventValueChanged];
+            }
+        };
         after(1, present);
+        after(2.5, ^{ where(@"shown"); });
         after(3, ^{ tapRow(menu); });
-        after(4.5, ^{
-            describeBlock(findBlock(menu.view), @"opened");
-            report(menu, @"opened");
-            NSArray<UISlider *> *found = sliders(findBlock(menu.view));
-            found[0].value = 1.25;
-            [found[0] sendActionsForControlEvents:UIControlEventValueChanged];
-            [found[0] sendActionsForControlEvents:UIControlEventTouchUpInside];
-            found[1].value = 2;
-            [found[1] sendActionsForControlEvents:UIControlEventValueChanged];
-            [found[1] sendActionsForControlEvents:UIControlEventTouchUpInside];
-        });
-        after(5.5, ^{
-            describeBlock(findBlock(menu.view), @"1.25x, +2 st");
-            drawScreen(self.window, @"follow-off");
-            UISwitch *toggle = findSwitch(findBlock(menu.view));
-            toggle.on = YES;
-            [toggle sendActionsForControlEvents:UIControlEventValueChanged];
-        });
-        after(7, ^{
-            describeBlock(findBlock(menu.view), @"pitch follows");
-            report(menu, @"pitch follows");
-            drawScreen(self.window, @"follow-on");
-            tapRow(menu);
-        });
-        after(8.5, ^{
-            report(menu, @"closed while following");
-            drawScreen(self.window, @"follow-closed");
-            tapRow(menu);
-        });
-        after(10, ^{
-            UISwitch *toggle = findSwitch(findBlock(menu.view));
-            toggle.on = NO;
-            [toggle sendActionsForControlEvents:UIControlEventValueChanged];
-        });
-        after(11.5, ^{
-            describeBlock(findBlock(menu.view), @"no longer following");
-            report(menu, @"no longer following");
-        });
+        after(4.5, ^{ where(@"opened"); });
+        after(5, ^{ tapRow(menu); });
+        after(6.5, ^{ where(@"closed"); });
         return;
     }
     if (argument(@"open")) {
@@ -423,14 +485,40 @@ static void drawScreen(UIWindow *window, NSString *name) {
     });
     after(5, ^{
         NSArray<UISlider *> *found = sliders(findBlock(menu.view));
-        found[0].value = 1.27;
-        [found[0] sendActionsForControlEvents:UIControlEventValueChanged];
-        [found[0] sendActionsForControlEvents:UIControlEventTouchUpInside];
+        // A disabled slider takes no finger, so `nospeed` leaves speed alone.
+        if (sg_speedAllowed) {
+            found[0].value = 1.27;
+            [found[0] sendActionsForControlEvents:UIControlEventValueChanged];
+            [found[0] sendActionsForControlEvents:UIControlEventTouchUpInside];
+        }
         found[1].value = -3.2;
         [found[1] sendActionsForControlEvents:UIControlEventValueChanged];
         [found[1] sendActionsForControlEvents:UIControlEventTouchUpInside];
+        found[2].value = 41;
+        [found[2] sendActionsForControlEvents:UIControlEventValueChanged];
+        [found[2] sendActionsForControlEvents:UIControlEventTouchUpInside];
+    });
+    // What the block says once the fingers are off: the reverb's thumb where it was let go, and while pitch
+    // follows a speed that is not normal, no semitones claimed. Without speed (`nospeed`) the switch is off
+    // limits and the pitch is the slider's.
+    BOOL speed = !argument(@"nospeed");
+    after(6, ^{
+        UIView *block = findBlock(menu.view);
+        NSArray<UISlider *> *found = sliders(block);
+        UIButton *pitch = [block valueForKey:@"_pitchValue"];
+        UISwitch *follows = [block valueForKey:@"_follows"];
+        check(found[2].value == 40, [NSString stringWithFormat:@"the reverb's thumb stays at 40 once let go (%.0f)", found[2].value]);
+        NSString *want = speed ? @"Follows speed" : @"−3 st";
+        check([[pitch titleForState:UIControlStateNormal] isEqualToString:want] && pitch.enabled == !speed,
+              [NSString stringWithFormat:@"the pitch reads %@ (%@, reset %@)", want, [pitch titleForState:UIControlStateNormal], pitch.enabled ? @"on" : @"off"]);
+        check(follows.enabled == speed, [NSString stringWithFormat:@"Pitch follows speed %@", speed ? @"enabled" : @"disabled without speed"]);
     });
     after(7, ^{ tapRow(menu); });
+    after(8, ^{
+        UILabel *summary = [findBlock(menu.view) valueForKey:@"_summary"];
+        NSString *want = speed ? @"1.25×  Reverb" : @"−3 st  Reverb";
+        check([summary.text isEqualToString:want], [NSString stringWithFormat:@"the closed row reads \"%@\" (\"%@\")", want, summary.text]);
+    });
 }
 
 @end

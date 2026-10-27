@@ -11,7 +11,7 @@
 // and the merch have their own tabs only so that they can be left out, so the strip goes and the Music list
 // stays. The strip sits in an AutoLayoutStackView, which traps when a view in it hides, so it goes invisible
 // and the pages under it move up into its place and stop paging, the way the native look's switch does it
-// (Native/Artist/Artist.x).
+// (Native/Artist/Artist.x). With its switch off (SGRKeyArtistHideTabs) the strip and the paging stay Spotify's.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Artist.h"
@@ -22,6 +22,7 @@ static NSString *const kPageIdentifier = @"creator-page";
 static const UIEdgeInsets kBleed = {600, 0, 600, 0};
 
 static char kFieldKey;
+static BOOL hideTabs;
 
 #pragma mark - the page
 
@@ -56,9 +57,9 @@ static SGRArtworkField *fieldIn(UIView *page) {
     if (field) return field;
     field = [[SGRArtworkField alloc] initWithFrame:page.bounds];
     field.bleed = kBleed;
+    // The photo's main color, not its bottom edge, which on a portrait is the artist's shirt.
+    field.mainColor = YES;
     objc_setAssociatedObject(page, &kFieldKey, field, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    __weak UIView *weakPage = page;
-    [field whenColored:^{ SGRRevealMark(weakPage, SGRRevealColor); }];
     SGLog(@"redesign artist: field on the page %.0fx%.0f", page.bounds.size.width, page.bounds.size.height);
     return field;
 }
@@ -70,13 +71,12 @@ static SGRArtworkField *fieldIn(UIView *page) {
     if (![page.accessibilityIdentifier isEqualToString:kPageIdentifier] || page.bounds.size.height < 200) return;
     // The page the repaint hook keeps clear is the one laying out, which is the one on screen.
     sgr_artistRoot = page;
-    // Behind a curtain from the first pass (Kit/SGRReveal.h), which the header claims once it lays out the photo
-    // header (ArtistHeader.x); a page with a header the redesign does not lay out is shown a moment later.
-    SGRRevealHold(page, 0);
     SGRArtworkField *field = fieldIn(page);
     if (field.superview != page) [page insertSubview:field atIndex:0];
     else if (page.subviews.firstObject != field) [page sendSubviewToBack:field];
     if (!CGRectEqualToRect(field.frame, page.bounds)) field.frame = page.bounds;
+    // The page comes in whole once its photo has been read (Kit/SGRField.h).
+    [field holdPage:page];
 }
 %end
 
@@ -122,7 +122,7 @@ static void hideStrip(UIView *strip) {
     %orig;
     for (UIView *v = ((UIView *)self).superview; v; v = v.superview) {
         if (![v.accessibilityIdentifier isEqualToString:@"Components.UI.TabsSectionHeading"]) continue;
-        if (SGRArtistPageOf(v)) hideStrip(v);
+        if (hideTabs && SGRArtistPageOf(v)) hideStrip(v);
         return;
     }
 }
@@ -135,6 +135,7 @@ static void hideStrip(UIView *strip) {
     // updateConstraints], OverflowStackViewLayoutBuilder.Line.tallestView nil). The row stays Spotify's, and
     // ArtistHeader.x draws more itself.
     if (!SGRedesignedUI()) return;
+    hideTabs = SGEnabled(SGRKeyArtistHideTabs);
     %init;
     SGRequireClasses(@[
         @"_TtC32CreativeWorkPlatform_TemplateKit12TemplateView",

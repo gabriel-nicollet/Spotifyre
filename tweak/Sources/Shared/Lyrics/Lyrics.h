@@ -10,24 +10,32 @@
 @class SGModRow, SGModSection;
 // LyricsSettings.m: the Lyrics page's parts (App/Pages.m puts the page together): where lyrics come
 // from, naming the source (read by the redesign's lyrics view only), the lock screen, which
-// language a line's translation is taken in, of those the lyrics come with (the redesign's lyrics
-// being where translations show), and whether lines timed only by the line are swept word by word.
+// language a line's translation is taken in, of those the lyrics come with, and the one Musixmatch's
+// community translations are asked in (the redesign's lyrics being where translations show), whether lines timed only by the line are swept word by word, whether lines in other alphabets show again in Latin letters, and how much later than the song every line shows.
 SGModSection *SGLyricsSourcesSection(BOOL namingSource);
 SGModRow *SGLockScreenLyricsRow(void);
-// The lyrics on the cover: the lock screen's artwork is a card of the line being sung, instead of the cover or its clip.
-SGModRow *SGLockScreenLyricsCoverRow(void);
 SGModRow *SGLyricsTranslationLanguageRow(void);
 SGModRow *SGLyricsWordTimingRow(void);
-SGModRow *SGLyricsSyncRow(void);
+SGModRow *SGLyricsRomanisedRow(void);
+SGModRow *SGLyricsDelayRow(void);
+
+// Shows a line written in another alphabet (Japanese, Korean, Chinese, Cyrillic, Greek, Thai, Arabic,
+// Hebrew, Devanagari...) again under itself in Latin letters, before its translation. Off by default.
+// Only the redesign's lyrics view draws it, and it applies at once: the switch posts the notification.
+#define SGKeyLyricsRomanised @"spotifyglass.lyricsRomanised"
+extern NSNotificationName const SGLyricsRomanisedDidChangeNotification;
+// Romanise.m: the text in Latin letters, offline; nil where it has no letter of another script, or
+// reads the same. `japanese` reads kanji the Japanese way, for a song SGLyricsLooksJapanese says is
+// (a line of kanji alone would read as Chinese). Safe off the main thread, and kept per text.
+NSString *SGLyricsRomanised(NSString *text, BOOL japanese);
+// Whether any of the lines has kana in it.
+@class SGKaraokeLine;
+BOOL SGLyricsLooksJapanese(NSArray<SGKaraokeLine *> *lines);
 
 // Sweeps a line timed only by the line word by word, on the estimate of when each word is sung, as if
 // the source had timed them. Off, such a line lights up whole as it starts. Off by default: the
 // estimate is a guess dressed up as timing.
 #define SGKeyLyricsSimulateWords @"spotifyglass.lyricsSimulateWords"
-// Whether the redesigned lyrics follow playback timing. Off shows the full lyrics without following the clock.
-#define SGKeyLyricsSync @"spotifyglass.lyricsSync"
-// On-device Apple Intelligence translation, shown beneath the original lyrics when enabled.
-#define SGKeyLyricsAITranslation @"spotifyglass.lyricsAITranslation"
 
 // How finely a line was timed by where it came from. The words of a line timed by the line are still
 // there, each with an estimated time, for a page that wants to sweep them anyway; a line with no time
@@ -54,7 +62,9 @@ typedef NS_ENUM(NSUInteger, SGKaraokeAlign) {
 @property (nonatomic) BOOL joined;
 @end
 
-@interface SGKaraokeLine : NSObject
+// A copy shares the words, the backing and the pronunciation, which nothing changes once a line is
+// built; a translation set on the copy leaves the original as it was.
+@interface SGKaraokeLine : NSObject <NSCopying>
 @property (nonatomic, copy) NSArray<SGKaraokeWord *> *words;
 @property (nonatomic) NSInteger start, end;
 // The voice singing the line, named as the source names it ("v1", "v2"), nil when it names none.
@@ -72,14 +82,12 @@ typedef NS_ENUM(NSUInteger, SGKaraokeAlign) {
 @property (nonatomic, strong) SGKaraokeLine *pronunciation;
 // The line in another language, the backing's words with it; nil where the source has none.
 @property (nonatomic, copy) NSString *translation;
-// Cached on-device translation, separate from translations supplied by the lyrics source.
-@property (nonatomic, copy) NSString *machineTranslation;
+// The translation came from a translator of the lyrics' menu (LyricsTranslation), not from the lyrics' source.
+@property (nonatomic) BOOL translationMade;
 @end
 
 // The line as one string, a space between the words that are not joined.
 NSString *SGKaraokeLineText(SGKaraokeLine *line);
-// AI translation when enabled and available, otherwise the source-provided translation.
-NSString *SGKaraokeLineDisplayTranslation(SGKaraokeLine *line);
 // When the singing of a line is over: its own end, or its backing's when that runs on past it.
 NSInteger SGKaraokeSungEnd(SGKaraokeLine *line);
 // The one line a place with room for one names as the one being sung at `ms`. Two voices can sing
@@ -103,22 +111,48 @@ NSArray<SGKaraokeLine *> *SGKaraokeEstimatedLines(NSArray<NSNumber *> *starts, N
 NSArray<SGKaraokeLine *> *SGKaraokeStaticLines(NSArray<NSString *> *texts);
 // The finest timing any of the lines has; SGKaraokeTimingNone for none at all.
 SGKaraokeTiming SGKaraokeLinesTiming(NSArray<SGKaraokeLine *> *lines);
+// The lines in the order they start, lines starting together kept as they came; the array itself when
+// it is in order already, which it nearly always is.
+NSArray<SGKaraokeLine *> *SGKaraokeInTimeOrder(NSArray<SGKaraokeLine *> *lines);
 
 NSArray<SGKaraokeLine *> *SGKaraokeLinesForTrack(NSString *trackID);   // nil until the lyrics came
 void SGKaraokeKeepLines(NSString *trackID, NSArray<SGKaraokeLine *> *lines);
-// Posted on the main queue when a track's lines are kept, with the track's id as the object.
-extern NSNotificationName const SGKaraokeLinesDidChangeNotification;
+// Posted on the main queue, object the track's id as SGKaraokePlayingTrack names it, when lines are kept
+// for it, and when a look for its lyrics (SGKaraokeLooking) ends with none, so a reader waiting on one
+// learns the look is over.
+extern NSNotificationName const SGKaraokeLinesKeptNotification;
+// Whether the track's lyrics are being asked for at this moment, of the sources or of spclient after
+// them: the ask in flight, not the pause before a lost one is asked again. A local file's walk can take
+// tens of seconds. A walk LyricsSources runs for Spotify's own request is not seen here. Main queue.
+BOOL SGKaraokeLooking(NSString *trackID);
+// The headers spclient needs to answer a request as the signed-in app, read off Spotify's own requests:
+// `use` runs at once when one has been seen, else with the first. Never logged or stored. Main queue.
+void SGSpclientHeaders(void (^use)(NSDictionary<NSString *, NSString *> *headers));
 // Asks spclient for a track's lyrics once, with the headers of Spotify's own requests, for when no
 // page of Spotify's has asked for them, e.g. with the app in the background.
 void SGKaraokeRequestLyrics(NSString *trackID);
 // Asks Spotify's JSON lyrics for the track once, and keeps its lines only if they are more finely
 // timed than the ones kept: the lyrics view was left with plain text, and Spotify may have it timed.
 void SGKaraokeAskSpotifyForTiming(NSString *trackID);
-// The Authorization header of Spotify's own requests, nil until one has gone out. Only ever sent
-// back to Spotify's servers (the lock screen's canvaz lookup), never to a lyrics source.
-NSString *SGKaraokeSpotifyAuthorization(void);
-NSString *SGKaraokePlayingTrack(void);   // the base62 id, nil before the player reported
+// Whether EeveeSpotify is injected alongside the mod.
+BOOL SGEeveeSpotifyInjected(void);
+// EeveeSpotify is injected and answers Spotify's lyrics, by its own settings (lyricsSource, and
+// patchType in its Reincarnated fork). Both answering the same request froze Spotify after launch, so
+// then the mod's sources and its own requests for Spotify's lyrics stand aside (LyricsSources'
+// SGLyricsEnabled, SGKaraokeRequestLyrics). Its settings are read once, as it reads them at launch.
+BOOL SGEeveeLyricsOn(void);
+// The Lyrics page's "Use these sources anyway", for an EeveeSpotify whose settings read wrong.
+#define SGKeyLyricsBesideEevee @"spotifyglass.lyrics.besideEevee"
+// SGEeveeLyricsOn, unless the user asked for the mod's sources beside it.
+BOOL SGLyricsStandAsideForEevee(void);
+// The base62 id, a local file's lyrics key (Shared/LocalFiles), nil before the player reported.
+NSString *SGKaraokePlayingTrack(void);
 NSInteger SGKaraokePositionMs(void);     // negative when unknown
+// The Lyrics page's Delay: every line shows this many ms later than the song, for headphones that play
+// behind it. Whatever times lines against the position compares them with the position less this, and a
+// tap on a line seeks to its start plus this. Read at every call, so a change applies at once.
+#define SGKeyLyricsDelay @"spotifyglass.lyricsDelay"
+NSInteger SGKaraokeDelayMs(void);
 void SGKaraokeSeek(NSInteger ms);
 id SGKaraokePlayer(void);                // SPTEsperantoPlayer, nil before the app asked it for its state
 // A track the player has reported, by its base62 id; nil for one it has not played this session.

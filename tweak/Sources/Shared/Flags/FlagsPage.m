@@ -109,7 +109,10 @@ static NSString *flagState(const SGFlagDef *flag, id value) {
         UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:@[@"Auto", @"Off", @"On"]];
         control.selectedSegmentIndex = value ? ([value boolValue] ? 2 : 1) : 0;
         control.selectedSegmentTintColor = SGGreen();
-        [control setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: SGSubtitleFont()} forState:UIControlStateNormal];
+        // Capped, so the segments leave the flag's name its room at the accessibility sizes.
+        UIFont *font = SGCappedFont(SGSubtitleFont(), 15);
+        [control setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: font} forState:UIControlStateNormal];
+        [control setTitleTextAttributes:@{NSForegroundColorAttributeName: SGOnAccent(), NSFontAttributeName: font} forState:UIControlStateSelected];
         control.tag = path.row;
         [control addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
         [control sizeToFit];

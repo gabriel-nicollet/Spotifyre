@@ -3,27 +3,34 @@
 //
 // Spotify plays through Core Audio units of its own (AudioUnitDriver2 in the binary: converter, EQ, mixer
 // and a RemoteIO output unit, started with AudioOutputUnitStart(_outputUnit)), with no Objective-C
-// method between it and the unit. So Spotify's import of AudioOutputUnitStart is rebound
-// (Core/SGRebind.h), and every RemoteIO unit it starts gets a render notify: after each render, the
-// buffer bound for the speaker is mixed to mono and handed to the analyzer (SGMusicAnalyzer.h) on
-// the render thread, which puts what it hears into a ring of events. That buffer is in the unit's output
-// format, the hardware's, not the one Spotify hands the unit (in the simulator 48 kHz float with a buffer
-// per channel, whatever the client: harness/audio-effects/sim, harness/haptics/sim), so the analyzer runs at
-// the hardware's rate, and a listener on the format follows it to a new one. The render timestamp says when
+// method between it and the unit, and it can run two such chains at once, one per sample rate. Shared/Player
+// keeps them apart and names the music's output (SGPlayerMusicOutput), and that one gets a render notify:
+// after each render, the buffer bound for the speaker is mixed to mono and handed to the analyzer
+// (SGMusicAnalyzer.h) on the render thread, which puts what it hears into a ring of events. A notify stays on
+// a unit that was the music's once and does nothing there, so the one analyzer never hears two outputs. That
+// buffer is in the unit's output format, the hardware's, not the one Spotify hands the unit (in the simulator
+// 48 kHz float with a buffer per channel, whatever the client: harness/audio-effects/sim, harness/haptics/sim),
+// so the analyzer runs at the hardware's rate, and Shared/Player says when it changes. The render timestamp says when
 // that buffer reaches the output; AVAudioSession's output latency (large over Bluetooth) is added, so
 // a tap lands when its drum is heard. A thread of this file's own takes the events off the ring and
 // schedules them with Core Haptics at those times: each hit a transient, the rumble one looping
 // continuous event whose intensity follows the level. The strength scales both as they are played, and
 // what Music Haptics follows leaves out the snares' taps (Bass) or the rumble (Beat) there too, so a change
 // applies to the next event.
+// The Vibrations page's preview asks for one kick, which the same thread plays at once through the same
+// engine and strength, and while the page shows, each tap played is handed back to it for its rings.
 //
-// The rebinding and the notify are in place under either look, so the switch works at once;
-// with the switch off the notify returns straight away. Nothing listens while Spotify is not the active
-// app, since iOS plays no haptics for an app in the background. Sound that is not Spotify's own
-// output (Connect, AirPlay to another device, video) never passes the unit, and plays no haptics.
+// The rebinding and the notify are in place under either look, so the switch works at once; with it
+// off the notify returns straight away. Nothing listens while Spotify is not the active app, since iOS
+// plays no haptics for an app in the background. Sound that is not Spotify's own output (Connect,
+// AirPlay to another device, video) never passes the unit, and plays no haptics.
+// Nothing listens either while In the Background (SystemMusicHaptics.x) is finding out whether iOS has a
+// haptic track for the song, or has one named: iOS plays it in front of Spotify as well as behind it, so
+// the two would double up. The switch is read again every time listening could start, not kept from
+// launch, so this one is right whatever order the two came up in.
 //
 // Threading: the notify runs on the render thread and only touches atomics, the analyzer and the
-// ring; the Core Haptics objects belong to the player thread; the switch, its settings and the app's
+// ring; the Core Haptics objects belong to the player thread; the switches, the settings and the app's
 // state are set on the main thread.
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
@@ -33,7 +40,7 @@
 #import <pthread.h>
 #import <stdatomic.h>
 #import "Core/SGCore.h"
-#import "Shared/Audio/SGAudioPipeline.h"
+#import "Shared/Player/SpeedPitch.h"
 #import "Haptics.h"
 #import "SGMusicAnalyzer.h"
 
@@ -60,7 +67,7 @@ enum { kRingSize = 1024, kMonoFrames = 4096 };
 
 #pragma mark - shared between the threads
 
-static atomic_bool sg_enabled, sg_active, sg_listening;
+static atomic_bool sg_active, sg_systemCovers, sg_listening;
 static atomic_uint sg_generation;
 static atomic_uint_fast64_t sg_latencyBits;
 static atomic_uint sg_lastFrames;
@@ -71,6 +78,8 @@ static atomic_uint_fast64_t sg_skipped;   // renders whose buffers were not laid
 // The strength's factor and what is followed, set on the main thread, read on the player thread.
 static atomic_uint_fast64_t sg_strengthBits;
 static atomic_int sg_follows;
+// A tap the Vibrations preview asked for, and whether it is watching the taps (SGMusicHapticsWatchTaps).
+static atomic_bool sg_previewAsked, sg_watched;
 
 static SGMusicEvent sg_ring[kRingSize];
 static atomic_uint sg_head, sg_tail;   // head moved by the render thread, tail by the player thread
@@ -115,11 +124,11 @@ static inline float sampleAt(const void *data, UInt32 index, UInt32 bytes, BOOL 
 
 // The hardware's format is float with a buffer per channel, but it is read rather than assumed (readFormat),
 // and buffers not laid out the way it says are left alone rather than read as noise: the format read at the
-// start can be a moment old.
+// start can be a moment old. `refCon` is the unit; only the music's output is heard.
 static OSStatus rendered(void *refCon, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *timestamp, UInt32 bus,
                          UInt32 frames, AudioBufferList *data) {
     if (!(*flags & kAudioUnitRenderAction_PostRender) || bus != 0 || !data || !data->mNumberBuffers || !frames) return noErr;
-    if (!atomic_load_explicit(&sg_listening, memory_order_relaxed)) return noErr;
+    if (!atomic_load_explicit(&sg_listening, memory_order_relaxed) || refCon != SGPlayerMusicOutput()) return noErr;
     if (*flags & kAudioUnitRenderAction_OutputIsSilence) return noErr;
 
     uint64_t layout = atomic_load_explicit(&sg_layout, memory_order_relaxed);
@@ -171,7 +180,6 @@ static OSStatus rendered(void *refCon, AudioUnitRenderActionFlags *flags, const 
 
 #pragma mark - the output unit
 
-
 static NSString *fourCC(UInt32 code) {
     char text[5] = {(char)(code >> 24), (char)(code >> 16), (char)(code >> 8), (char)code, 0};
     return @(text);
@@ -213,6 +221,17 @@ static void readFormat(AudioUnit unit) {
     }
     storeDouble(&sg_sampleRateBits, format.mSampleRate);
     atomic_store(&sg_layout, (uint64_t)format.mFormatFlags | (uint64_t)(format.mChannelsPerFrame & 0xffff) << 32 | (uint64_t)bytes << 48);
+}
+
+// The music's output started, changed or changed format (Shared/Player): its format read, the notify on it,
+// and the analyzer started over, since what it held came from before.
+static void listenTo(AudioUnit unit) {
+    if (!unit) return;
+    AudioUnitRemoveRenderNotify(unit, rendered, unit);
+    readFormat(unit);
+    atomic_fetch_add(&sg_generation, 1);
+    OSStatus status = AudioUnitAddRenderNotify(unit, rendered, unit);
+    if (status != noErr) SGLog(@"music haptics: the render notify could not be added (%d)", (int)status);
 }
 
 #pragma mark - the player thread
@@ -305,6 +324,14 @@ static CHHapticEventParameter *parameter(CHHapticEventParameterID identifier, fl
     return [[CHHapticEventParameter alloc] initWithParameterID:identifier value:value];
 }
 
+static void (^sg_watcher)(float intensity);   // main thread
+
+static void tellWatcher(float intensity, double lead) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(0, lead) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (sg_watcher) sg_watcher(intensity);
+    });
+}
+
 static void playTap(const SGMusicEvent *event) {
     double lead;
     NSTimeInterval at = engineTime(event->hostTime, &lead);
@@ -326,8 +353,28 @@ static void playTap(const SGMusicEvent *event) {
         return;
     }
     sg_stats.taps++;
+    if (atomic_load_explicit(&sg_watched, memory_order_relaxed)) tellWatcher(event->intensity, lead);
     sg_stats.leadSum += lead;
     sg_stats.leadMin = sg_stats.taps == 1 ? lead : MIN(sg_stats.leadMin, lead);
+}
+
+// The preview's kick: a tap at the strength a full kick plays at, and under it a moment of the rumble unless
+// only the beat is followed, both now rather than when a sound is heard.
+static void playPreview(BOOL rumbles) {
+    NSMutableArray<CHHapticEvent *> *events = [NSMutableArray arrayWithObject:[[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticTransient parameters:@[
+        parameter(CHHapticEventParameterIDHapticIntensity, MIN(1, kTapGain * strength())),
+        parameter(CHHapticEventParameterIDHapticSharpness, 0.4f),
+    ] relativeTime:0]];
+    if (rumbles) {
+        [events addObject:[[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticContinuous parameters:@[
+            parameter(CHHapticEventParameterIDHapticIntensity, MIN(1, 0.5f * kRumbleGain * strength())),
+            parameter(CHHapticEventParameterIDHapticSharpness, 0),
+        ] relativeTime:0.02 duration:0.22]];
+    }
+    NSError *error = nil;
+    CHHapticPattern *pattern = [[CHHapticPattern alloc] initWithEvents:events parameters:@[] error:&error];
+    id<CHHapticPatternPlayer> player = pattern ? [sg_engine createPlayerWithPattern:pattern error:&error] : nil;
+    if (!player || ![player startAtTime:CHHapticTimeImmediate error:&error]) SGLog(@"music haptics: the preview did not play: %@", error);
 }
 
 static void stopRumble(NSTimeInterval at) {
@@ -421,6 +468,7 @@ static void *playerLoop(void *unused) {
         @autoreleasepool {
             double now = hostSeconds(mach_absolute_time());
             if (!atomic_load(&sg_listening)) {
+                atomic_store(&sg_previewAsked, false);
                 atomic_store(&sg_tail, atomic_load(&sg_head));
                 stopEngine();
                 idle = YES;
@@ -430,6 +478,10 @@ static void *playerLoop(void *unused) {
             BOOL rumbles = follows != SGMusicFollowsBeat, snares = follows != SGMusicFollowsBass;
             if (!rumbles) stopRumble(CHHapticTimeImmediate);
             BOOL any = NO;
+            if (atomic_exchange(&sg_previewAsked, false) && startEngine()) {
+                playPreview(rumbles);
+                any = YES;
+            }
             unsigned head = atomic_load(&sg_head), tail = atomic_load(&sg_tail);
             if (tail != head && startEngine()) {
                 for (; tail != head; tail++) {
@@ -469,7 +521,7 @@ static void readLatency(void) {
 }
 
 static void updateListening(void) {
-    BOOL listening = atomic_load(&sg_enabled) && atomic_load(&sg_active);
+    BOOL listening = SGMusicHapticsOn() && atomic_load(&sg_active) && !atomic_load(&sg_systemCovers);
     if (atomic_exchange(&sg_listening, listening) == listening) return;
     if (listening) {
         atomic_fetch_add(&sg_generation, 1);
@@ -487,9 +539,9 @@ static void updateListening(void) {
     dispatch_semaphore_signal(sg_wake);
 }
 
-void SGSetMusicHapticsEnabled(BOOL on) {
-    if (!sg_wake) return;
-    atomic_store(&sg_enabled, on);
+void SGMusicHapticsSetSystemCovers(BOOL covers) {
+    if (atomic_exchange(&sg_systemCovers, covers) == covers || !sg_wake) return;
+    if (SGMusicHapticsOn()) SGLog(@"music haptics: %@", covers ? @"iOS's own covers this song, standing down" : @"iOS's own does not play this song, playing along");
     updateListening();
 }
 
@@ -505,19 +557,34 @@ void SGMusicHapticsSettingsChanged(void) {
     dispatch_semaphore_signal(sg_wake);
 }
 
+void SGMusicHapticsPreview(void) {
+    if (!sg_wake || !atomic_load(&sg_listening)) return;
+    atomic_store(&sg_previewAsked, true);
+    dispatch_semaphore_signal(sg_wake);
+}
+
+void SGMusicHapticsWatchTaps(void (^watcher)(float intensity)) {
+    sg_watcher = [watcher copy];
+    atomic_store(&sg_watched, watcher != nil);
+}
+
 %ctor {
-    SGMigrateKey(SGKeyMusicHapticsWas, SGKeyMusicHaptics);
+    SGMigrateMusicHaptics();
     SGMigrateKey(SGKeyMusicStrengthWas, SGKeyMusicStrength);
     SGMigrateKey(SGKeyMusicFollowsWas, SGKeyMusicFollows);
     mach_timebase_info_data_t timebase;
     mach_timebase_info(&timebase);
     sg_secondsPerTick = (double)timebase.numer / timebase.denom / 1e9;
-    static const SGAudioProcessor processor = {readFormat, rendered};
-    if (!SGAudioPipelineRegister(SGAudioStageHaptics, &processor)) return;
+    if (!SGPlayerWatchMusicOutput(listenTo)) {
+        SGLog(@"music haptics: Spotify's output cannot be reached, Music Haptics is inactive");
+        return;
+    }
     sg_wake = dispatch_semaphore_create(0);
     readSettings();
-    atomic_store(&sg_enabled, SGFlag(SGKeyMusicHaptics, NO));
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserverForName:SGMusicHapticsSwitchesChangedNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        updateListening();
+    }];
     [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
         atomic_store(&sg_active, true);
         updateListening();
@@ -526,7 +593,10 @@ void SGMusicHapticsSettingsChanged(void) {
         atomic_store(&sg_active, false);
         updateListening();
     }];
-    [center addObserverForName:AVAudioSessionRouteChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-        if (atomic_load(&sg_listening)) readLatency();
+    // Posted on the audio session's thread: a main-queue observer would make it wait for main (AGENTS.md).
+    [center addObserverForName:AVAudioSessionRouteChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (atomic_load(&sg_listening)) readLatency();
+        });
     }];
 }

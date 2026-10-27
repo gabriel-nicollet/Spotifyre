@@ -1,5 +1,6 @@
 #import "SGDSPEffects.h"
 #import <AudioToolbox/AudioToolbox.h>
+#import <math.h>
 #import <stdlib.h>
 #import <string.h>
 
@@ -41,7 +42,7 @@ static OSStatus pull(void *refCon, AudioUnitRenderActionFlags *flags, const Audi
     return noErr;
 }
 
-SGDSPReverb *SGDSPReverbCreate(double rate, int preset) {
+SGDSPReverb *SGDSPReverbCreate(double rate, int preset, float amount) {
     AudioComponentDescription description = {kAudioUnitType_Effect, kAudioUnitSubType_Reverb2, kAudioUnitManufacturer_Apple, 0, 0};
     AudioComponent component = AudioComponentFindNext(NULL, &description);
     SGDSPReverb *reverb = component ? calloc(1, sizeof *reverb) : NULL;
@@ -67,23 +68,36 @@ SGDSPReverb *SGDSPReverbCreate(double rate, int preset) {
         return NULL;
     }
     reverb->output.list.mNumberBuffers = 2;
-    SGDSPReverbSet(reverb, preset);
+    SGDSPReverbSet(reverb, preset, amount);
     // The unit sets itself up on its first render, allocating: that render is a block of silence, here.
     float silence[2][kSGDSPEffectMaxFrames] = {{0}};
     SGDSPReverbRun(reverb, silence[0], silence[1], kSGDSPEffectMaxFrames);
     return reverb;
 }
 
-void SGDSPReverbSet(SGDSPReverb *reverb, int preset) {
+static void setPreset(SGDSPReverb *reverb, int preset, float mix) {
     const Preset *p = &kPresets[preset < 0 ? 0 : preset >= SGDSPReverbPresetCount ? SGDSPReverbPresetCount - 1 : preset];
     const struct { AudioUnitParameterID id; float value; } values[] = {
-        {kReverb2Param_DryWetMix, p->mix}, {kReverb2Param_Gain, 0}, {kReverb2Param_MinDelayTime, p->minDelay},
+        {kReverb2Param_DryWetMix, mix}, {kReverb2Param_Gain, 0}, {kReverb2Param_MinDelayTime, p->minDelay},
         {kReverb2Param_MaxDelayTime, p->maxDelay}, {kReverb2Param_DecayTimeAt0Hz, p->decay},
         {kReverb2Param_DecayTimeAtNyquist, p->decayHigh}, {kReverb2Param_RandomizeReflections, p->density},
     };
     for (size_t i = 0; i < sizeof values / sizeof *values; i++) {
         AudioUnitSetParameter(reverb->unit, values[i].id, kAudioUnitScope_Global, 0, values[i].value, 0);
     }
+}
+
+void SGDSPReverbSet(SGDSPReverb *reverb, int preset, float amount) {
+    int index = preset < 0 ? 0 : preset >= SGDSPReverbPresetCount ? SGDSPReverbPresetCount - 1 : preset;
+    setPreset(reverb, index, fminf(100, kPresets[index].mix * fmaxf(0, amount) / 50));
+}
+
+void SGDSPReverbSetSend(SGDSPReverb *reverb, int preset) {
+    setPreset(reverb, preset, 100);
+}
+
+void SGDSPReverbReset(SGDSPReverb *reverb) {
+    AudioUnitReset(reverb->unit, kAudioUnitScope_Global, 0);
 }
 
 void SGDSPReverbRun(void *state, float *left, float *right, uint32_t frames) {

@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 UIColor *SGRAccentColor(void) { return nil; }
 __weak UIView *sgr_nowPlayingRoot = nil;
-__weak UIView *sgr_nowPlayingCard = nil;
+NSHashTable<UIView *> *sgr_nowPlayingPainted = nil;
 __weak UIView *sgr_lyricsCardRoot = nil;
 __weak UIView *sgr_lyricsPageRoot = nil;
 __weak UIView *sgr_playlistRoot = nil;

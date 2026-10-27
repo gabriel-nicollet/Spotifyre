@@ -34,6 +34,9 @@ static NSString *keyOf(SPTPlayerState *state) {
 
 static void publish(SPTPlayerState *state) {
     sg_playerState = state;
+    for (id<SGPlayerStateObserver> observer in sg_stateObservers.allObjects) {
+        if ([observer respondsToSelector:@selector(playerStateDidReport:)]) [observer playerStateDidReport:state];
+    }
     NSString *key = keyOf(state);
     if ([key isEqualToString:sg_stateKey]) return;
     sg_stateKey = key;

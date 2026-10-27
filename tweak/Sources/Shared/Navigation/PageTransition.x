@@ -24,7 +24,7 @@
 //
 // The cost is that the page being left behind is measured against the bar too, and reflows by the
 // same 54pt as it slides away under the swipe. It is on its way off screen, which is the better
-// place for the jump than the page being arrived at. A cancelled swipe puts the bar back on its
+// place for the jump than the page being arrived at. A canceled swipe puts the bar back on its
 // own: Spotify's completion block sees the cancellation and asks for the state again, which for the
 // page that stayed is a bar shown.
 //

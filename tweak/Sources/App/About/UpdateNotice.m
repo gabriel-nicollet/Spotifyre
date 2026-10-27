@@ -15,10 +15,6 @@ static const NSInteger kTries = 15;        // a minute of waiting for the screen
 
 static BOOL sg_offered;   // once a run, whatever else happens
 
-BOOL SGUpdateNoticeShown(void) {
-    return sg_offered;
-}
-
 // Everything that has changed since this build, newest release first, which is what the sheet counts
 // and reads the first lines of.
 static NSArray<SGUpdateChange *> *changesSinceThisBuild(void) {
@@ -31,9 +27,10 @@ static NSArray<SGUpdateChange *> *changesSinceThisBuild(void) {
 }
 
 // Three lines and a count: enough to know whether to care, with the whole changelog a tap away.
-static NSString *noticeBody(NSString *version) {
+static NSString *noticeBody(NSString *version, BOOL beta) {
     NSArray<SGUpdateChange *> *changes = changesSinceThisBuild();
     NSMutableString *body = [NSMutableString stringWithFormat:@"This build is %s.", SG_VERSION];
+    if (beta) [body appendString:@" This one is a beta, a test build ahead of the next release."];
     NSUInteger shown = MIN(changes.count, (NSUInteger)3);
     for (NSUInteger i = 0; i < shown; i++) [body appendFormat:@"\n\n• %@", changes[i].text];
     if (changes.count > shown) [body appendFormat:@"\n\nand %lu more in %@.", (unsigned long)(changes.count - shown), version];
@@ -65,7 +62,7 @@ static void offerWhenClear(NSInteger tries) {
     [NSUserDefaults.standardUserDefaults setObject:version forKey:kTold];
     SGUpdateRelease *release = SGUpdateNewestRelease();
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ is out", version]
-                                                                  message:noticeBody(version)
+                                                                  message:noticeBody(version, release.prerelease)
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [sheet addAction:[UIAlertAction actionWithTitle:@"What's new" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         // The sheet is still going as this runs, so the page waits for the screen it is pushed onto.
@@ -83,19 +80,16 @@ static void offerWhenClear(NSInteger tries) {
 }
 
 void SGWatchForUpdates(void) {
-    // Every time Spotify comes to the front, not only the first: it lives for days behind other apps,
-    // and the day's usage count has to go out on a day it was merely brought back. The sheet is still
-    // once per launch.
+    // Once per launch, a few seconds after Spotify first comes to the front.
     static BOOL launched;
     [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
                                                     object:nil
                                                      queue:NSOperationQueue.mainQueue
                                                 usingBlock:^(NSNotification *note) {
-        BOOL first = !launched;
+        if (launched) return;
         launched = YES;
-        if (!first && !SGUsageOwed()) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kSettle * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            BOOL tell = first && SGEnabled(SGKeyUpdateNotice);
+            BOOL tell = SGEnabled(SGKeyUpdateNotice);
             if (tell && SGUpdateVersion()) {   // the last check knows one already
                 offerWhenClear(kTries);
             } else if (tell) {
@@ -108,9 +102,8 @@ void SGWatchForUpdates(void) {
                 }];
             }
             // Inside the six hours this does nothing and no check lands, which is the point: the
-            // sheet is for a release that turned up, not for every launch. The day's usage count is
-            // the exception, and it goes out whether or not the sheet is wanted.
-            if (tell || SGUsageOwed()) SGCheckForUpdate(NO);
+            // sheet is for a release that turned up, not for every launch.
+            if (tell) SGCheckForUpdate(NO);
         });
     }];
 }

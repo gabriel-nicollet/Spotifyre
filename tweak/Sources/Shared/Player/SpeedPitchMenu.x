@@ -10,11 +10,12 @@
 // follow.
 //
 // Only the menu the player's more button opens gets it: the button (id=Context menu,
-// trees/lyrics.txt:183, an Encore Tertiary button) is watched from the redesign's PlayerHeader.x, and a
-// menu shown within a few seconds of its tap, or presented from a now playing controller, is the
-// player's. Under the native look nothing hands the button over, so the block rides on the second test
-// alone, the presenter being Spotify's own now playing controller. The first time, the menu's structure
-// is logged, since no recorded tree shows it yet.
+// trees/lyrics.txt:183, an Encore Tertiary button in NowPlaying_ModesImpl.HeaderElementsUnit) is watched
+// from here under either look, and the first menu that comes up within a few seconds of its tap is the
+// player's. The presenter is not a test: every sheet the player puts up comes from its
+// NowPlayingOverlayContainer, the ⋯ card's own pages too (its Sleep timer is a context menu sheet of its own,
+// which took the block as well, "tapped 0" in the log). The first time, the menu's structure is logged,
+// since no recorded tree shows it yet.
 //
 // The block is drawn from its own measures and type (below), not from the redesign's Kit, so it sits on
 // Spotify's sheet under either look.
@@ -22,22 +23,23 @@
 // The block keeps whether it was open for the rest of the session; speed and pitch last until Spotify
 // quits.
 //
-// The redesign's player menu draws a row of its own and takes the two sliders alone
-// (SGSpeedPitchPanelMake): the same view with its row left out and its panel always open.
+// Under the redesign, with the player's background Fluid or Animated, a row under the block switches
+// Animated artwork (SpeedPitch.h), which the redesign's PlayerMotion.x defines.
 //
-// Between the sliders, a switch has pitch follow speed (issue plus#5): the pitch slider folds away, and
-// the panel with it, since the pitch is the speed's. The sheet's block resizes itself in its table; the
-// redesign's menu is told through SGSpeedPitchChangedNotification and reads SGSpeedPitchPanelHeight().
+// The redesign shows the player's sheet as the system menu, with speed, pitch, reverb and Animated artwork
+// as items of its own (Redesigned/Player/PlayerMenu.m), so the block stays out of a sheet shown that way
+// and comes in only if the sheet itself is shown after all (SGPlayerMenuReplaced).
 #import <CoreText/SFNTLayoutTypes.h>
 #import <objc/runtime.h>
 #import "Core/SGCore.h"
 #import "Settings/SGPageStyle.h"
+#import "Shared/AudioEffects/AudioEffects.h"
 #import "Shared/Haptics/Haptics.h"
 #import "SpeedPitch.h"
 
 // A menu this soon after the more button's tap is the player's.
 static const NSTimeInterval kMenuAfterTap = 3;
-static const CGFloat kRowHeight = 56, kSliderBlockHeight = 72, kFollowHeight = 44, kPanelBottom = 12;
+static const CGFloat kRowHeight = 56, kSliderBlockHeight = 72, kSwitchRowHeight = 44, kPanelBottom = 12;
 // The block's own measures and type, so it stands on Spotify's sheet under either look rather than on
 // the redesign's Kit: the sheet's side margin, the gap everything else is a multiple of, and a spring
 // that settles without overshooting.
@@ -91,12 +93,10 @@ static char kBlockKey, kDecidedKey, kWatchedKey, kShownAtKey, kRowsInKey;
 
 #pragma mark - the block
 
-NSNotificationName const SGSpeedPitchChangedNotification = @"SGSpeedPitchChangedNotification";
-
 @interface SGSpeedPitchView : UIView
 @property (nonatomic, weak) UITableView *table;
 @property (nonatomic) BOOL inFooter;
-// The sliders alone: no row, the panel at the top and always open.
+// The sliders alone, always open, for the redesign's panel under the ⋯ (SGPlayerShowSpeedPitchPanel).
 @property (nonatomic) BOOL panelOnly;
 @end
 
@@ -105,11 +105,16 @@ NSNotificationName const SGSpeedPitchChangedNotification = @"SGSpeedPitchChanged
     UIImageView *_icon, *_chevron;
     UILabel *_title, *_summary;
     UIView *_panel;
-    UILabel *_speedName, *_pitchName, *_followName;
-    UIButton *_speedValue, *_pitchValue;
-    UISlider *_speed, *_pitch;
-    UISwitch *_follow;
-    float _shownSpeed, _shownPitch;
+    UILabel *_speedName, *_pitchName, *_reverbName;
+    UIButton *_speedValue, *_pitchValue, *_reverbValue;
+    UISlider *_speed, *_pitch, *_reverb;
+    UILabel *_followsName;
+    UISwitch *_follows;
+    UIView *_animatedRow;
+    UIImageView *_animatedIcon;
+    UILabel *_animatedName;
+    UISwitch *_animated;
+    float _shownSpeed, _shownPitch, _shownReverb;
     NSTimeInterval _speedSentAt;
     BOOL _speedPending;
 }
@@ -118,7 +123,7 @@ static UIImage *symbol(NSString *name, CGFloat size, UIImageSymbolWeight weight)
     return [UIImage systemImageNamed:name withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:size weight:weight]];
 }
 
-// A glyph with its colour drawn in, so it never passes through a tint on its way to the screen.
+// A glyph with its color drawn in, so it never passes through a tint on its way to the screen.
 static UIImage *paintedSymbol(NSString *name, CGFloat size, UIImageSymbolWeight weight, UIColor *color) {
     return [symbol(name, size, weight) imageWithTintColor:color renderingMode:UIImageRenderingModeAlwaysOriginal];
 }
@@ -144,7 +149,7 @@ static UILabel *makeLabel(UIFont *font, UIColor *color) {
     return button;
 }
 
-// A glyph centred in a box of one size, so both sliders' tracks start and end at the same x.
+// A glyph centered in a box of one size, so both sliders' tracks start and end at the same x.
 static UIImage *endImage(NSString *name, CGFloat size) {
     UIImage *glyph = paintedSymbol(name, size, UIImageSymbolWeightMedium, secondary());
     CGSize box = CGSizeMake(24, 24);
@@ -190,7 +195,7 @@ static void placeTick(UISlider *slider) {
     if (!(self = [super initWithFrame:frame])) return nil;
     self.clipsToBounds = YES;
     self.backgroundColor = UIColor.clearColor;
-    // Nothing here draws in the tint: every colour is set on the view that draws it, and the glyphs have
+    // Nothing here draws in the tint: every color is set on the view that draws it, and the glyphs have
     // theirs painted in rather than tinted. The row came up in the system blue for a moment as the sheet
     // appeared on the phone (issue #68), which is the tint a view inherits when nothing up the sheet sets
     // one. The block's own tint is white as well, for whatever UIKit draws in it (the sliders' parts).
@@ -230,29 +235,46 @@ static void placeTick(UISlider *slider) {
     _speed.accessibilityLabel = @"Speed";
     _pitch = [self slider:-kMaxPitch max:kMaxPitch normal:0 minImage:@"arrow.down" maxImage:@"arrow.up"];
     _pitch.accessibilityLabel = @"Pitch";
-    _followName = makeLabel(nameFont, secondary());
-    _followName.text = @"Pitch follows speed";
-    _followName.adjustsFontSizeToFitWidth = YES;
-    _followName.minimumScaleFactor = 0.8;
-    _followName.isAccessibilityElement = NO;
-    _follow = [UISwitch new];
-    _follow.onTintColor = SGGreen();
-    _follow.accessibilityLabel = @"Pitch follows speed";
-    _follow.accessibilityHint = @"Faster plays higher, as a record does";
-    [_follow addTarget:self action:@selector(followChanged) forControlEvents:UIControlEventValueChanged];
-    for (UIView *view in @[_speedName, _speedValue, _speed, _followName, _follow, _pitchName, _pitchValue, _pitch]) [_panel addSubview:view];
+    _reverbName = makeLabel(nameFont, secondary());
+    _reverbName.text = @"Reverb";
+    _reverbValue = [self valueButton:@selector(resetReverb)];
+    _reverb = [self slider:0 max:100 normal:0 minImage:@"speaker" maxImage:@"building.columns"];
+    _reverb.accessibilityLabel = @"Reverb";
+    _followsName = makeLabel(nameFont, primary());
+    _followsName.text = @"Pitch follows speed";
+    _follows = [UISwitch new];
+    _follows.accessibilityLabel = @"Pitch follows speed";
+    [_follows addTarget:self action:@selector(followsChanged) forControlEvents:UIControlEventValueChanged];
+    for (UIView *view in @[_speedName, _speedValue, _speed, _pitchName, _pitchValue, _pitch, _reverbName, _reverbValue, _reverb,
+                           _followsName, _follows]) [_panel addSubview:view];
+
+    if (SGPlayerMenuOffersAnimatedArtwork()) {
+        _animatedRow = [UIView new];
+        _animatedIcon = [[UIImageView alloc] initWithImage:paintedSymbol(@"play.rectangle.on.rectangle", 18, UIImageSymbolWeightRegular, secondary())];
+        _animatedIcon.contentMode = UIViewContentModeCenter;
+        _animatedName = makeLabel(font(UIFontTextStyleBody, UIFontWeightRegular, UIContentSizeCategoryExtraLarge), primary());
+        _animatedName.text = @"Animated artwork";
+        _animated = [UISwitch new];
+        _animated.accessibilityLabel = @"Animated artwork";
+        [_animated addTarget:self action:@selector(animatedChanged) forControlEvents:UIControlEventValueChanged];
+        for (UIView *view in @[_animatedIcon, _animatedName, _animated]) [_animatedRow addSubview:view];
+        [self addSubview:_animatedRow];
+    }
 
     [self refresh];
     return self;
 }
 
-// The sliders' part: speed, the switch, and pitch unless it follows speed.
-static CGFloat panelHeight(void) {
-    return kSliderBlockHeight + kFollowHeight + (SGPlayerPitchFollowsSpeed() ? 0 : kSliderBlockHeight) + kPanelBottom;
++ (CGFloat)heightOpen:(BOOL)open {
+    return kRowHeight + (open ? 3 * kSliderBlockHeight + kSwitchRowHeight + kPanelBottom : 0)
+         + (SGPlayerMenuOffersAnimatedArtwork() ? kRowHeight : 0);
 }
 
-+ (CGFloat)heightOpen:(BOOL)open {
-    return kRowHeight + (open ? panelHeight() : 0);
+// Set after init, which drew the values for the sheet's closed block: drawn again open.
+- (void)setPanelOnly:(BOOL)panelOnly {
+    _panelOnly = panelOnly;
+    [self showValues];
+    [self setNeedsLayout];
 }
 
 - (void)layoutSubviews {
@@ -268,17 +290,11 @@ static CGFloat panelHeight(void) {
     _summary.frame = CGRectMake(summaryX, 0, MAX(0, CGRectGetMinX(_chevron.frame) - kGrid - summaryX), kRowHeight);
 
     _row.hidden = self.panelOnly;
-    // Pitch stays laid out under the switch when it folds away, so it fades where it was rather than moving.
-    _panel.frame = CGRectMake(0, self.panelOnly ? 0 : kRowHeight, width, kSliderBlockHeight + kFollowHeight + kSliderBlockHeight + kPanelBottom);
+    _animatedRow.hidden = self.panelOnly;
+    _panel.frame = CGRectMake(0, self.panelOnly ? kGrid : kRowHeight, width, 3 * kSliderBlockHeight + kSwitchRowHeight + kPanelBottom);
     CGFloat y = 0;
-    for (NSArray<UIView *> *line in @[@[_speedName, _speedValue, _speed], @[_followName, _follow], @[_pitchName, _pitchValue, _pitch]]) {
-        if (line.count == 2) {
-            CGSize toggle = [_follow sizeThatFits:CGSizeZero];
-            line[1].frame = CGRectMake(width - side - toggle.width, y + roundf((kFollowHeight - toggle.height) / 2), toggle.width, toggle.height);
-            line[0].frame = CGRectMake(side, y, MAX(0, CGRectGetMinX(line[1].frame) - kGrid - side), kFollowHeight);
-            y += kFollowHeight;
-            continue;
-        }
+    for (NSArray<UIView *> *line in @[@[_speedName, _speedValue, _speed], @[_pitchName, _pitchValue, _pitch],
+                                       @[_reverbName, _reverbValue, _reverb]]) {
         line[0].frame = CGRectMake(side, y + 4, width / 2 - side, 24);
         line[1].frame = CGRectMake(width / 2, y + 4, width / 2 - side, 24);
         line[2].frame = CGRectMake(side, y + 30, width - 2 * side, 36);
@@ -286,9 +302,33 @@ static CGFloat panelHeight(void) {
         placeTick((UISlider *)line[2]);
         y += kSliderBlockHeight;
     }
+    CGSize toggle = [_follows sizeThatFits:CGSizeZero];
+    _follows.frame = CGRectMake(width - side - toggle.width, y + (kSwitchRowHeight - toggle.height) / 2, toggle.width, toggle.height);
+    _followsName.frame = CGRectMake(side, y, CGRectGetMinX(_follows.frame) - side - kGrid, kSwitchRowHeight);
+
+    // Under the panel while it is open, under the row while it is closed.
+    _animatedRow.frame = CGRectMake(0, sg_open ? CGRectGetMaxY(_panel.frame) : kRowHeight, width, kRowHeight);
+    _animatedIcon.frame = _icon.frame;
+    toggle = [_animated sizeThatFits:CGSizeZero];
+    _animated.frame = CGRectMake(width - side - toggle.width, (kRowHeight - toggle.height) / 2, toggle.width, toggle.height);
+    _animatedName.frame = CGRectMake(titleX, 0, MAX(0, CGRectGetMinX(_animated.frame) - kGrid - titleX), kRowHeight);
 }
 
 #pragma mark state
+
+float SGPlayerReverb(void) {
+    return SGDSPSwitch(SGKeyDSP) && SGDSPSwitch(SGKeyDSPReverb) ? roundf(SGDSPNumber(SGKeyDSPReverbAmount)) : 0;
+}
+
+void SGPlayerSetReverb(float amount) {
+    if (amount > 0) {
+        SGDSPSetNumber(SGKeyDSPReverbAmount, amount);
+        if (!SGDSPSwitch(SGKeyDSPReverb)) SGDSPSetSwitch(SGKeyDSPReverb, YES);
+        if (!SGDSPSwitch(SGKeyDSP)) SGDSPSetSwitch(SGKeyDSP, YES);
+    } else if (SGDSPSwitch(SGKeyDSPReverb)) {
+        SGDSPSetSwitch(SGKeyDSPReverb, NO);
+    }
+}
 
 static float snappedSpeed(float value) {
     float speed = roundf(value / kSpeedStep) * kSpeedStep;
@@ -304,68 +344,64 @@ static NSString *pitchText(float pitch) {
     return [NSString stringWithFormat:@"%@%.0f", pitch > 0 ? @"+" : @"−", fabsf(pitch)];
 }
 
-// The semitones a speed moves the pitch by while it follows, to a tenth (+3.9 at 1.25×, +12 at 2×).
-static NSString *followedPitchText(float speed) {
-    float semitones = roundf(12 * log2f(speed) * 10) / 10;
-    if (semitones == 0) return nil;
-    BOOL whole = semitones == roundf(semitones);
-    return [NSString stringWithFormat:whole ? @"%@%.0f st" : @"%@%.1f st", semitones > 0 ? @"+" : @"−", fabsf(semitones)];
-}
-
-// What the row says beside its name: the speed, and the pitch where it is moved, set or followed.
-static NSString *summaryText(float speed, BOOL speedShown, float pitch, BOOL follows) {
-    NSMutableArray<NSString *> *changed = [NSMutableArray array];
-    if (speedShown && speed != 1) [changed addObject:speedText(speed)];
-    NSString *moved = follows ? (speedShown ? followedPitchText(speed) : nil) : pitch != 0 ? [pitchText(pitch) stringByAppendingString:@" st"] : nil;
-    if (moved) [changed addObject:moved];
-    return changed.count ? [changed componentsJoinedByString:@"  "] : nil;
-}
-
 // What the player and the pitch say now, onto the controls (not while a finger is on one).
 - (void)refresh {
     BOOL speedAllowed = SGPlayerSpeedAllowed(), pitchAvailable = SGPlayerPitchAvailable();
     if (!_speed.tracking) _shownSpeed = snappedSpeed(SGPlayerSpeed());
     if (!_pitch.tracking) _shownPitch = SGPlayerPitch();
+    if (!_reverb.tracking) _shownReverb = SGPlayerReverb();
+    _reverb.value = _shownReverb;
     _speed.value = _shownSpeed;
     _pitch.value = _shownPitch;
     _speed.enabled = speedAllowed;
     _pitch.enabled = pitchAvailable;
     _speed.alpha = speedAllowed ? 1 : 0.4;
-    // It only means anything where speed applies, so elsewhere it is off and cannot be turned on.
-    _follow.on = SGPlayerPitchFollowsSpeed();
-    _follow.enabled = speedAllowed;
-    _followName.alpha = speedAllowed ? 1 : 0.4;
+    // Following needs the speed's unit, which the in place fallback does not have.
+    _follows.on = SGPlayerPitchFollowsSpeed();
+    _follows.enabled = speedAllowed;
+    _follows.alpha = _followsName.alpha = speedAllowed ? 1 : 0.4;
+    _animated.on = SGPlayerMenuAnimatedArtwork();
     [self showValues];
 }
 
 - (void)showValues {
     BOOL speedAllowed = SGPlayerSpeedAllowed(), pitchAvailable = SGPlayerPitchAvailable();
+    // While pitch follows a speed that is not normal, the speed sets the pitch and the semitones are not
+    // played (SGTimePitch.h), so the slider stands aside and nothing claims them.
+    BOOL following = speedAllowed && _follows.on && _shownSpeed != 1;
+    float pitch = following ? 0 : _shownPitch;
     [UIView performWithoutAnimation:^{
         [_speedValue setTitle:speedAllowed ? speedText(_shownSpeed) : @"Unavailable here" forState:UIControlStateNormal];
-        [_pitchValue setTitle:pitchAvailable ? [pitchText(_shownPitch) stringByAppendingString:_shownPitch ? @" st" : @""] : @"Unavailable" forState:UIControlStateNormal];
+        [_pitchValue setTitle:!pitchAvailable ? @"Unavailable" : following ? @"Follows speed" : [pitchText(pitch) stringByAppendingString:pitch ? @" st" : @""]
+                     forState:UIControlStateNormal];
         [_speedValue layoutIfNeeded];
         [_pitchValue layoutIfNeeded];
     }];
+    BOOL pitchFree = pitchAvailable && !following;
+    _pitch.enabled = pitchFree;
+    _pitch.alpha = pitchFree ? 1 : 0.4;
     _speedValue.enabled = speedAllowed && _shownSpeed != 1;
-    _pitchValue.enabled = pitchAvailable && _shownPitch != 0;
-    BOOL follows = SGPlayerPitchFollowsSpeed();
-    NSString *followed = follows ? followedPitchText(_shownSpeed) : nil;
-    _speed.accessibilityValue = !speedAllowed ? @"Unavailable" : followed ? [NSString stringWithFormat:@"%@, pitch %@", speedText(_shownSpeed), followed] : speedText(_shownSpeed);
-    _pitch.accessibilityValue = _shownPitch == 0 ? @"Original pitch" : [NSString stringWithFormat:@"%.0f semitones %@", fabsf(_shownPitch), _shownPitch > 0 ? @"up" : @"down"];
+    _pitchValue.enabled = pitchFree && pitch != 0;
+    [UIView performWithoutAnimation:^{
+        [_reverbValue setTitle:_shownReverb > 0 ? [NSString stringWithFormat:@"%.0f%%", _shownReverb] : @"Off" forState:UIControlStateNormal];
+        [_reverbValue layoutIfNeeded];
+    }];
+    _reverbValue.enabled = _shownReverb > 0;
+    _reverb.accessibilityValue = _shownReverb > 0 ? [NSString stringWithFormat:@"%.0f percent", _shownReverb] : @"Off";
+    _speed.accessibilityValue = speedAllowed ? speedText(_shownSpeed) : @"Unavailable";
+    _pitch.accessibilityValue = following ? @"Follows speed" : pitch == 0 ? @"Original pitch"
+                                : [NSString stringWithFormat:@"%.0f semitones %@", fabsf(pitch), pitch > 0 ? @"up" : @"down"];
 
-    NSString *summary = summaryText(_shownSpeed, YES, _shownPitch, follows);
-    _summary.text = sg_open ? nil : summary;
-    _row.accessibilityLabel = summary ? [@"Speed and pitch, " stringByAppendingString:[summary stringByReplacingOccurrencesOfString:@"  " withString:@", "]] : @"Speed and pitch";
+    NSMutableArray<NSString *> *changed = [NSMutableArray array];
+    if (_shownSpeed != 1) [changed addObject:speedText(_shownSpeed)];
+    if (pitch != 0) [changed addObject:[pitchText(pitch) stringByAppendingString:@" st"]];
+    if (_shownReverb > 0) [changed addObject:@"Reverb"];
+    _summary.text = sg_open ? nil : [changed componentsJoinedByString:@"  "];
+    _row.accessibilityLabel = changed.count ? [@"Speed and pitch, " stringByAppendingString:[changed componentsJoinedByString:@", "]] : @"Speed and pitch";
     _row.accessibilityValue = sg_open ? @"Expanded" : @"Collapsed";
     _chevron.transform = sg_open ? CGAffineTransformMakeRotation(M_PI) : CGAffineTransformIdentity;
-    BOOL showsPanel = sg_open || self.panelOnly;
-    _panel.alpha = showsPanel ? 1 : 0;
-    _panel.accessibilityElementsHidden = !showsPanel;
-    for (UIView *view in @[_pitchName, _pitchValue]) view.alpha = follows ? 0 : 1;
-    _pitch.alpha = follows ? 0 : SGPlayerPitchAvailable() ? 1 : 0.4;
-    for (UIView *view in @[_pitchName, _pitchValue, _pitch]) view.accessibilityElementsHidden = follows;
-    [NSNotificationCenter.defaultCenter postNotificationName:SGSpeedPitchChangedNotification object:nil
-                                                    userInfo:summary ? @{@"summary": summary} : nil];
+    _panel.alpha = sg_open || self.panelOnly ? 1 : 0;
+    _panel.accessibilityElementsHidden = !sg_open && !self.panelOnly;
 }
 
 #pragma mark actions
@@ -378,49 +414,28 @@ static NSString *summaryText(float speed, BOOL speedShown, float pitch, BOOL fol
     [UIView animateWithDuration:0.2 animations:^{ _row.backgroundColor = UIColor.clearColor; }];
 }
 
-// To its height for sg_open and the switch, in the sheet's table, the rows under it moving with it; the
-// redesign's menu sizes the panel itself, on the notification showValues posts.
-- (void)resize {
-    UITableView *table = self.table;
-    CGRect frame = self.frame;
-    frame.size.height = [SGSpeedPitchView heightOpen:sg_open];
-    BOOL inTable = table && !self.panelOnly;
-    animateOpen(^{
-        if (inTable) {
-            [table beginUpdates];
-            self.frame = frame;
-            if (self.inFooter) table.tableFooterView = self;
-            else table.tableHeaderView = self;
-        }
-        [self showValues];
-        [self setNeedsLayout];
-        [self layoutIfNeeded];
-        if (inTable) [table endUpdates];
-    }, ^(BOOL finished) {
-        if (sg_open && inTable) [table scrollRectToVisible:[table convertRect:self.bounds fromView:self] animated:YES];
-    });
-    if (!inTable) return;
-    [table invalidateIntrinsicContentSize];
-    UIView *sheet = table.superview;
-    for (int i = 0; sheet && i < 4; i++, sheet = sheet.superview) [sheet setNeedsLayout];
-}
-
 - (void)toggle {
     sg_open = !sg_open;
     if (sg_open) [self refresh];
-    [self resize];
     UITableView *table = self.table;
+    CGRect frame = self.frame;
+    frame.size.height = [SGSpeedPitchView heightOpen:sg_open];
+    animateOpen(^{
+        [table beginUpdates];
+        self.frame = frame;
+        if (self.inFooter) table.tableFooterView = self;
+        else table.tableHeaderView = self;
+        [self showValues];
+        [self layoutIfNeeded];
+        [table endUpdates];
+    }, ^(BOOL finished) {
+        if (sg_open) [table scrollRectToVisible:[table convertRect:self.bounds fromView:self] animated:YES];
+    });
+    [table invalidateIntrinsicContentSize];
+    UIView *sheet = table.superview;
+    for (int i = 0; sheet && i < 4; i++, sheet = sheet.superview) [sheet setNeedsLayout];
     UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification, sg_open ? _speed : nil);
     SGLog(@"speed and pitch: speed and pitch %@, table %.0f tall showing %.0f", sg_open ? @"opened" : @"closed", table.contentSize.height, table.bounds.size.height);
-}
-
-- (void)followChanged {
-    SGSetPlayerPitchFollowsSpeed(_follow.on);
-    _shownPitch = SGPlayerPitch();
-    _pitch.value = _shownPitch;
-    [self resize];
-    UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification, nil);
-    SGLog(@"speed and pitch: pitch %@ speed at %.2fx", SGPlayerPitchFollowsSpeed() ? @"follows" : @"no longer follows", _shownSpeed);
 }
 
 - (void)sendSpeed {
@@ -445,6 +460,12 @@ static NSString *summaryText(float speed, BOOL speedShown, float pitch, BOOL fol
                 if (view && view->_speedPending) [view sendSpeed];
             });
         }
+    } else if (slider == _reverb) {
+        float amount = roundf(slider.value / 5) * 5;
+        if (amount == _shownReverb) return;
+        if (amount == 0 || _shownReverb == 0) SGPlayFeedback(SGFeedbackDetent);
+        _shownReverb = amount;
+        SGPlayerSetReverb(amount);
     } else {
         float pitch = roundf(slider.value);
         if (pitch == _shownPitch) return;
@@ -459,9 +480,29 @@ static NSString *summaryText(float speed, BOOL speedShown, float pitch, BOOL fol
     if (slider == _speed) {
         slider.value = _shownSpeed;
         if (_speedPending || snappedSpeed(SGPlayerSpeed()) != _shownSpeed) [self sendSpeed];
+    } else if (slider == _reverb) {
+        slider.value = _shownReverb;
     } else {
         slider.value = _shownPitch;
     }
+}
+
+- (void)resetReverb {
+    _shownReverb = 0;
+    SGPlayerSetReverb(0);
+    [_reverb setValue:0 animated:YES];
+    [self showValues];
+}
+
+- (void)animatedChanged {
+    SGPlayerMenuSetAnimatedArtwork(_animated.on);
+    SGPlayFeedback(SGFeedbackDetent);
+}
+
+- (void)followsChanged {
+    SGSetPlayerPitchFollowsSpeed(_follows.on);
+    SGPlayFeedback(SGFeedbackDetent);
+    [self refresh];
 }
 
 - (void)resetSpeed {
@@ -480,21 +521,50 @@ static NSString *summaryText(float speed, BOOL speedShown, float pitch, BOOL fol
 
 @end
 
-#pragma mark - the sliders for a menu of a look's own
+#pragma mark - the panel
 
-CGFloat SGSpeedPitchPanelHeight(void) {
-    return panelHeight();
+// A popover, so it takes the system's glass and closes on a tap outside it. On iPhone a popover becomes a
+// sheet unless its delegate says otherwise.
+@interface SGSpeedPitchPanel : UIViewController <UIPopoverPresentationControllerDelegate>
+@end
+
+@implementation SGSpeedPitchPanel
+- (void)loadView {
+    SGSpeedPitchView *block = [SGSpeedPitchView new];
+    block.panelOnly = YES;
+    self.view = block;
 }
 
-UIView *SGSpeedPitchPanelMake(void) {
-    SGSpeedPitchView *panel = [[SGSpeedPitchView alloc] initWithFrame:CGRectMake(0, 0, 320, SGSpeedPitchPanelHeight())];
-    panel.panelOnly = YES;
-    [panel refresh];
-    return panel;
+- (UIModalPresentationStyle)adaptivePresentationStyleForPresentationController:(UIPresentationController *)controller
+                                                               traitCollection:(UITraitCollection *)traits {
+    return UIModalPresentationNone;
 }
+@end
 
-NSString *SGSpeedPitchSummary(void) {
-    return summaryText(snappedSpeed(SGPlayerSpeed()), SGPlayerSpeedAllowed(), SGPlayerPitch(), SGPlayerPitchFollowsSpeed());
+void SGPlayerShowSpeedPitchPanel(UIView *from) {
+    if (!from.window) return;
+    SGSpeedPitchPanel *panel = [SGSpeedPitchPanel new];
+    panel.modalPresentationStyle = UIModalPresentationPopover;
+    panel.preferredContentSize = CGSizeMake(320, kGrid + 3 * kSliderBlockHeight + kSwitchRowHeight + kPanelBottom);
+    UIPopoverPresentationController *popover = panel.popoverPresentationController;
+    popover.sourceView = from;
+    popover.sourceRect = from.bounds;
+    popover.permittedArrowDirections = UIPopoverArrowDirectionUp | UIPopoverArrowDirectionDown;
+    popover.delegate = panel;
+    SGPresentDark(panel);
+    // Picked from the system menu, which is still going away: the panel waits for it.
+    __block int tries = 0;
+    __block void (^present)(void);
+    present = ^{
+        UIViewController *top = SGTopController();
+        if ((top.isBeingDismissed || top.isBeingPresented || top.transitionCoordinator) && ++tries < 20) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), present);
+            return;
+        }
+        present = nil;
+        [top presentViewController:panel animated:YES completion:nil];
+    };
+    dispatch_async(dispatch_get_main_queue(), present);
 }
 
 #pragma mark - the player's more button
@@ -511,15 +581,19 @@ NSString *SGSpeedPitchSummary(void) {
 }
 @end
 
-void SGPlayerMenuWatchMoreButton(UIView *button) {
+static void watchMoreButton(UIView *button) {
     if (!button || objc_getAssociatedObject(button, &kWatchedKey)) return;
     static SGMoreTapWatcher *watcher;
     if (!watcher) watcher = [SGMoreTapWatcher new];
     objc_setAssociatedObject(button, &kWatchedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    // An Encore button may read its touches through a gesture recognizer rather than as a control, so
-    // both are watched.
+    // A control (Spotify's ⋯ is an Encore button, a UIControl) is watched through its own events alone, from
+    // the touch down on: a recognizer on it, even one that cancels and delays nothing, took part in its touches
+    // (a ripple on the ⋯ on the phone).
     if ([button isKindOfClass:UIControl.class]) {
-        [(UIControl *)button addTarget:watcher action:@selector(tapped) forControlEvents:UIControlEventTouchUpInside | UIControlEventPrimaryActionTriggered];
+        // Touch down alone: a touch up after the ⋯ card has used the tap up would count a second time, for the
+        // next sheet (the card's Sleep timer took the block that way on the phone).
+        [(UIControl *)button addTarget:watcher action:@selector(tapped) forControlEvents:UIControlEventTouchDown];
+        return;
     }
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:watcher action:@selector(tapped)];
     tap.cancelsTouchesInView = NO;
@@ -529,16 +603,6 @@ void SGPlayerMenuWatchMoreButton(UIView *button) {
 }
 
 #pragma mark - the menu
-
-// The presenter or one of its parents is a now playing controller. Only the chain up is looked at: the
-// root's children include the now playing bar's, which every menu would match.
-static BOOL presentedFromPlayer(UIViewController *menu) {
-    UIViewController *presenter = menu.navigationController.presentingViewController ?: menu.presentingViewController;
-    for (UIViewController *vc = presenter; vc; vc = vc.parentViewController) {
-        if ([NSStringFromClass(vc.class) containsString:@"NowPlaying"]) return YES;
-    }
-    return NO;
-}
 
 static void logStructure(UIView *view, int depth, NSMutableString *out) {
     if (depth > 6 || out.length > 3000) return;
@@ -565,15 +629,22 @@ static UITableView *findTable(UIView *root, int depth) {
 static BOOL isPlayerMenu(UIViewController *menu) {
     NSNumber *decided = objc_getAssociatedObject(menu, &kDecidedKey);
     if (decided) return decided.boolValue;
-    BOOL tapped = sg_moreTappedAt && CACurrentMediaTime() - sg_moreTappedAt < kMenuAfterTap;
-    BOOL fromPlayer = presentedFromPlayer(menu);
-    BOOL ours = tapped || fromPlayer;
-    if (tapped) sg_moreTappedAt = 0;
+    // The tap is used up by the menu it opened, so a sheet that menu opens in turn is not taken for it.
+    BOOL ours = sg_moreTappedAt && CACurrentMediaTime() - sg_moreTappedAt < kMenuAfterTap;
+    if (ours) sg_moreTappedAt = 0;
     objc_setAssociatedObject(menu, &kDecidedKey, @(ours), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     UIViewController *presenter = menu.navigationController.presentingViewController ?: menu.presentingViewController;
-    SGLog(@"speed and pitch: a context menu, %@ (tapped %d, presented by %@)", ours ? @"the player's" : @"not the player's", tapped,
+    SGLog(@"speed and pitch: a context menu, %@ (tapped %d, presented by %@)", ours ? @"the player's" : @"not the player's", ours,
           presenter ? NSStringFromClass(presenter.class) : @"nothing");
     return ours;
+}
+
+void SGPlayerMenuMarkPlayers(void) {
+    sg_moreTappedAt = CACurrentMediaTime();
+}
+
+BOOL SGPlayerMenuIsPlayers(UIViewController *menu) {
+    return isPlayerMenu(menu);
 }
 
 #pragma mark - Spotify's rows
@@ -636,6 +707,8 @@ static void watchRows(UIViewController *menu) {
 static void install(UIViewController *menu) {
     UIView *root = menu.viewIfLoaded;
     if (!root || !isPlayerMenu(menu)) return;
+    // Shown as the system menu, whose own items are speed, pitch and reverb.
+    if (SGPlayerMenuReplaced(menu)) return;
     UITableView *table = findTable(root, 0);
     SGSpeedPitchView *block = objc_getAssociatedObject(menu, &kBlockKey);
     if (!table) {
@@ -687,6 +760,22 @@ static void install(UIViewController *menu) {
     }
 }
 
+// The player's header row: its more button found by its identifier and watched, under either look.
+%hook _TtC20NowPlaying_ModesImpl18HeaderElementsUnit
+- (void)viewDidLayoutSubviews {
+    %orig;
+    UIView *row = ((UIViewController *)self).viewIfLoaded;
+    static __weak UIView *watched;
+    if (watched && [watched isDescendantOfView:row]) return;
+    __block UIView *more = nil;
+    SGForEachView(row, ^(UIView *view) {
+        if (!more && [view.accessibilityIdentifier isEqualToString:@"Context menu"]) more = view;
+    });
+    watchMoreButton(more);
+    if (more) watched = more;
+}
+%end
+
 %hook _TtC24ContextMenu_InternalImpl25ContextMenuViewController
 - (void)viewDidLayoutSubviews {
     %orig;
@@ -703,5 +792,5 @@ static void install(UIViewController *menu) {
 
 %ctor {
     %init;
-    SGRequireClasses(@[@"_TtC24ContextMenu_InternalImpl25ContextMenuViewController"]);
+    SGRequireClasses(@[@"_TtC24ContextMenu_InternalImpl25ContextMenuViewController", @"_TtC20NowPlaying_ModesImpl18HeaderElementsUnit"]);
 }

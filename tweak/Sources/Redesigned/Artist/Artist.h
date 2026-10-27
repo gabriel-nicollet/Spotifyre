@@ -10,21 +10,36 @@
 //                       gone (the Music list is the page), the flags the screen forces
 //     ArtistHeader.x    the header: the photo full bleed dissolving into the field, and the Kit's
 //                       SGRHeaderInfo over it -- the name, the listeners, shuffle, a white Play and Follow
-//     ArtistSections.x  the sections the Music list carries that are not the artist's music: its videos
+//     ArtistSections.x  the sections the Music list carries that are not the artist's music: its videos, and
+//                       the Artist pick, the Release Countdown and About when asked
 //     ArtistFollow.x    whether the artist is followed, from Spotify's collection, for Follow's glyph
+//     ArtistSettings.m  the Artists page of Mod Settings: the switches below
 //
 // Every hook installs only while Redesigned UI is on (SGRedesignedUI); the native look's do not then.
 // Threading: main thread only.
 #import <UIKit/UIKit.h>
+
+// Apple Music's logo in place of the artist's name (ArtistHeader.x); on until switched off.
+#define SGRKeyArtistLogo @"spotifyglass.redesign.artist.logo"
+// What the redesign takes off the page, on until switched off: the videos in the Music list (ArtistSections.x)
+// and the Music / Video / Merch strip (ArtistField.x).
+#define SGRKeyArtistHideVideos @"spotifyglass.redesign.artist.hide.videos"
+#define SGRKeyArtistHideTabs @"spotifyglass.redesign.artist.hide.tabs"
+// And off until switched on, as the native look's hides are: the Artist pick, the Release Countdown and About
+// sections of the Music list (ArtistSections.x).
+#define SGRKeyArtistHidePick @"spotifyglass.redesign.artist.hide.pick"
+#define SGRKeyArtistHideCountdown @"spotifyglass.redesign.artist.hide.countdown"
+#define SGRKeyArtistHideAbout @"spotifyglass.redesign.artist.hide.about"
+UIViewController *SGRArtistSettingsPage(void);
 
 // The artist page `view` is on, or nil: the TemplateView with the identifier creator-page.
 UIView *SGRArtistPageOf(UIView *view);
 
 // ArtistField.x. The field belongs to the page `view` is on.
 //
-// The colour the page's field is showing, SGRNeutralField() before one has been read.
+// The color the page's field is showing, SGRNeutralField() before one has been read.
 UIColor *SGRArtistFieldColor(UIView *view);
-// The artist's photo, for the page's field to take its colour from. The same image again is a no-op.
+// The artist's photo, for the page's field to take its color from. The same image again is a no-op.
 void SGRArtistSetArtwork(UIView *view, UIImage *image);
 
 // ArtistFollow.x. YES once Spotify's collection has said whether the user follows the page's artist, with

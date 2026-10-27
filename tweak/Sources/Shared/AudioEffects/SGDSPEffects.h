@@ -37,7 +37,7 @@ SGDSPWide *SGDSPWideCreate(double rate, double levelPercent);
 void SGDSPWideSet(SGDSPWide *wide, double levelPercent);
 void SGDSPWideRun(void *wide, float *left, float *right, uint32_t frames);
 
-// Seven Linkwitz-Riley bands around `frequencies`, each band's loud and quiet moments pulled towards its own
+// Seven Linkwitz-Riley bands around `frequencies`, each band's loud and quiet moments pulled toward its own
 // running level by gains[i] (1: 60% less dynamics) or pushed away from it (-1: 60% more), by 12 dB at most.
 // `timeConstant` is the release; the attack a tenth of it, the running level ten times it.
 typedef struct SGDSPCompander SGDSPCompander;
@@ -61,10 +61,15 @@ void SGDSPCrossfeedRun(void *crossfeed, float *left, float *right, uint32_t fram
 // preset: an index of SGDSPReverbPresetCount. NULL when the unit could not be made.
 enum { SGDSPReverbPresetCount = 9 };
 typedef struct SGDSPReverb SGDSPReverb;
-SGDSPReverb *SGDSPReverbCreate(double rate, int preset);
-void SGDSPReverbSet(SGDSPReverb *reverb, int preset);
+// `amount` scales the room's wet mix: 50 is the room's own, 100 twice it.
+SGDSPReverb *SGDSPReverbCreate(double rate, int preset, float amount);
+void SGDSPReverbSet(SGDSPReverb *reverb, int preset, float amount);
 void SGDSPReverbRun(void *reverb, float *left, float *right, uint32_t frames);
 void SGDSPReverbFree(void *reverb);
+// Wet only, for a send: what comes out is the room alone, none of what went in.
+void SGDSPReverbSetSend(SGDSPReverb *reverb, int preset);
+// Empties the room's tail. Off the render thread, or on it between two runs.
+void SGDSPReverbReset(SGDSPReverb *reverb);
 
 // A script in JSFX's shape: a desc: line and sliderN: defaults, then @init, @slider, @block and @sample
 // sections, spl0 and spl1 the samples, srate the rate. NULL and why, with the file's line, when it does

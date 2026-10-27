@@ -15,7 +15,7 @@ __weak UIView *sg_npvBackdropRoot = nil;
             if (SGIsInside(view, sg_lyricsCardRoot) || SGIsInside(view, sg_lyricsPageRoot)) {
                 color = NULL;
             } else if (SGIsInside(view, sg_npvBackdropRoot)) {
-                // The album colour arrives on the plane per track, outside any layout pass.
+                // The album color arrives on the plane per track, outside any layout pass.
                 color = NULL;
             } else if (SGIsBaseSurface(color) && SGIsInside(view, sg_homeRoot)) {
                 // Home keeps its cards and its placeholders; only the base surface the gradient

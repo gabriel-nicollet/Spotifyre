@@ -14,6 +14,12 @@
 //
 // The tracks themselves are the same cell class over RetrievalListStructuredData and are never touched here.
 //
+// A section comes back when its switch is off (AlbumSettings.m). Which one a cell is in is read the way the
+// native look's Album.x reads it: the nearest heading above it, by its title in English. Those are the only
+// names there are -- more by and you might also like are the same carousel of cards -- so in any other
+// language every section is the last switch's, the one for the sections no other switch names. With every
+// switch on, which is how they come, nothing is read and the rule is the one above.
+//
 // A dropped cell is 0 tall, but what it holds keeps the height it measured at, hidden and cut off by the
 // cell: Spotify's content squeezed to 0 with the cell breaks its own required constraints on every layout
 // pass, which is what held the main thread where dropped sections scrolled in on Home (2026-09-17). The two
@@ -80,6 +86,98 @@ static void unsettle(UICollectionViewCell *cell) {
     cell.accessibilityElementsHidden = NO;
 }
 
+#pragma mark - the switches
+
+static const struct { __unsafe_unretained NSString *title, *key; BOOL prefix; } kSections[] = {
+    {@"More by ", SGRKeyAlbumHideMoreBy, YES},
+    {@"Related Music Videos", SGRKeyAlbumHideVideos, NO},
+    {@"Concerts", SGRKeyAlbumHideConcerts, NO},
+    {@"Merch", SGRKeyAlbumHideMerch, NO},
+    {@"You might also like", SGRKeyAlbumHideYouMightLike, NO},
+};
+static const NSInteger kOther = sizeof(kSections) / sizeof(kSections[0]);
+
+// What a cell is to the sections, kept per list by index path: a heading's section is its index in kSections
+// or kOther.
+static const NSInteger kNoHeading = -1, kBoundary = -2;
+
+// Bit i set when section i is switched back on, bit kOther for the rest; read once, as switches are.
+static NSUInteger shownSections(void) {
+    static NSUInteger shown = NSUIntegerMax;
+    if (shown != NSUIntegerMax) return shown;
+    shown = 0;
+    for (NSInteger i = 0; i < kOther; i++) {
+        if (!SGEnabled(kSections[i].key)) shown |= 1u << i;
+    }
+    if (!SGEnabled(SGRKeyAlbumHideOther)) shown |= 1u << kOther;
+    return shown;
+}
+
+static NSInteger sectionTitled(NSString *title) {
+    for (NSInteger i = 0; i < kOther; i++) {
+        NSString *wanted = kSections[i].title;
+        BOOL match = kSections[i].prefix
+            ? [title.lowercaseString hasPrefix:wanted.lowercaseString]
+            : [title caseInsensitiveCompare:wanted] == NSOrderedSame;
+        if (match) return i;
+    }
+    return kOther;
+}
+
+// The section a heading opens, by any of its labels, or kNoHeading. Concerts may come under Spotify's events
+// heading (Components.UI.EventsSectionHeadingHome), so any SectionHeadingHome counts.
+static NSInteger headingIn(UIView *content) {
+    __block BOOL heading = NO;
+    NSMutableArray<NSString *> *titles = [NSMutableArray array];
+    SGForEachView(content, ^(UIView *v) {
+        if ([v.accessibilityIdentifier containsString:@"SectionHeadingHome"] ||
+            [NSStringFromClass(v.class) containsString:@"SectionHeadingHome"]) heading = YES;
+        NSString *title = [v isKindOfClass:UILabel.class] ? ((UILabel *)v).text : v.accessibilityLabel;
+        if (title.length) [titles addObject:title];
+    });
+    if (!heading) return kNoHeading;
+    for (NSString *title in titles) {
+        NSInteger section = sectionTitled(title);
+        if (section != kOther) return section;
+    }
+    return kOther;
+}
+
+static NSMutableDictionary<NSIndexPath *, NSNumber *> *cellsOf(UICollectionView *list) {
+    static char key;
+    NSMutableDictionary *cells = objc_getAssociatedObject(list, &key);
+    if (!cells) {
+        cells = [NSMutableDictionary dictionary];
+        objc_setAssociatedObject(list, &key, cells, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return cells;
+}
+
+// The nearest heading at or above `path`, or kNoHeading under the album's own line, before anything above it
+// is known, or with no list.
+static NSInteger sectionOf(UICollectionView *list, NSIndexPath *path) {
+    NSDictionary<NSIndexPath *, NSNumber *> *cells = cellsOf(list);
+    for (NSInteger item = path.item; item >= 0; item--) {
+        NSNumber *cell = cells[[NSIndexPath indexPathForItem:item inSection:path.section]];
+        if (!cell || cell.integerValue == kBoundary) return kNoHeading;
+        if (cell.integerValue != kNoHeading) return cell.integerValue;
+    }
+    return kNoHeading;
+}
+
+// Records what the cell is and answers whether its section is switched back on.
+static BOOL shown(UICollectionViewCell *cell, UIView *content, NSIndexPath *path, BOOL kept) {
+    NSUInteger switched = shownSections();
+    UICollectionView *list = nil;
+    for (UIView *v = cell.superview; v && !list; v = v.superview) {
+        if ([v isKindOfClass:UICollectionView.class]) list = (UICollectionView *)v;
+    }
+    if (!switched || !list || !path) return NO;
+    cellsOf(list)[path] = @(kept ? kBoundary : headingIn(content));
+    NSInteger section = sectionOf(list, path);
+    return section != kNoHeading && (switched & (1u << section));
+}
+
 static void logOnce(NSString *what) {
     static NSMutableSet<NSString *> *logged;
     if (!logged) logged = [NSMutableSet set];
@@ -100,9 +198,13 @@ static void logOnce(NSString *what) {
     UICollectionViewLayoutAttributes *result = %orig;
     CGFloat natural = MAX(1, result.size.height);
     if (isKept(content)) {
+        shown(cell, content, attributes.indexPath, YES);
         settle(cell, natural, kLead);
         result.size = CGSizeMake(result.size.width, natural + kLead);
         logOnce(@"the album's own line and its copyright kept under the tracks");
+    } else if (shown(cell, content, attributes.indexPath, NO)) {
+        if (objc_getAssociatedObject(cell, &kSettledKey)) unsettle(cell);
+        logOnce(@"a section under the tracks shown, its switch off");
     } else {
         settle(cell, natural, 0);
         result.size = CGSizeMake(result.size.width, 0);

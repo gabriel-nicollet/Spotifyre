@@ -8,13 +8,17 @@
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
-	<key>NSMotionUsageDescription</key>
-	<string>Spotify reads the head movement of your AirPods for head gestures and to keep Spatial Voice preview audio anchored in front of you.</string>
+	<key>MusicHapticsSupported</key>
+	<true/>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_spotify-ln-check._tcp</string>
 		<string>_spotify-connect._tcp</string>
 		<string>_googlecast._tcp</string>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Find nearby speakers and devices for Spotify Connect and Cast.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>AirPods gestures and Spatial voice read how your head moves, so a double nod can like a song, a shake can skip it, and Karaoke's voice can stay in front of you as you turn.</string>
 </dict>
 </plist>

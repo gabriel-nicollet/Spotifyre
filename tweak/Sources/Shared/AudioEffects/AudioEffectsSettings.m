@@ -24,6 +24,7 @@ static const SGDSPNumberKey kNumbers[] = {
     {SGKeyDSPBassGain,          {1, 15, 6, 0.5}},
     {SGKeyDSPConvolverMode,     {0, 2, 0, 1}},
     {SGKeyDSPReverbPreset,      {0, 8, 5, 1}},     // Plate
+    {SGKeyDSPReverbAmount,      {0, 100, 50, 1}},  // the room's own mix
     {SGKeyDSPStereoWideLevel,   {0, 100, 60, 1}},
     {SGKeyDSPCrossfeedMode,     {0, 2, 2, 1}},     // libbs2b's own default
     {SGKeyDSPTubeDrive,         {0, 18, 4, 0.5}},
@@ -37,6 +38,7 @@ static NSDictionary<NSString *, NSString *> *stringDefaults(void) {
             SGKeyDSPCompanderGains: @"0;0;0;0;0;0;0",
             SGKeyDSPEqualizerGains: @"0;0;0;0;0;0;0;0;0;0;0;0;0;0;0",
             SGKeyDSPGraphicEqNodes: @"GraphicEQ: 0.0 0.0;",
+            SGKeyDSPGraphicEqHeadphone: @"",
             SGKeyDSPConvolverFile: @"",
             SGKeyDSPDDCFile: @"",
             SGKeyDSPLiveprogFile: @"",

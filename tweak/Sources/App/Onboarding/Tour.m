@@ -3,6 +3,7 @@
 #import "Onboarding.h"
 #import "App/About/About.h"
 #import "App/Pages.h"
+#import "Shared/AdBlock/AdBlock.h"
 
 static const CGFloat kMargin = 24;
 static const CGFloat kCardRadius = 22;
@@ -25,13 +26,13 @@ static char kPaneKey;
 }
 @end
 
-static UIButton *glassButton(NSString *title) {
+UIButton *SGOnboardingButton(NSString *title) {
     UIButtonConfiguration *config;
     if (@available(iOS 26.0, *)) config = [UIButtonConfiguration prominentGlassButtonConfiguration];
     else config = [UIButtonConfiguration filledButtonConfiguration];
     config.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
     config.baseBackgroundColor = SGGreen();
-    config.baseForegroundColor = UIColor.blackColor;
+    config.baseForegroundColor = SGOnAccent();
     config.contentInsets = NSDirectionalEdgeInsetsMake(15, 20, 15, 20);
     config.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]}];
     UIButton *button = [UIButton buttonWithConfiguration:config primaryAction:nil];
@@ -41,19 +42,8 @@ static UIButton *glassButton(NSString *title) {
 
 #pragma mark - the choice
 
-// One of the two looks, as a glass card: symbol, name, a line on what it brings, and a check
-// when it is the one picked.
-@interface SGLookCard : UIControl
-- (instancetype)initWithSymbol:(NSString *)symbol title:(NSString *)title subtitle:(NSString *)subtitle;
-@end
-
-@implementation SGLookCard {
-    SGGlassView *_glass;
-    UIImageView *_check;
-}
-
-- (instancetype)initWithSymbol:(NSString *)symbol title:(NSString *)title subtitle:(NSString *)subtitle {
-    if (!(self = [super initWithFrame:CGRectZero])) return nil;
+// A card's row: a symbol on a dim square, a name over a line of small gray text, and an accessory at the end.
+static UIStackView *cardRow(NSString *symbol, NSString *title, NSString *subtitle, UIView *accessory) {
     UIImageView *icon = SGSymbolView(symbol, 17, UIImageSymbolWeightSemibold, 36);
     icon.tintColor = UIColor.whiteColor;
     icon.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
@@ -73,15 +63,61 @@ static UIButton *glassButton(NSString *title) {
     text.axis = UILayoutConstraintAxisVertical;
     text.spacing = 2;
 
-    _check = SGSymbolView(@"circle", 22, UIImageSymbolWeightRegular, 26);
-
-    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[icon, text, _check]];
-    row.alignment = UIStackViewAlignmentCenter;
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:accessory ? @[icon, text, accessory] : @[icon, text]];
+    row.alignment = accessory ? UIStackViewAlignmentCenter : UIStackViewAlignmentTop;
     row.spacing = 14;
-    row.userInteractionEnabled = NO;
-    row.translatesAutoresizingMaskIntoConstraints = NO;
     [text setContentHuggingPriority:UILayoutPriorityDefaultLow - 1 forAxis:UILayoutConstraintAxisHorizontal];
     [text setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh - 1 forAxis:UILayoutConstraintAxisHorizontal];
+    [NSLayoutConstraint activateConstraints:@[
+        [icon.widthAnchor constraintEqualToConstant:36],
+        [icon.heightAnchor constraintEqualToConstant:36],
+    ]];
+    return row;
+}
+
+// A glass card of rows, in the look cards' shape, that only points somewhere: the tips at the end of the tour.
+static UIView *tipsCard(NSArray<UIView *> *rows) {
+    SGGlassView *card = [SGGlassView new];
+    card.radius = kCardRadius;
+    card.clipsToBounds = YES;
+    card.layer.cornerRadius = kCardRadius;
+    card.layer.cornerCurve = kCACornerCurveContinuous;
+    UIStackView *column = [[UIStackView alloc] initWithArrangedSubviews:rows];
+    column.axis = UILayoutConstraintAxisVertical;
+    column.spacing = 16;
+    column.translatesAutoresizingMaskIntoConstraints = NO;
+    [card addSubview:column];
+    [NSLayoutConstraint activateConstraints:@[
+        [column.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+        [column.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [column.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
+        [column.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
+    ]];
+    return card;
+}
+
+// One of the two looks, as a glass card: symbol, name, a line on what it brings, and a check
+// when it is the one picked. With an accessory instead, the card is a row for it (the ads switch).
+@interface SGLookCard : UIControl
+- (instancetype)initWithSymbol:(NSString *)symbol title:(NSString *)title subtitle:(NSString *)subtitle;
+- (instancetype)initWithSymbol:(NSString *)symbol title:(NSString *)title subtitle:(NSString *)subtitle accessory:(UIView *)accessory;
+@end
+
+@implementation SGLookCard {
+    SGGlassView *_glass;
+    UIImageView *_check;
+}
+
+- (instancetype)initWithSymbol:(NSString *)symbol title:(NSString *)title subtitle:(NSString *)subtitle {
+    return [self initWithSymbol:symbol title:title subtitle:subtitle accessory:nil];
+}
+
+- (instancetype)initWithSymbol:(NSString *)symbol title:(NSString *)title subtitle:(NSString *)subtitle accessory:(UIView *)accessory {
+    if (!(self = [super initWithFrame:CGRectZero])) return nil;
+    if (!accessory) _check = SGSymbolView(@"circle", 22, UIImageSymbolWeightRegular, 26);
+    UIStackView *row = cardRow(symbol, title, subtitle, accessory ?: _check);
+    row.userInteractionEnabled = NO;
+    row.translatesAutoresizingMaskIntoConstraints = NO;
 
     _glass = [SGGlassView new];
     _glass.radius = kCardRadius;
@@ -98,8 +134,6 @@ static UIButton *glassButton(NSString *title) {
         [_glass.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
         [_glass.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
         [_glass.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
-        [icon.widthAnchor constraintEqualToConstant:36],
-        [icon.heightAnchor constraintEqualToConstant:36],
         [row.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:16],
         [row.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-16],
         [row.topAnchor constraintEqualToAnchor:self.topAnchor constant:16],
@@ -118,38 +152,172 @@ static UIButton *glassButton(NSString *title) {
 
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
-    if (self.enabled) self.alpha = highlighted ? 0.6 : 1;
+    self.alpha = highlighted ? 0.6 : 1;
+}
+
+@end
+
+#pragma mark - the logo
+
+// Vitrine's icon in live glass: reeds of glass over a warm glow, the shop window of icons/Vitrine.png.
+// The tour opens on it, each reed flying in and landing beside the last, before the page comes in
+// under it. Glass shows and hides by its effect, never by an alpha (Redesigned/Kit/SGRGlass.h).
+@interface SGTourLogo : UIView
+// The state before the landing: the frame alone, no glass, no glow, the reeds out of place.
+- (void)prepare;
+// Plays the landing, then runs `landed` as the last reed starts to settle; under Reduce Motion the reeds
+// and the glow fade in where they are.
+- (void)landThen:(void (^)(void))landed;
+@end
+
+@implementation SGTourLogo {
+    CAGradientLayer *_glow;
+    UIView *_pane;
+    NSArray<UIVisualEffectView *> *_reeds;
+    NSArray<CAGradientLayer *> *_flutes;
+}
+
+static const NSUInteger kReeds = 5;
+
+// Clear glass, the style for what sits over something bright, so the glow keeps its light through it.
+static UIVisualEffect *reedEffect(void) {
+    Class glass = NSClassFromString(@"UIGlassEffect");
+    if ([glass respondsToSelector:@selector(effectWithStyle:)]) return [glass effectWithStyle:1];
+    return SGGlassEffect();
+}
+static const CGFloat kLogoRadius = 22;
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (!(self = [super initWithFrame:frame])) return nil;
+    self.isAccessibilityElement = YES;
+    self.accessibilityLabel = @"Vitrine";
+    self.accessibilityTraits = UIAccessibilityTraitImage;
+
+    _pane = [UIView new];
+    _pane.clipsToBounds = YES;
+    _pane.layer.cornerRadius = kLogoRadius;
+    _pane.layer.cornerCurve = kCACornerCurveContinuous;
+    _pane.layer.borderWidth = 1;
+    _pane.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.28].CGColor;
+    [self addSubview:_pane];
+
+    // The icon's palette: a light core going to Apple Music red, then violet, then the dark around it.
+    _glow = [CAGradientLayer layer];
+    _glow.type = kCAGradientLayerRadial;
+    _glow.colors = @[(id)[UIColor colorWithRed:1 green:0.93 blue:0.9 alpha:1].CGColor,
+                     (id)[UIColor colorWithRed:0.98 green:0.18 blue:0.28 alpha:1].CGColor,
+                     (id)[UIColor colorWithRed:0.55 green:0.2 blue:0.85 alpha:1].CGColor,
+                     (id)[UIColor colorWithRed:0.08 green:0.04 blue:0.1 alpha:1].CGColor];
+    _glow.locations = @[@0, @0.35, @0.7, @1];
+    _glow.startPoint = CGPointMake(0.45, 0.5);
+    _glow.endPoint = CGPointMake(1.05, 1.1);
+    [_pane.layer addSublayer:_glow];
+
+    // Each reed is a flute: shade where its curve turns away on the right, a line of light on the left.
+    NSMutableArray<UIVisualEffectView *> *reeds = [NSMutableArray array];
+    NSMutableArray<CAGradientLayer *> *flutes = [NSMutableArray array];
+    for (NSUInteger i = 0; i < kReeds; i++) {
+        UIVisualEffectView *reed = [[UIVisualEffectView alloc] initWithEffect:reedEffect()];
+        reed.userInteractionEnabled = NO;
+        reed.clipsToBounds = YES;
+        CAGradientLayer *flute = [CAGradientLayer layer];
+        flute.startPoint = CGPointMake(0, 0.5);
+        flute.endPoint = CGPointMake(1, 0.5);
+        flute.colors = @[(id)[UIColor colorWithWhite:1 alpha:0].CGColor, (id)[UIColor colorWithWhite:1 alpha:0.45].CGColor,
+                         (id)[UIColor colorWithWhite:1 alpha:0].CGColor, (id)[UIColor colorWithWhite:0 alpha:0].CGColor,
+                         (id)[UIColor colorWithWhite:0 alpha:0.35].CGColor];
+        flute.locations = @[@0.08, @0.16, @0.3, @0.6, @1];
+        [reed.contentView.layer addSublayer:flute];
+        [flutes addObject:flute];
+        [_pane addSubview:reed];
+        [reeds addObject:reed];
+    }
+    _reeds = reeds;
+    _flutes = flutes;
+    return self;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _pane.frame = self.bounds;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    _glow.frame = _pane.bounds;
+    CGFloat width = self.bounds.size.width / kReeds, height = self.bounds.size.height;
+    for (NSUInteger i = 0; i < kReeds; i++) {
+        UIVisualEffectView *reed = _reeds[i];
+        // Frames are laid out under the identity transform the landing ends on.
+        CGAffineTransform transform = reed.transform;
+        reed.transform = CGAffineTransformIdentity;
+        reed.frame = CGRectMake(i * width, 0, width, height);
+        reed.transform = transform;
+        _flutes[i].frame = reed.bounds;
+    }
+    [CATransaction commit];
+}
+
+- (void)prepare {
+    BOOL reduce = UIAccessibilityIsReduceMotionEnabled();
+    _glow.opacity = 0;
+    for (NSUInteger i = 0; i < kReeds; i++) {
+        _reeds[i].effect = nil;
+        _reeds[i].contentView.alpha = 0;
+        // Alternate reeds come from above and below, the middle one from furthest, so the pane closes
+        // on itself rather than sliding in from one side.
+        CGFloat from = (i % 2 ? -1 : 1) * (28 + 10 * (CGFloat)(2 - labs((long)i - 2)));
+        if (!reduce) _reeds[i].transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(0, from), 0.94, 0.94);
+    }
+}
+
+- (void)landThen:(void (^)(void))landed {
+    BOOL reduce = UIAccessibilityIsReduceMotionEnabled();
+
+    CABasicAnimation *glow = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    glow.fromValue = @0;
+    glow.toValue = @1;
+    glow.duration = 0.5;
+    glow.timingFunction = [CAMediaTimingFunction functionWithControlPoints:0.23 :1 :0.32 :1];
+    _glow.opacity = 1;
+    [_glow addAnimation:glow forKey:@"in"];
+
+    if (reduce) {
+        [UIView animateWithDuration:0.3 animations:^{
+            for (UIVisualEffectView *reed in self->_reeds) {
+                reed.effect = reedEffect();
+                reed.contentView.alpha = 1;
+            }
+        }];
+        if (landed) landed();
+        return;
+    }
+    // A landing has a little give: damping 0.8, the reeds 50 ms apart.
+    const NSTimeInterval stagger = 0.05, flight = 0.55;
+    for (NSUInteger i = 0; i < kReeds; i++) {
+        UIVisualEffectView *reed = _reeds[i];
+        UIViewPropertyAnimator *animator = [[UIViewPropertyAnimator alloc] initWithDuration:flight dampingRatio:0.8 animations:^{
+            reed.transform = CGAffineTransformIdentity;
+            reed.effect = reedEffect();
+            reed.contentView.alpha = 1;
+        }];
+        [animator startAnimationAfterDelay:0.1 + i * stagger];
+    }
+    if (landed) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((0.1 + (kReeds - 1) * stagger + flight * 0.5) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), landed);
+    }
 }
 
 @end
 
 #pragma mark - the tour
 
-// One page, the one choice worth making now: the redesign or Spotify's own look. Everything else
-// waits in Mod Settings.
+// One page, the two choices worth making now under Vitrine's logo: the redesign or Spotify's own look, and
+// Spotify without its ads. Everything else waits in Mod Settings; a card of pointers names what people miss there.
 @interface SGOnboardingController : UIViewController
 @end
 
-@implementation SGOnboardingController {
-    UIImageView *_hero;
-    SGLookCard *_redesigned, *_legacy;
-    UIView *_beta;
-    UIButton *_primary;
-}
-
-- (instancetype)init {
-    if (!(self = [super initWithNibName:nil bundle:nil])) return nil;
-    self.modalPresentationStyle = UIModalPresentationOverFullScreen;
-    self.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
-    return self;
-}
-
-// Under the cards while the redesign is picked: it is a beta, and a bug report is the way to help.
-- (UIView *)betaNote {
-    UIImageView *icon = SGSymbolView(@"exclamationmark.triangle.fill", 15, UIImageSymbolWeightSemibold, 22);
-    icon.tintColor = UIColor.systemYellowColor;
-    UILabel *text = [UILabel new];
-    text.text = SGRedesignTested() ? @"The redesign is a beta. Expect lags, freezes and bugs, and if you find one, please report it." : SGRedesignUntestedWarning();
+// A symbol and a line of small gray text, the note under a card.
+static UIStackView *noteLine(UIImageView *icon, UILabel *text) {
     text.font = [UIFont systemFontOfSize:13];
     text.textColor = SGGrey();
     text.numberOfLines = 0;
@@ -157,8 +325,60 @@ static UIButton *glassButton(NSString *title) {
     UIStackView *line = [[UIStackView alloc] initWithArrangedSubviews:@[icon, text]];
     line.alignment = UIStackViewAlignmentTop;
     line.spacing = 10;
+    return line;
+}
 
-    UIStackView *note = [[UIStackView alloc] initWithArrangedSubviews:@[line]];
+// The three switches at the top of the Premium, ads & privacy page, which the No ads card sets together.
+static NSArray<NSString *> *adKeys(void) {
+    return @[SGKeyHideAds, SGKeyHideUpsells, SGKeyFakePremium];
+}
+
+static BOOL adFree(void) {
+    for (NSString *key in adKeys()) if (!SGHidden(key)) return NO;
+    return YES;
+}
+
+@implementation SGOnboardingController {
+    SGTourLogo *_logo;
+    SGLookCard *_redesigned, *_legacy, *_adsCard;
+    UISwitch *_ads;
+    UIStackView *_column;
+    UIView *_splitTip;   // the redesign's; the lyrics tip's line changes with the look too
+    UILabel *_lyricsTip;
+    UIView *_note;
+    UIImageView *_noteIcon;
+    UILabel *_noteText;
+    UIButton *_report;
+    UIButton *_primary;
+    NSArray<UIView *> *_page;   // what comes in under the logo, in order
+    BOOL _landed;
+}
+
+- (instancetype)init {
+    if (!(self = [super initWithNibName:nil bundle:nil])) return nil;
+    self.modalPresentationStyle = UIModalPresentationOverFullScreen;
+    self.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+    // Its text is white, and the glass under it would take the system's appearance, light in light mode.
+    SGPresentDark(self);
+    return self;
+}
+
+// Under the cards: what the picked look leaves out, or below iOS 26 what the redesign risks there.
+- (UIView *)noteView {
+    _noteIcon = SGSymbolView(@"info.circle.fill", 15, UIImageSymbolWeightSemibold, 22);
+    _noteText = [UILabel new];
+    UIStackView *line = noteLine(_noteIcon, _noteText);
+
+    UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
+    config.contentInsets = NSDirectionalEdgeInsetsMake(4, 32, 4, 0);
+    config.baseForegroundColor = SGGreen();
+    config.attributedTitle = [[NSAttributedString alloc] initWithString:@"Report a bug" attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]}];
+    _report = [UIButton buttonWithConfiguration:config primaryAction:[UIAction actionWithHandler:^(UIAction *action) {
+        SGOpenURL([SGRepoURL stringByAppendingString:@"/issues"]);
+    }]];
+    _report.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+
+    UIStackView *note = [[UIStackView alloc] initWithArrangedSubviews:@[line, _report]];
     note.axis = UILayoutConstraintAxisVertical;
     note.alignment = UIStackViewAlignmentLeading;
     note.spacing = 2;
@@ -167,42 +387,116 @@ static UIButton *glassButton(NSString *title) {
     return note;
 }
 
+// The redesign is the look Vitrine is built around, so picking it needs no note on iOS 26. Legacy is
+// told what it goes without; below 26 the redesign is told it is untested, with the way to report it.
+- (void)updateNote {
+    BOOL untested = _redesigned.selected && !SGRedesignAvailable();
+    if (untested) {
+        _noteIcon.image = [UIImage systemImageNamed:@"exclamationmark.triangle.fill"];
+        _noteIcon.tintColor = UIColor.systemYellowColor;
+        _noteText.text = SGRedesignUntestedWarning();
+    } else {
+        _noteIcon.image = [UIImage systemImageNamed:@"info.circle.fill"];
+        _noteIcon.tintColor = SGGrey();
+        _noteText.text = @"Apple Music style lyrics, the redesigned player and the glass tab bar come with the redesign only.";
+    }
+    _report.hidden = !untested || !SGRepoURL;
+    _note.hidden = _redesigned.selected && !untested;
+    // The ads card stands apart from the look's cards and its note, whichever of those comes last.
+    [_column setCustomSpacing:_note.hidden ? 32 : 12 afterView:_legacy];
+    // The tips of the picked look: Split Tabs is the redesign's bar's, and the lyrics preview the redesign's page's.
+    _splitTip.hidden = !_redesigned.selected;
+    _lyricsTip.text = [(_redesigned.selected ? @"A live preview of the look, the sources in order, and lyrics even where Spotify has none."
+                                             : @"The sources in order, and lyrics even where Spotify has none.")
+                       stringByAppendingString:@"\nMod Settings > Lyrics"];
+}
+
+// What people miss in Mod Settings, as pointers only: the tour has no way into a page but holding Home.
+- (UIView *)tipsView {
+    UIStackView *split = cardRow(@"rectangle.split.2x1", @"Split Tabs",
+                                 @"Any tab, Queue for one, on a bar of its own at the trailing end.\nMod Settings > Tab bar > Split Tabs", nil);
+    _splitTip = split;
+    UIStackView *lyrics = cardRow(@"quote.bubble", @"Lyrics", @"", nil);
+    // The row's text stack is its last arranged view, the gray line that stack's; updateNote writes the look's.
+    _lyricsTip = (UILabel *)((UIStackView *)lyrics.arrangedSubviews.lastObject).arrangedSubviews.lastObject;
+    BOOL liveActivity = NO;
+    if (@available(iOS 17.0, *)) liveActivity = YES;
+    UIStackView *airPods = cardRow(@"airpods.pro", liveActivity ? @"AirPods gestures, Live Activity" : @"AirPods gestures",
+                                   liveActivity ? @"Nod twice or shake your head to control the music, with a chime; and the track on the "
+                                                  @"lock screen. Either look.\nMod Settings > AirPods gestures, Live Activity"
+                                                : @"Nod twice or shake your head to control the music, with a chime. Either look."
+                                                  @"\nMod Settings > AirPods gestures", nil);
+    return tipsCard(@[split, lyrics, airPods]);
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.85];
 
-    SGGlassView *halo = [SGGlassView new];
-    halo.capsule = YES;
-    halo.translatesAutoresizingMaskIntoConstraints = NO;
-    _hero = SGSymbolView(@"music.note", 34, UIImageSymbolWeightMedium, 88);
-    _hero.translatesAutoresizingMaskIntoConstraints = NO;
-    [halo addSubview:_hero];
-    // The column stretches its children to its width; the halo keeps its square inside a strip.
+    _logo = [SGTourLogo new];
+    _logo.translatesAutoresizingMaskIntoConstraints = NO;
+    // The column stretches its children to its width; the logo keeps its square inside a strip.
     UIView *strip = [UIView new];
-    [strip addSubview:halo];
+    [strip addSubview:_logo];
 
+    BOOL glass = SGRedesignAvailable();
     UILabel *heading = [UILabel new];
     heading.text = @"Pick your look.";
     heading.font = [UIFont systemFontOfSize:30 weight:UIFontWeightBold];
     heading.textColor = UIColor.whiteColor;
     heading.numberOfLines = 0;
 
-    _redesigned = [[SGLookCard alloc] initWithSymbol:@"sparkles" title:@"Redesigned" subtitle:@"Looks like Apple Music. Better lyrics, Live Activity."];
+    NSString *redesign = glass ? @"Looks like Apple Music. Better lyrics, Live Activity."
+                               : [NSString stringWithFormat:@"Looks like Apple Music. Untested on iOS %@.", UIDevice.currentDevice.systemVersion];
+    _redesigned = [[SGLookCard alloc] initWithSymbol:@"sparkles" title:@"Redesigned" subtitle:redesign];
     _legacy = [[SGLookCard alloc] initWithSymbol:@"slider.horizontal.3" title:@"Legacy" subtitle:@"More options, still looks like Spotify."];
     for (SGLookCard *card in @[_redesigned, _legacy]) [card addTarget:self action:@selector(picked:) forControlEvents:UIControlEventTouchUpInside];
-    // The first launch offers the redesign where it is tested; the tour again from the Mod page shows the stored look.
-    BOOL redesign = SGFlag(SGKeyOnboardingSeen, NO) ? SGRedesignedUIStored() : SGRedesignTested();
-    _redesigned.selected = redesign;
-    _legacy.selected = !redesign;
-    _beta = [self betaNote];
-    _beta.hidden = !redesign;
+    // The first launch offers the redesign where it is at home; below iOS 26 it waits to be asked for.
+    // The tour again from the Mod page shows the stored look.
+    BOOL redesigned = SGFlag(SGKeyOnboardingSeen, NO) ? SGRedesignedUIStored() : glass;
+    _redesigned.selected = redesigned;
+    _legacy.selected = !redesigned;
+    _note = [self noteView];
 
-    UIStackView *column = [[UIStackView alloc] initWithArrangedSubviews:@[strip, heading, _redesigned, _legacy, _beta]];
+    // Spotify without its ads: one switch for Hide ads, Hide upsells and Spoof Premium. Off leaves each as it
+    // is; the tour again shows on only while all three are. They are read at launch, so on ends in a restart.
+    _ads = [UISwitch new];
+    _ads.onTintColor = SGGreen();
+    _ads.on = adFree();
+    _adsCard = [[SGLookCard alloc] initWithSymbol:@"speaker.slash" title:@"No ads"
+                                         subtitle:@"No ads, no Premium upsells, and Premium spoofed." accessory:_ads];
+    [_adsCard addTarget:self action:@selector(toggleAds) forControlEvents:UIControlEventTouchUpInside];
+    _adsCard.isAccessibilityElement = YES;
+    _adsCard.accessibilityLabel = @"No ads";
+    _adsCard.accessibilityHint = @"No ads, no Premium upsells, and Premium spoofed.";
+    _adsCard.accessibilityValue = _ads.on ? @"On" : @"Off";
+    if (@available(iOS 17.0, *)) _adsCard.accessibilityTraits = UIAccessibilityTraitToggleButton;
+    else _adsCard.accessibilityTraits = UIAccessibilityTraitButton;
+    UILabel *adsText = [UILabel new];
+    adsText.text = @"Three switches of Premium, ads & privacy, applied at the restart; off leaves each as it is. Spoof Premium is "
+                   @"untested and can end in a forced logout; a Premium account gains nothing from it. Offline, audio quality and "
+                   @"sessions stay the server's.";
+    UIStackView *adsNote = noteLine(SGSymbolView(@"info.circle.fill", 15, UIImageSymbolWeightSemibold, 22), adsText);
+    adsNote.arrangedSubviews.firstObject.tintColor = SGGrey();
+    adsNote.layoutMargins = UIEdgeInsetsMake(4, 4, 0, 4);
+    adsNote.layoutMarginsRelativeArrangement = YES;
+
+    UILabel *tipsHeading = [UILabel new];
+    tipsHeading.text = @"Easy to miss";
+    tipsHeading.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    tipsHeading.textColor = UIColor.whiteColor;
+    UIView *tips = [self tipsView];
+
+    _column = [[UIStackView alloc] initWithArrangedSubviews:@[strip, heading, _redesigned, _legacy, _note, _adsCard, adsNote, tipsHeading, tips]];
+    UIStackView *column = _column;
     column.axis = UILayoutConstraintAxisVertical;
     column.spacing = 12;
     [column setCustomSpacing:28 afterView:strip];
     [column setCustomSpacing:24 afterView:heading];
+    [column setCustomSpacing:32 afterView:_note];
+    [column setCustomSpacing:32 afterView:adsNote];
     column.translatesAutoresizingMaskIntoConstraints = NO;
+    [self updateNote];
 
     UIScrollView *scroll = [UIScrollView new];
     scroll.alwaysBounceVertical = YES;
@@ -211,7 +505,7 @@ static UIButton *glassButton(NSString *title) {
     [scroll addSubview:column];
     [self.view addSubview:scroll];
 
-    _primary = glassButton(@"Start listening");
+    _primary = SGOnboardingButton(@"Start listening");
     [_primary addTarget:self action:@selector(finish) forControlEvents:UIControlEventTouchUpInside];
     UILabel *footer = [UILabel new];
     footer.text = @"Hold Home to open settings.";
@@ -234,13 +528,11 @@ static UIButton *glassButton(NSString *title) {
         [column.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:kMargin],
         [column.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-kMargin],
         [column.widthAnchor constraintEqualToAnchor:frame.widthAnchor constant:-2 * kMargin],
-        [halo.leadingAnchor constraintEqualToAnchor:strip.leadingAnchor],
-        [halo.topAnchor constraintEqualToAnchor:strip.topAnchor],
-        [halo.bottomAnchor constraintEqualToAnchor:strip.bottomAnchor],
-        [halo.widthAnchor constraintEqualToConstant:88],
-        [halo.heightAnchor constraintEqualToConstant:88],
-        [_hero.centerXAnchor constraintEqualToAnchor:halo.centerXAnchor],
-        [_hero.centerYAnchor constraintEqualToAnchor:halo.centerYAnchor],
+        [_logo.leadingAnchor constraintEqualToAnchor:strip.leadingAnchor],
+        [_logo.topAnchor constraintEqualToAnchor:strip.topAnchor],
+        [_logo.bottomAnchor constraintEqualToAnchor:strip.bottomAnchor],
+        [_logo.widthAnchor constraintEqualToConstant:88],
+        [_logo.heightAnchor constraintEqualToConstant:88],
         [_primary.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:kMargin],
         [_primary.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-kMargin],
         [_primary.bottomAnchor constraintEqualToAnchor:footer.topAnchor constant:-12],
@@ -249,31 +541,56 @@ static UIButton *glassButton(NSString *title) {
         [footer.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
     ]];
     [self refresh];
+
+    // The tour opens on the logo alone; the page waits under it until the reeds land.
+    _page = @[heading, _redesigned, _legacy, _note, _adsCard, adsNote, tipsHeading, tips, _primary, footer];
+    [_logo prepare];
+    BOOL reduce = UIAccessibilityIsReduceMotionEnabled();
+    for (UIView *view in _page) {
+        view.alpha = 0;
+        if (!reduce) view.transform = CGAffineTransformMakeTranslation(0, 16);
+    }
 }
 
-// iOS 16 has no symbol effects and skips the bounce.
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    if (@available(iOS 17.0, *)) [_hero addSymbolEffect:[NSClassFromString(@"NSSymbolBounceEffect") effect]];
+    if (_landed) return;
+    _landed = YES;
+    NSArray<UIView *> *page = _page;
+    [_logo landThen:^{
+        // A strong ease out, critically damped, 40 ms between the parts. Under Reduce Motion the page
+        // only fades, as nothing was moved out of place.
+        for (NSUInteger i = 0; i < page.count; i++) {
+            UIViewPropertyAnimator *animator = [[UIViewPropertyAnimator alloc] initWithDuration:0.45 dampingRatio:1 animations:^{
+                page[i].alpha = 1;
+                page[i].transform = CGAffineTransformIdentity;
+            }];
+            [animator startAnimationAfterDelay:i * 0.04];
+        }
+    }];
 }
 
 - (void)picked:(SGLookCard *)card {
     _redesigned.selected = card == _redesigned;
     _legacy.selected = card == _legacy;
-    BOOL hide = !_redesigned.selected;
-    if (_beta.hidden != hide) {
-        [UIView animateWithDuration:0.25 animations:^{
-            self->_beta.hidden = hide;
-            self->_beta.alpha = hide ? 0 : 1;
-            [self.view layoutIfNeeded];
-        }];
-    }
+    [UIView animateWithDuration:0.25 animations:^{
+        [self updateNote];
+        self->_note.alpha = self->_note.hidden ? 0 : 1;
+        [self.view layoutIfNeeded];
+    }];
     [self refresh];
 }
 
-// The look is picked at launch, so a choice that differs from the running one ends the tour in a restart.
+- (void)toggleAds {
+    [_ads setOn:!_ads.on animated:YES];
+    _adsCard.accessibilityValue = _ads.on ? @"On" : @"Off";
+    [self refresh];
+}
+
+// The look and the ad switches are read at launch, so a choice that differs from the running one ends the
+// tour in a restart.
 - (BOOL)needsRestart {
-    return _redesigned.selected != SGRedesignedUI();
+    return _redesigned.selected != SGRedesignedUI() || (_ads.on && !adFree());
 }
 
 - (void)refresh {
@@ -283,9 +600,12 @@ static UIButton *glassButton(NSString *title) {
     _primary.configuration = config;
 }
 
+// Below iOS 26 the note above the button has said what the redesign risks there, so picking it and
+// going on is the warning accepted (SGSetRedesignedUI stores that).
 - (void)finish {
     SGSetEnabled(SGKeyOnboardingSeen, YES);
     SGSetRedesignedUI(_redesigned.selected);
+    if (_ads.on) for (NSString *key in adKeys()) SGSetEnabled(key, YES);
     if (self.needsRestart) {
         SGRestartSpotify();
         return;
@@ -300,7 +620,7 @@ static UIButton *glassButton(NSString *title) {
 static __weak SGOnboardingController *sg_tour;
 
 BOOL SGOnboardingShowing(void) {
-    return sg_tour != nil;
+    return sg_tour != nil || SGWhatsNewShowing();
 }
 
 void SGShowOnboarding(void) {

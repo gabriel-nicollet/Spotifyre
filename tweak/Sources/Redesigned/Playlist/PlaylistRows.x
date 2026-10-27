@@ -4,7 +4,7 @@
 // Tree (trees/clean/playlist/02.txt:164-247): a cell id=Playlist.ItemCell holds an Encore.ListRow painted the
 // base surface, and in it Encore.ImageView 48x48 (the artwork), Track.Row.Content.Title,
 // Track.Row.Content.Subtitle and, at the trailing edge, Components.UI.ContextMenuButton. The row's own paint
-// is cleared here rather than left to the Kit's repaint hook, which only hears about a colour when Spotify
+// is cleared here rather than left to the Kit's repaint hook, which only hears about a color when Spotify
 // sets it and not when a reused cell already carries one.
 //
 // Spotify's type and its spacing are left alone: the row is 64pt for a title of 18pt, and a larger font of
@@ -63,12 +63,6 @@ static void applyRow(UIView *cell) {
     UIView *row = identified(cell, @"Encore.ListRow", &kRowKey);
     if (!row) return;
     clearSurface(row);
-
-    // The first track with its title in is the list the page waits for (Kit/SGRReveal.h). A row still loading
-    // is Components.UI.RetrievalRowLoadingElementUI rather than Encore.ListRow, grey bars with no text in them
-    // (trees/continuous/1.txt).
-    UIView *page = SGRPlaylistPageOf(cell);
-    if (SGRRevealWaitsFor(page, SGRRevealList) && SGRRevealShowsText(row)) SGRRevealMark(page, SGRRevealList);
 
     CGFloat leading = SGRSideMargin + 48 + kHairlineGap;
     UIView *art = identified(row, @"Encore.ImageView", &kArtKey);

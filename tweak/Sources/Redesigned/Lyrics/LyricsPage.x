@@ -5,9 +5,9 @@
 // Page (trees/lyrics.txt): a page of its own, presented over the player by a
 // _UIOverFullscreenPresentationController, which is why the card's glass stops at the card's edge.
 // Tome_PageTemplateImpl paints the template view #121212 and FullscreenView paints itself the
-// album colour on top, both opaque; clearing them lets the player's blurred artwork through.
+// album color on top, both opaque; clearing them lets the player's blurred artwork through.
 //
-// The album colour is the stubborn one: it arrives per track, after the page has laid out, and it
+// The album color is the stubborn one: it arrives per track, after the page has laid out, and it
 // comes back through a path SGRRepaint.x never sees, so a sweep at layout time loses the race.
 // FullscreenView is asked not to keep it at all instead. The pane goes inside FullscreenView, in
 // front of whatever that view still fills itself with, rather than behind the whole page.
@@ -29,7 +29,7 @@ static UIView *clearAncestors(UIView *view) {
 }
 
 %hook _TtC32Lyrics_FullscreenElementPageImpl14FullscreenView
-// A colour kept here is re-applied whenever UIKit feels like it, so it is refused outright.
+// A color kept here is re-applied whenever UIKit feels like it, so it is refused outright.
 - (void)setBackgroundColor:(UIColor *)color {
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"lyrics page paints itself %@ through UIView", color); });

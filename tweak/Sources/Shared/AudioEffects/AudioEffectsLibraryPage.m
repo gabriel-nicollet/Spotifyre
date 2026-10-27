@@ -6,6 +6,7 @@
 #import "Settings/SGPage.h"
 #import "Settings/SGPageStyle.h"
 #import "AudioEffectsPage.h"
+#import "AudioEffectsPresets.h"
 
 static NSString *const kAutoEqURL = @"https://github.com/jaakkopasanen/AutoEq";
 
@@ -347,7 +348,7 @@ typedef NS_ENUM(NSInteger, SGGraphicEqRow) {
 }
 
 - (BOOL)edited {
-    return ![[self cleaned:_text.text] isEqualToString:SGDSPString(SGKeyDSPGraphicEqNodes)];
+    return ![SGDSPGraphicEqLine(_text.text) ?: _text.text isEqualToString:SGDSPString(SGKeyDSPGraphicEqNodes)];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
@@ -392,22 +393,16 @@ typedef NS_ENUM(NSInteger, SGGraphicEqRow) {
     else [self save:kFlatGraphicEq];
 }
 
-// One line, trimmed: AutoEq's files end in a newline, and a copy out of a web page often has more.
-- (NSString *)cleaned:(NSString *)text {
-    NSCharacterSet *space = NSCharacterSet.whitespaceAndNewlineCharacterSet;
-    NSArray<NSString *> *words = [text componentsSeparatedByCharactersInSet:space];
-    words = [words filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
-    return [words componentsJoinedByString:@" "];
-}
-
 - (void)save:(NSString *)text {
-    NSString *line = [self cleaned:text ?: @""];
-    if (![line.lowercaseString hasPrefix:@"graphiceq:"]) {
+    NSString *line = SGDSPGraphicEqLine(text);
+    if (!line) {
         showAlert(self, text.length ? @"Not a GraphicEQ line" : @"Nothing to paste",
                   @"It starts with \"GraphicEQ:\", then pairs of a frequency and a gain: GraphicEQ: 20 -1.2; 21 -1.1; …");
         return;
     }
     [_text resignFirstResponder];
+    // Text of one's own is no longer the headphone's correction the Headphones row names.
+    if (![line isEqualToString:SGDSPString(SGKeyDSPGraphicEqNodes)]) SGDSPSetString(SGKeyDSPGraphicEqHeadphone, @"");
     SGDSPSetString(SGKeyDSPGraphicEqNodes, line);
     _text.text = line;
     [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:SGGraphicEqSave inSection:2]] withRowAnimation:UITableViewRowAnimationNone];

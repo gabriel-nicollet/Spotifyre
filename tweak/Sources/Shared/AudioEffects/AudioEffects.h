@@ -4,14 +4,15 @@
 //
 // What it offers: output gain and limiter, a multiband compander, dynamic bass boost, a 15 band equalizer,
 // the Graphic EQ (any curve, as AutoEq writes them), the convolver (impulse responses), ViPER DDC files,
-// Liveprog (EEL2 scripts), reverb, stereo widening, crossfeed and analog modelling. Each effect has a switch
+// Liveprog (EEL2 scripts), reverb, stereo widening, crossfeed and analog modeling. Each effect has a switch
 // and its own values, kept under its own keys.
 //
 // Unlike the mod's other switches these apply as they change, not at launch: every setter below stores the
 // value and hands the effect it belongs to to the engine, which re-reads that effect's keys off the main
 // thread. The engine is made the first time Spotify starts its output with the master switch on.
 //
-// Threading: everything here is main thread, except SGDSPStatus and SGDSPError, which any thread may call.
+// Threading: everything here is main thread, except SGDSPStatus, SGDSPError and SGAudioSetOutputReader, which any
+// thread may call.
 #import <Foundation/Foundation.h>
 
 #pragma mark - keys
@@ -40,6 +41,9 @@
 // The Graphic EQ, in AutoEq's GraphicEQ format: "GraphicEQ: 20 -1.2; 21 -1.1; ...".
 #define SGKeyDSPGraphicEq               @"spotifyglass.dsp.geq"
 #define SGKeyDSPGraphicEqNodes          @"spotifyglass.dsp.geq.nodes"
+// The AutoEq headphone the nodes came from, as its folder in AutoEq's results (SGAutoEqHeadphone.path);
+// empty once the text is edited by hand.
+#define SGKeyDSPGraphicEqHeadphone      @"spotifyglass.dsp.geq.headphone"
 
 // File effects name a file in their library (SGDSPLibraryFiles), by its name alone: the app's container
 // moves on every reinstall, the name does not.
@@ -55,6 +59,7 @@
 
 #define SGKeyDSPReverb                  @"spotifyglass.dsp.reverb"
 #define SGKeyDSPReverbPreset            @"spotifyglass.dsp.reverb.preset"       // SGDSPReverbPresetNames index
+#define SGKeyDSPReverbAmount            @"spotifyglass.dsp.reverb.amount"       // %, 50 is the room's own mix
 
 #define SGKeyDSPStereoWide              @"spotifyglass.dsp.wide"
 #define SGKeyDSPStereoWideLevel         @"spotifyglass.dsp.wide.level"          // percent, 50 leaving the width as it is
@@ -111,7 +116,7 @@ typedef NS_ENUM(NSInteger, SGDSPFileKind) {
     SGDSPFileLiveprog,          // Liveprog's .eel
 };
 
-// Documents/spoti.pw/Audio effects/<Convolver|DDC|Liveprog>, made on first use, empty until files are imported.
+// Documents/Vitrine/Audio effects/<Convolver|DDC|Liveprog>, made on first use, empty until files are imported.
 NSString *SGDSPLibraryDirectory(SGDSPFileKind kind);
 NSArray<NSString *> *SGDSPLibraryFiles(SGDSPFileKind kind);   // names, sorted
 NSArray<NSString *> *SGDSPFileExtensions(SGDSPFileKind kind); // lowercase, without the dot
@@ -134,3 +139,15 @@ NSString *SGDSPError(NSString *switchKey);
 void SGDSPEqualizerResponse(NSArray<NSNumber *> *gains, NSInteger count, double *frequencies, double *decibels);
 // The compander's amounts drawn as a smooth curve, the same way.
 void SGDSPCompanderResponse(NSArray<NSNumber *> *gains, NSInteger count, double *frequencies, double *values);
+
+#pragma mark - the output's sound, read
+
+// Called on the render thread with what Spotify's music output plays (SGPlayerMusicOutput), after the effects
+// (and Speed and pitch, and Sing): each buffer the notify sees, mixed to mono, as floats, in runs of up to 4096
+// frames, at the output's rate; zeros for a buffer marked silent. It runs whether the master switch is on or off,
+// but only once Spotify has started its output, and never when Shared/Player cannot reach Spotify's output. It must not allocate, lock, block or
+// send an Objective-C message.
+typedef void (*SGAudioOutputReader)(const float *samples, uint32_t count, double sampleRate);
+// One reader at a time; NULL takes it off. Any thread. A reader taken off can still be in a call that began
+// before, so what it touches has to outlive it.
+void SGAudioSetOutputReader(SGAudioOutputReader reader);

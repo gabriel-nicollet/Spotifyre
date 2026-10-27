@@ -20,4 +20,4 @@ A recording shows the move: `xcrun simctl io booted recordVideo -f run.mp4`, the
 `ffmpeg -ss T -t 0.5 -i run.mp4 -vf "fps=24,scale=160:-1,tile=8x1" -frames:v 1 strip.png`.
 
 What it does not cover: Spotify's real player and list, the tab bar's stand-in, the bar's glass on the
-closing stand-in (`BarTransition.x`), a drag, and the field's colour (the sheet is black here).
+closing stand-in (`BarTransition.x`), a drag, and the field's color (the sheet is black here).

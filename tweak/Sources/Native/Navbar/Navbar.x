@@ -15,8 +15,8 @@
 //   at y 12.5 over an SPTEncoreLabel at y 35.
 #import "Core/SGCore.h"
 #import "Navbar.h"
-#import "Headers/SPTEncoreIconView.h"
 #import "Shared/Navigation/Links.h"
+#import "Shared/Navigation/TabIcons.h"
 #import <objc/message.h>
 
 static const CGFloat kIconSize = 24;
@@ -24,9 +24,11 @@ static const CGFloat kIconTop = 12.5;
 static const CGFloat kLabelTop = 35;
 static const CGFloat kLabelHeight = 14;
 static char kCustomKey, kOrderKey;
+// Between the main group and the split tabs (Split tabs), when both have something on the bar.
+static const CGFloat kSplitGap = 10;
 
 // Where Spotify's own items keep their icon and label, read off one of them every pass, so an item of
-// the mod's own sits on the same line as its neighbours.
+// the mod's own sits on the same line as its neighbors.
 static CGRect sg_iconBox = {{0, kIconTop}, {kIconSize, kIconSize}};
 static CGRect sg_labelBox = {{0, kLabelTop}, {0, kLabelHeight}};
 
@@ -37,40 +39,17 @@ static UIFont *sg_tabFont;
 // Spotify's own tabs in Spotify's order, from the first layout pass of this launch, before
 // anything below has moved them.
 static NSMutableArray<NSString *> *sg_stockOrder;
+// How many tabs at the end of the row are split off from the rest, 0 for one group.
+static NSUInteger sg_apartCount;
 
 static UIColor *itemColor(void) { return [UIColor colorWithWhite:0xB3 / 255.0 alpha:1]; }
 
 #pragma mark - the mod's own items
 
-// One of the 538 glyphs SPTEncoreIcon exposes, one class method each ("podcasts", "heart"), so an
-// item of the mod's own is drawn the same way as Spotify's, or `sf:` and an SF Symbol's name. A star
-// stands in for a name that is neither.
-static UIView *iconView(NSString *name) {
-    if ([name hasPrefix:@"sf:"]) {
-        NSString *symbol = [name substringFromIndex:3];
-        UIImage *image = [UIImage systemImageNamed:symbol withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:19 weight:UIImageSymbolWeightSemibold]];
-        UIImageView *view = [[UIImageView alloc] initWithImage:image];
-        view.tintColor = itemColor();
-        view.contentMode = UIViewContentModeCenter;
-        return view;
-    }
-    Class icon = NSClassFromString(@"SPTEncoreIcon");
-    Class view = NSClassFromString(@"SPTEncoreIconView");
-    SEL glyphSel = NSSelectorFromString(name.length ? name : @"star");
-    if (icon && view && [icon respondsToSelector:glyphSel]) {
-        id (*glyphFor)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
-        id glyph = glyphFor(icon, glyphSel);
-        SPTEncoreIconView *encore = glyph ? [[view alloc] initWithIcon:glyph] : nil;
-        if (encore) {
-            [encore setForegroundColor:itemColor()];
-            return encore;
-        }
-    }
-    UIImage *image = [UIImage systemImageNamed:@"star.fill" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:19 weight:UIImageSymbolWeightSemibold]];
-    UIImageView *fallback = [[UIImageView alloc] initWithImage:image];
-    fallback.tintColor = itemColor();
-    fallback.contentMode = UIViewContentModeCenter;
-    return fallback;
+// Drawn the way Spotify's own are, an Encore glyph or an SF Symbol at the glyphs' size
+// (Shared/Navigation/TabIcons.h).
+static UIView *iconView(NSDictionary *entry) {
+    return SGTabIconView(entry[SGNavbarIcon], [entry[SGNavbarIconSet] isEqual:SGTabIconSetSymbols], itemColor());
 }
 
 @interface SGTabItemView : UIControl
@@ -99,18 +78,19 @@ static UIView *iconView(NSString *name) {
 - (void)applyEntry:(NSDictionary *)entry {
     self.uri = entry[SGNavbarURI];
     _title.text = entry[SGNavbarTitle];
-    NSString *name = entry[SGNavbarIcon] ?: @"star";
+    // The set is part of the name: "star" is a glyph in one and a symbol in the other.
+    NSString *name = [NSString stringWithFormat:@"%@ %@", entry[SGNavbarIconSet] ?: @"encore", entry[SGNavbarIcon] ?: @"star"];
     if ([name isEqualToString:_iconName]) return;
     [_icon removeFromSuperview];
     _iconName = [name copy];
-    _icon = iconView(name);
+    _icon = iconView(entry);
     // Encore's views lay themselves out from constraints; this one is placed by frame.
     _icon.translatesAutoresizingMaskIntoConstraints = YES;
     [self addSubview:_icon];
 }
 
-// Both boxes come off a neighbour, so whatever Spotify does to the row's line-up is copied rather than
-// guessed at; only the horizontal centring is the item's own.
+// Both boxes come off a neighbor, so whatever Spotify does to the row's line-up is copied rather than
+// guessed at; only the horizontal centering is the item's own.
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat width = self.bounds.size.width;
@@ -193,6 +173,8 @@ void SGComposeTabBar(UIView *tabBar) {
     NSMutableArray<UIView *> *wanted = [NSMutableArray array];
     NSMutableSet<NSString *> *placed = [NSMutableSet set];
     NSMutableSet<NSString *> *keep = [NSMutableSet set];
+    NSSet<NSString *> *split = SGEnabled(SGKeyNavbar) ? [NSSet setWithArray:SGNavbarSplit()] : nil;
+    NSMutableSet<UIView *> *apart = [NSMutableSet set];
 
     if (SGEnabled(SGKeyNavbar)) {
         for (NSDictionary *entry in SGNavbarLayout()) {
@@ -207,9 +189,11 @@ void SGComposeTabBar(UIView *tabBar) {
                 else custom[ident] = item = [[SGTabItemView alloc] initWithEntry:entry];
                 [keep addObject:ident];
                 [wanted addObject:item];
+                if ([split containsObject:ident]) [apart addObject:item];
             } else if (stockViews[ident]) {
                 stockViews[ident].hidden = hidden;
                 [wanted addObject:stockViews[ident]];
+                if ([split containsObject:ident]) [apart addObject:stockViews[ident]];
             }
         }
     }
@@ -220,6 +204,7 @@ void SGComposeTabBar(UIView *tabBar) {
         if (!item || [wanted containsObject:item]) continue;
         item.hidden = NO;
         [wanted addObject:item];
+        if ([split containsObject:ident]) [apart addObject:item];
     }
     for (NSString *ident in custom.allKeys) {
         if ([keep containsObject:ident]) continue;
@@ -237,34 +222,45 @@ void SGComposeTabBar(UIView *tabBar) {
     for (UIView *item in wanted) {
         if ([item isKindOfClass:SGTabItemView.class] && item.superview != stack) [stack addArrangedSubview:item];
     }
-    NSMutableArray<UIView *> *order = [NSMutableArray array];
-    for (UIView *item in wanted) if (!item.hidden && item.superview == stack) [order addObject:item];
+    // Split tabs go to the end, each group in the list's order. With nothing left in the main group they
+    // are the bar's one group.
+    NSMutableArray<UIView *> *order = [NSMutableArray array], *trailing = [NSMutableArray array];
+    for (UIView *item in wanted) {
+        if (item.hidden || item.superview != stack) continue;
+        [([apart containsObject:item] ? trailing : order) addObject:item];
+    }
+    NSUInteger apartCount = order.count ? trailing.count : 0;
+    [order addObjectsFromArray:trailing];
     sg_row = stack;
-    if (![order isEqualToArray:objc_getAssociatedObject(stack, &kOrderKey)]) {
+    if (![order isEqualToArray:objc_getAssociatedObject(stack, &kOrderKey)] || apartCount != sg_apartCount) {
+        sg_apartCount = apartCount;
         objc_setAssociatedObject(stack, &kOrderKey, order, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [stack setNeedsLayout];
     }
 }
 
 // Spotify placed the icon and the label for the width it measured (trees/test5.txt: x 28 in a
-// 134pt slot, the centre of the 80pt it had with five tabs) and lays the item out no further
-// once the slot changes. Assigning the centres back sends them through the hooks below.
+// 134pt slot, the center of the 80pt it had with five tabs) and lays the item out no further
+// once the slot changes. Assigning the centers back sends them through the hooks below.
 static void centreContents(UIView *item) {
     SGForEachView(item, ^(UIView *v) {
         if ([v isKindOfClass:%c(SPTEncoreIconView)] || [v isKindOfClass:%c(SPTEncoreLabel)]) v.center = v.center;
     });
 }
 
-// Equal slots across the bar, in the order composed above. The frames go on after the stack's
-// own pass, so Spotify's own widths never decide whether a fifth item fits.
+// Equal slots across the bar, in the order composed above, the split tabs' after a gap. The frames go on
+// after the stack's own pass, so Spotify's own widths never decide whether a fifth item fits.
 static void placeRow(UIStackView *stack) {
     NSArray<UIView *> *order = objc_getAssociatedObject(stack, &kOrderKey);
     UIView *bar = sg_navbarRoot;
     if (!order.count || !bar) return;
-    CGFloat width = bar.bounds.size.width / order.count;
+    CGFloat gap = sg_apartCount ? kSplitGap : 0;
+    CGFloat width = (bar.bounds.size.width - gap) / order.count;
     CGFloat height = stack.bounds.size.height;
+    NSUInteger firstApart = order.count - sg_apartCount;
     [order enumerateObjectsUsingBlock:^(UIView *item, NSUInteger i, BOOL *stop) {
-        CGFloat x = [bar convertPoint:CGPointMake(i * width, 0) toView:stack].x;
+        CGFloat left = i * width + (i >= firstApart ? gap : 0);
+        CGFloat x = [bar convertPoint:CGPointMake(left, 0) toView:stack].x;
         CGRect frame = CGRectMake(x, 0, width, height);
         if (!CGAffineTransformIsIdentity(item.transform)) item.transform = CGAffineTransformIdentity;
         if (!CGRectEqualToRect(item.frame, frame)) item.frame = frame;
@@ -282,7 +278,7 @@ static void placeRow(UIStackView *stack) {
 // Spotify's element layout places the icon and the label from the width it measured, not from
 // the slot above (trees/test5.txt: x 38 in a 134pt element in a 126pt slot), and a view placed by
 // its parent gets no layout pass of its own. So the placement itself is bent: on the bar, whatever
-// x Spotify sets, the view lands centred on its slot.
+// x Spotify sets, the view lands centered on its slot.
 static CGFloat slotCentreX(UIView *view) {
     UIStackView *row = sg_row;
     if (!row) return NAN;

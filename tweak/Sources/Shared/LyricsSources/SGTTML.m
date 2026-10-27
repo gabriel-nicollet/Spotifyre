@@ -12,7 +12,7 @@
 // syllable continues a word rather than starting one.
 //
 // The head can carry the lines again in two more ways, each keyed to its line by the itunes:key of
-// the <p>: Apple's translations, as text, and its pronunciations (transliterations), spelt in the
+// the <p> (lrc:key in lrc.red's copies): Apple's translations, as text, and its pronunciations (transliterations), spelled in the
 // Latin alphabet and timed by spans that start with the words of the line they spell out.
 //
 // <iTunesMetadata><translations><translation xml:lang="en-US"><text for="L1">I'm so drunk …
@@ -65,7 +65,7 @@ static NSInteger msOfClock(NSString *clock) {
 @implementation SGTTMLText
 @end
 
-// What a <text> of the head is: a line again, in another language or spelt out.
+// What a <text> of the head is: a line again, in another language or spelled out.
 typedef NS_ENUM(NSInteger, SGTTMLPart) {
     SGTTMLPartNone,
     SGTTMLPartTranslation,
@@ -128,7 +128,7 @@ typedef NS_ENUM(NSInteger, SGTTMLPart) {
         _lineStart = msOfClock(attributes[@"begin"]);
         _lineEnd = msOfClock(attributes[@"end"]);
         _voice = attributes[@"ttm:agent"] ?: attributes[@"agent"];
-        _key = attributes[@"itunes:key"] ?: attributes[@"key"];
+        _key = attributes[@"itunes:key"] ?: attributes[@"lrc:key"] ?: attributes[@"key"];
         return;
     }
     BOOL translation = [element isEqualToString:@"translation"];
@@ -265,8 +265,8 @@ typedef NS_ENUM(NSInteger, SGTTMLPart) {
 #pragma mark - what the head adds to the lines
 
 // The letters and digits alone, lowercased: a pronunciation or a translation that reads the same as its
-// line is the line again, as an English line of a Japanese song is spelt out as itself.
-static NSString *bareText(NSString *text) {
+// line is the line again, as an English line of a Japanese song is spelled out as itself.
+NSString *SGLyricsBareText(NSString *text) {
     NSMutableString *bare = [NSMutableString string];
     NSCharacterSet *kept = NSCharacterSet.alphanumericCharacterSet;
     NSString *lower = text.lowercaseString;
@@ -275,10 +275,6 @@ static NSString *bareText(NSString *text) {
         if ([kept characterIsMember:c]) [bare appendFormat:@"%C", c];
     }
     return bare;
-}
-
-BOOL SGLyricsReadsSame(NSString *text, NSString *other) {
-    return [bareText(text ?: @"") isEqualToString:bareText(other ?: @"")];
 }
 
 // The translation the Lyrics page asks for: the one in that language, whichever the region ("en"
@@ -304,17 +300,17 @@ static NSString *pronunciationLanguage(NSArray<NSString *> *languages) {
     return languages.firstObject;
 }
 
-static SGKaraokeLine *spoken(NSArray<SGKaraokeWord *> *words, NSString *plain, SGKaraokeLine *of) {
+SGKaraokeLine *SGLyricsPronunciation(NSArray<SGKaraokeWord *> *words, NSString *plain, SGKaraokeLine *of) {
     NSString *said = words.count ? nil : plain;
     SGKaraokeLine *line = nil;
     if (words.count) {
         line = [SGKaraokeLine new];
         line.words = words;
     } else if (said.length) {
-        // Spelt out without spans: its words are estimated across the time of the line they spell.
+        // Spelled out without spans: its words are estimated across the time of the line they spell.
         line = [SGKaraokeEstimatedLines(@[@(of.start), @(MAX(of.end, of.start))], @[said, @""]) firstObject];
     }
-    if (!line || [bareText(SGKaraokeLineText(line)) isEqualToString:bareText(SGKaraokeLineText(of))]) return nil;
+    if (!line || [SGLyricsBareText(SGKaraokeLineText(line)) isEqualToString:SGLyricsBareText(SGKaraokeLineText(of))]) return nil;
     line.start = of.start;
     line.end = MAX(of.end, line.words.lastObject.end);
     line.align = of.align;
@@ -333,11 +329,11 @@ static void addHead(SGTTMLReader *reader) {
         NSString *translation = translations[key].plain;
         NSString *said = SGKaraokeLineText(line);
         if (line.backing) said = [said stringByAppendingFormat:@" %@", SGKaraokeLineText(line.backing)];
-        if (translation.length && ![bareText(translation) isEqualToString:bareText(said)]) line.translation = translation;
+        if (translation.length && ![SGLyricsBareText(translation) isEqualToString:SGLyricsBareText(said)]) line.translation = translation;
         SGTTMLText *pronunciation = pronunciations[key];
         if (!pronunciation) return;
-        line.pronunciation = spoken(pronunciation.words, pronunciation.plain, line);
-        if (line.backing && pronunciation.backingWords.count) line.backing.pronunciation = spoken(pronunciation.backingWords, nil, line.backing);
+        line.pronunciation = SGLyricsPronunciation(pronunciation.words, pronunciation.plain, line);
+        if (line.backing && pronunciation.backingWords.count) line.backing.pronunciation = SGLyricsPronunciation(pronunciation.backingWords, nil, line.backing);
     }];
 }
 

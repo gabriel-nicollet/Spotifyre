@@ -30,24 +30,31 @@ and 471 in turn, 512, and a mix down to single frames), and each check prints a 
     ./build.sh thread && build/audio-effects-thread <song> <out dir>
     ./build.sh address && build/audio-effects-address <song> <out dir>
 
+`./build.sh route && build/route-check` checks the corrections remembered per output (AutoEq.m) through the real
+settings, a route change being a direct call: the speaker, a pair remembered with a pick, another with None, a pick
+made with nothing remembered, a hand-made curve, the effects left off, forgetting and renaming.
+
 A last word `stress` runs the convolver, the threaded checks, rate changes and Liveprog only.
 
 ## The hook in the simulator (`sim/main.m`)
 
 Spotify's chain rebuilt with real units (a converter fed by a render callback, a mixer, RemoteIO, wired with
 MakeConnection), with `AudioEffects.x` (logos, internal generator), its settings, libraries and engine compiled
-into an app whose main executable is the harness, so its `AudioOutputUnitStart` goes through the shared
-audio pipeline's rebound import slot as Spotify's does. The effects register in that pipeline after speed/pitch
-and before haptics. A second render notify, added after the output started and so after the effects', measures
+into an app whose main executable is the harness, so its `AudioOutputUnitStart` goes through the rebound import
+slot as Spotify's does. A second render notify, added after the output started and so after the effects', measures
 what they left in the buffer while a script flips settings: the switch off and a gain that must not apply, the
 switch on and -12 dB, a Liveprog script from the library swapping the channels, a reverb ringing out after the
-source stops, a file missing from the library and its error, then a 16-bit interleaved client at 48 kHz.
+source stops, a file missing from the library and its error, then a 16-bit interleaved client at 48 kHz, then a
+second chain at 44.1 kHz started beside it: the effects move to the second chain and the first plays untouched,
+and when the second stops they move back. SpeedPitch.x is compiled in, since it names the output the effects
+follow. At each step the output's reader (`SGAudioSetOutputReader`, the player's Visualizer's tap) is checked too:
+the mono mix it gets is the measured level 6 dB down, the sine being in one channel, at the output's rate.
 
     THEOS=$HOME/theos ./build-sim.sh
     xcrun simctl install <udid> build/sim/AudioEffectsHarness.app
     xcrun simctl launch --console-pty <udid> com.vojta.audioeffectsharness
 
-Use a device of your own on the iOS 26.5 runtime (`xcrun simctl create`), by UDID, and launch it once: the iOS 27
-simulator crashes harnesses like this one, and every crash puts a dialog on the Mac's screen. The tweak's own lines
+Use a device of your own (`xcrun simctl create`), by UDID. The app has the shared scene delegate (`../scene.m`),
+without which iOS 27 kills it at launch; 2026-10-06 all passed on the iOS 27.0 simulator. The tweak's own lines
 are in the unified log:
 `xcrun simctl spawn <udid> log show --last 2m --predicate 'eventMessage CONTAINS "[spotifyglass]"'`.

@@ -9,17 +9,17 @@ looked at on the Mac without the phone.
     SIMCTL_CHILD_HARNESS_SCENARIO=artwork xcrun simctl launch --console-pty <udid> com.vojta.playerharness
     xcrun simctl io <udid> screenshot shot.png
 
-Launch it on an iOS 26 simulator by UDID. The iOS 27 runtime kills an app that has a scene manifest but
-no scene delegate. `SRC=<another checkout>/tweak/Sources OUT=<dir> ./build.sh` builds it against other
+Launch it on a simulator by UDID; it has a scene delegate (`../scene.m`), so the iOS 27 runtime runs it
+too. `SRC=<another checkout>/tweak/Sources OUT=<dir> ./build.sh` builds it against other
 sources, for example an older commit, to see a bug before its fix.
 
 `build.sh` runs `logos.pl -c generator=internal` over `PlayerLyrics.x`, `PlayerArtwork.x`,
-`PlayerFooter.x`, `PlayerControls.x`, `PlayerScroll.x`, `PlayerField.x`, `PlayerAnimated.x` and the Kit's `SGRBridges.x`, and
-links them with the real `Core/`, `Settings/`, `Redesigned/Kit/`, `PlayerBackgroundSettings.m`, `SGRKaraokeView` and
-`Shared/LockScreenArtwork`'s order and canvas reading. `stubs.m` stands in for the hooks the harness does not compile (the Kit's
-accent and repaint, the rest of the player, the lyrics store, the haptics, where Animated artwork's clips come from)
-and plays a mock player: `SGRHarnessSetTrack` reports a track, with the image ids Spotify's metadata
-carries, to every state observer, and `SGRHarnessSetTrackWith` the same with more metadata and the tracks up next. A song of ten timed lines plays on from launch. `main.m` also answers
+`PlayerControls.x`, `PlayerFooter.x`, `PlayerScroll.x`, `PlayerField.x`, `PlayerHeader.x` (the glass circles of
+the down arrow and the ⋯, in a mocked `HeaderElementsUnit`, and their press) and the Kit's `SGRBridges.x`, and links them with
+the real `Core/`, `Redesigned/Kit/`, `SGRKaraokeView`, `Settings/`, the Player page and the Visualizer (`PlayerVisualiser.m`, `SGRSpectrum.m`). `stubs.m` stands in for the hooks the harness
+does not compile (the Kit's accent and repaint, the rest of the player, the lyrics store, the haptics,
+Sing's mic) and plays a mock player: `SGRHarnessSetTrack` reports a track, with the image ids Spotify's
+metadata carries, to every state observer. A song of ten timed lines plays on from launch. `main.m` also answers
 for i.scdn.co through an `NSURLProtocol` handed to every session, so each picture the Kit fetches can
 come late, out of order, or not at all.
 
@@ -31,40 +31,95 @@ come late, out of order, or not at all.
   it logs whether touches on the lowered footer row (issue #54) still reach it.
 - `artwork` is issue #58. Tracks change while the covers on screen lag behind (3.5 s late, past the
   Kit's last look), two skips come in a row with the older picture answering last, and one track plays
-  offline. Each step checks by colour that the Kit and the field show that track's picture, and the log
+  offline. Each step checks by color that the Kit and the field show that track's picture, and the log
   ends with `artwork checks: n of 4 right -- PASS` or `FAIL`. Before the fix it read 1 of 4.
-- `taps` puts real touches on the player (`touches.m`, KIF's way: a UITouch and an IOHIDEvent sent
-  through UIApplication, so hit testing, gesture recognizers and UIControl tracking all run): taps on
-  the progress bar, on and beside it, with the lyrics up and not, the thumb's own drag and a tap on it,
-  the times and the rows around the bar, a lyric line, and the lyrics' thumbnail with the controls
-  there and with the lines alone. The duration unit is Spotify's position slider under its own class
-  name, wired the way the binary wires it (began on touch down, a seek on touch up). The log ends with
-  `tap checks: n of 25 right -- PASS` or `FAIL`. The iOS 26 UISlider lets go of a touch only once its
-  thumb has settled, and a tap is delivered to the views late through the list's delayed touches, as
-  on the phone.
-- `fluid` is the Fluid artwork background: another album at 7 s (the crossfade), paused from 11 to 13 s, the
-  player's open or close announced at 15 s, Speed, Saturation and Blur pushed at 17 s and put back at 20 s,
-  as the page's sliders do. The log's `redesign warp:` lines pair the link's runs and stops with each step
-  and give its cost a frame.
+- `landscape` turns the lyrics sideways at 3 s, puts a line's meanings over them (the real
+  `MeaningSheet.m`) at 4 s and takes them away at 9, then pauses at 14.5 and resumes at 15.5. Each step
+  logs whether the controls are up and whether a touch on the lines lands on the lines or on the shield
+  that brings the controls back, with `ok` or `WRONG`. At 6 s it logs the sheet's frame: a card inside
+  the safe area with a grabber, where the sheet before it covered the whole screen. It also logs that the
+  window comes up clear and fades in, dark, that every button has a label and 44pt, and at 22 s that
+  VoiceOver's escape takes the screen away and gives the key back to the player.
+- `scroll` moves the list up and down in code and logs whether it stayed at its top, then scrubs a mock of
+  the progress bar's slider in code (issue #172): the list's pan off while it tracks, back at its end, at a
+  cancel and when the slider leaves the window, and a pan that was off already left off. The log ends
+  with `scrub checks: ... -- PASS` or `FAIL`.
+- `cover` is issue #77. The cover is checked untouched first, then given Spotify's layout for a track with
+  lyrics, a smaller cover over the lyric preview, and must take its room back as a centered square the
+  Kit also reports. The log ends with `cover checks: n of 4 right -- PASS` or `FAIL`.
+- `immersive` opens the lyrics and waits past the rest: only the bottom stack under the title row
+  (progress bar, buttons, volume row, footer) fades, the lines grow down only, a touch where the buttons
+  were lands on the lines, the thumbnail takes its own, and the lines' tap is off. Then the tap that
+  wakes them (fired in code), a scroll that hides them again and the thumbnail closing the lyrics. Then,
+  opened again, a sheet over the player keeps the controls up past the rest and they fade once it has
+  gone, Sing's mic stays with the lines and takes its own touch, and a finger held on the player (its
+  touch watcher driven in code) keeps the controls up until it lifts. The log ends with
+  `immersive checks: n of 15 right -- PASS` or `FAIL`.
+- `badge` shows the hold's 2× badge on the cover by hand, holds again while it fades out and lets go.
+  The log ends with `badge checks: n of 3 right -- PASS` or `FAIL`.
 
-- `animated` is Animated artwork over local clips, from the folder `HARNESS_CLIPS` names (`canvas.mp4` and
-  `late.mp4` at 9:16, `apple.mp4` at 3:4, `bright.mp4` nearly white; make them with ffmpeg, e.g.
-  `ffmpeg -f lavfi -i testsrc2=s=360x640:r=30:d=4 -c:v libx264 -pix_fmt yuv420p canvas.mp4`, and keep them out of
-  the repo). A Canvas fades in over Fluid artwork, Apple Music's cover fetched ahead takes over straight from it,
-  a track without a clip goes back to Fluid artwork, a Canvas still downloading shows Fluid artwork until it
-  lands, then a pause, the lyrics, Spotify's own video coming and going, the player's transition and a bright
-  clip. The log ends with `animated checks: n of 15 right -- PASS` or `FAIL`. With `HARNESS_STEPPED=1` each
-  step waits for `xcrun simctl spawn <udid> notifyutil -p com.vojta.harness.next`, so a script can screenshot
-  every state once it has settled.
+- `motion` is Animated artwork. The clip, `HARNESS_CANVAS_FILE` (any mp4, `harness/fluid-clip` writes one),
+  is served as the track's Canvas before the player's background has laid out; then the background lays
+  out, the lyrics open and close, the background is built again, and the ⋯ menu's switch goes off, on, and
+  off with the player out of its window. Each step is checked (the clip on the field, the cover hidden, the
+  poster under the video and the Fluid field held under it, the foot and the blur, the thumbnail, the clip
+  and the cover crossing over half way through the switch). Then the song pauses and plays (the clip's rate
+  0, then 1), a mock of Spotify's video unit attaches and detaches its video (the clip goes and comes back),
+  a track comes with no Canvas and then again with one (the clip comes in late), and a skip to a track whose
+  clip is in the store keeps the last clip until the new one is over it, the cover hidden throughout. The clip's
+  dim is checked over the clip and 0.15 darker under the lyrics, with the rule at its ends; `HARNESS_DIM` is the
+  dim the clip should get (`ffmpeg -f lavfi -i "color=c=white:s=360x640:d=4"` gives 0.54, black 0.10). Uninstall
+  the app between clips, or the store answers with the last one. Then Low Power Mode, which the process is made
+  to report (the simulator has none; Reduce Motion takes the same path), takes the clip away for the cover over
+  Fluid and gives it back once off, and a track change with the app made to report the background takes the clip
+  away at once, with no fade. The log ends with `motion checks: n of 25 right -- PASS` or `FAIL`.
+  `HARNESS_CANVAS_FAILS=n` fails the first n requests for the clip on the way: with 1 the store tries again and
+  every check passes, with 2 the clip never comes.
+- `catalog` is Apple Music's catalog (`SGMotionCatalog.m`) behind a stub of its search: the names searched
+  without their edition, an album search for "Midnights (3am Edition)" asking "Taylor Swift Midnights" and taking
+  the edition of that same name before the standard album, then a 429 and the next album finding nothing at once
+  with nothing asked. The log ends with `catalog checks: n of 5 right -- PASS` or `FAIL`.
 
-`HARNESS_BACKGROUND=0|1` stores Fluid artwork or Animated artwork (unset is the default, `animated` picks
-Animated artwork), `HARNESS_OLD_BACKGROUND=0|1|2` the choice before it (Still artwork, Colour flow, Fluid artwork)
-and `HARNESS_OLD_MOTION=0` the Moving background switch before that, off. `HARNESS_COVER=<path>` starts on a
-picture of your own; keep real covers out of the repo.
+- `settings` opens the redesign's Player page (`PlayerSettings.m`, with the real `Settings/` framework) over the
+  player at 3 s, with the clip of `motion` in. It checks the card leads the page with the five backgrounds'
+  segmented control under it, every name whole, the Mini player section's three rows are on the page, and then,
+  as the control picks each in turn, that the card shows Animated (the clip, the sources and Low Data Mode's rows
+  in), Fluid, Colors, Still, Visualizer (the hills over Fluid held still) and Animated again, with a note for
+  each and the header the same height throughout. The log ends with `settings checks: n of 8 right -- PASS` or
+  `FAIL`.
+- `preview` opens the Player page with the background Still at launch, so the player looks up no clip, and picks
+  Animated on it. The card looks the track's clip up itself: nothing is asked for before the page or while Still
+  shows, the card is Fluid while the clip comes (`HARNESS_CANVAS_DELAY`, 2 s), then the clip is in it with its
+  poster and the field held, the player still without one, and the file in the store, where `SGMotionFile` finds
+  it without asking the server again. Fluid and then Animated again bring it back at once. The clip's address is
+  the run's own, so the store never has it from a run before. The log ends with
+  `preview checks: n of 7 right -- PASS` or `FAIL`; on the sources before the fix it read 5 of 7.
+- `card` plays nothing and opens the Player page at 1 s, then logs the card's title, artist and cover size: with
+  no track ever played, Not Playing over the accent's gradient; with `HARNESS_LAST=1`, a last track played with a
+  long title (gliding), its cover from the picture server and a Canvas of the run's own (`HARNESS_CANVAS_FILE`).
+  `HARNESS_BACKGROUND` is the background's index, Fluid if unset. For screenshots: 2026-10-06 on an iPhone 17 Pro,
+  iOS 27.0, the card read Not Playing over a dim green field, and Holocene with its cover over Fluid.
+- `visualiser` plays the Visualizer background, fed by `stubs.m`'s stand-in for the audio effects' reader: a song
+  of its own at 120 beats a minute, handed over in buffers of 1024 at 48 kHz. It checks the hills stand on the
+  Fluid field held still with the reader on and the link at up to 60 fps, blur behind the lyrics with the link at
+  30, settle and stop with the reader off on a pause, come back on play, and go and come back through the ⋯
+  menu's switch to Fluid and back. The log ends with `visualizer checks: n of 7 right -- PASS` or `FAIL`.
+
+- `header` is the glass circles' press (`PlayerHeader.x`): a finger (`../tabbar/touch.m`) held half a second on
+  the down arrow and then on the ⋯, each a `UIControl` under Spotify's identifier. It checks each has a 44pt glass
+  circle first among its subviews, that a touch at its middle lands on the button, that the circle is pressed
+  in (scale 0.92) while the finger is down and whole again once it lifts. The log ends with
+  `header checks: n of 9 right -- PASS` or `FAIL`. The ⋯'s press on the phone comes through the mod's button
+  over it, which this harness does not build; `harness/system-menu`'s `arrow` run covers that button's events.
+
+- `seek` is the tap around the progress bar (`PlayerControls.x`): a mock slider with Spotify's identifier and
+  the two times beside it. It checks that a tap counts below the bar and up to 12 pt past its ends, not on the
+  thumb or the times, that the ends of the thumb's travel are the song's start and end, that a tap is played
+  to the slider as touch down, value changed and touch up with the slider still tracking, that a drag nobody
+  seeks for is seeked directly after a second, and that the slider lets go once the position is there. The
+  log ends with `seek checks: n of 9 right -- PASS` or `FAIL`.
 
 `HARNESS_VOLUME=0` leaves out the volume row that the phone has and the tree does not.
-`HARNESS_FREE=1` builds the units under the class names Spotify Free's player gives them
-(`ReinventFree_ReinventFreeNpvImpl`), around the same elements; the log should read as it does without it.
 
 A screen recording is the way to see a move:
 

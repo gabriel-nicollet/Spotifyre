@@ -5,13 +5,15 @@ void SGForEachView(UIView *view, void (^fn)(UIView *));
 CGRect SGFrameIn(UIView *view, UIView *target);
 // Whether `view` sits under `root`, stopping at a visual effect view on the way up.
 BOOL SGIsInside(UIView *view, UIView *root);
+// Whether no view from `view` up to (not including) `root` is hidden.
+BOOL SGShownUnder(UIView *view, UIView *root);
 // The first wide stack view under `host` with at least two arranged children: a player row, or
 // the row of items in the tab bar.
 UIStackView *SGRowIn(UIView *host);
 // Whether any view under `root` has `marker` in its class name.
 BOOL SGHasClass(UIView *root, NSString *marker);
 
-// Artwork, glyphs, text and thin lines (progress bar) keep their colour, everything else goes clear.
+// Artwork, glyphs, text and thin lines (progress bar) keep their color, everything else goes clear.
 BOOL SGKeepsColor(UIView *view);
 void SGStripBackgrounds(UIView *view);
 BOOL SGIsVisibleColor(CGColorRef color);

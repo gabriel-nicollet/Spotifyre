@@ -111,3 +111,12 @@ UIView *SGRGlassInside(UIView *control, const void *key, CGFloat side) {
 UIView *SGRGlassCapsuleInside(UIView *control, const void *key, CGSize size, BOOL prominent) {
     return glassInside(control, key, size, YES, prominent);
 }
+
+void SGRShowGlass(UIView *shape, BOOL shown) {
+    if ([shape isKindOfClass:UIVisualEffectView.class]) {
+        UIVisualEffectView *glass = (UIVisualEffectView *)shape;
+        if ((glass.effect != nil) != shown) glass.effect = shown ? SGGlassEffect() : nil;
+    } else {
+        shape.alpha = shown ? 1 : 0;
+    }
+}

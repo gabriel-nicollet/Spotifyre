@@ -1,6 +1,6 @@
 // The player's open and close, told from the appearance callbacks of a controller inside the player,
 // which UIKit sends as the presentation or the dismissal begins, whatever animates it; the transition
-// coordinator says when it is over, a cancelled swipe included. Spotify 9.1.78 presents the player
+// coordinator says when it is over, a canceled swipe included. Spotify 9.1.78 presents the player
 // through SPTBarInteractivePresentationController, never through NowPlaying_ViewPageImpl's
 // Show/CloseFullscreenAnimatedTransitioning animators, whose hooks never once fired.
 #import "Core/SGCore.h"

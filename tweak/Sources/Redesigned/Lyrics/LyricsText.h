@@ -12,7 +12,7 @@ typedef NS_ENUM(NSInteger, SGRLyricsText) {
 };
 
 #define SGRKeyLyricsPronunciation @"spotifyglass.redesign.lyricsPronunciation"   // off until switched on
-#define SGRKeyLyricsTranslation @"spotifyglass.redesign.lyricsTranslation"       // on unless switched off
+#define SGRKeyLyricsTranslation @"spotifyglass.redesign.lyricsTranslation"       // off until switched on
 // The three as the words "lyrics", "pronunciation" and "translation", largest first.
 #define SGRKeyLyricsTextOrder @"spotifyglass.redesign.lyricsTextOrder"
 
@@ -28,27 +28,3 @@ void SGRSetLyricsTextShown(SGRLyricsText text, BOOL shown);
 // LyricsTextSettings.m: the Lyrics page's row for the order, which opens a list of the three to drag.
 @class SGModRow;
 SGModRow *SGRLyricsTextSizesRow(void);
-SGModRow *SGRLyricsTranslationRow(void);
-SGModRow *SGRLyricsAITranslationRow(void);
-
-// Lyrics appearance: preset and fine-tuning values used by SGRKaraokeView.
-#define SGRKeyLyricsStyle @"spotifyglass.redesign.lyricsStyle"
-#define SGRKeyLyricsStyleFontSize @"spotifyglass.redesign.lyricsStyleFontSize"
-#define SGRKeyLyricsStyleFontWeight @"spotifyglass.redesign.lyricsStyleFontWeight"
-#define SGRKeyLyricsStyleLineGap @"spotifyglass.redesign.lyricsStyleLineGap"
-#define SGRKeyLyricsStyleDim @"spotifyglass.redesign.lyricsStyleDim"
-#define SGRKeyLyricsStyleBlur @"spotifyglass.redesign.lyricsStyleBlur"
-#define SGRKeyLyricsStyleBloom @"spotifyglass.redesign.lyricsStyleBloom"
-
-CGFloat SGRLyricsStyleFontSize(void);
-CGFloat SGRLyricsStyleFontWeight(void);
-CGFloat SGRLyricsStyleLineGap(void);
-CGFloat SGRLyricsStyleDim(void);
-CGFloat SGRLyricsStyleBlur(void);
-CGFloat SGRLyricsStyleBloom(void);
-SGModRow *SGRLyricsStyleRow(void);
-SGModRow *SGRLyricsStyleTuneRow(void);
-SGModRow *SGRLyricsStylePreviewRow(void);
-SGModRow *SGRLyricsStyleCustomizeRow(void);
-// Landscape lyrics' switch (LandscapeLyrics.h): the full screen lyrics page turns with the phone.
-SGModRow *SGRLyricsLandscapeRow(void);

@@ -142,7 +142,7 @@ static UIImage *symbolFor(SGRDownloadState state) {
     return [[UIImage systemImageNamed:name withConfiguration:config] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
-// Downloaded is the one state that is "on", so it takes the accent colour, as shuffle does while it is on.
+// Downloaded is the one state that is "on", so it takes the accent color, as shuffle does while it is on.
 static UIColor *tintFor(SGRDownloadState state) {
     return state == SGRDownloadDownloaded ? SGRAccent() : SGRPrimary();
 }

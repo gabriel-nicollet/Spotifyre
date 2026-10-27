@@ -1,10 +1,10 @@
 // Home gradient: a wash behind the top of the Home tab, strongest under the avatar and the pills
 // and out by the second shelf, like the gradient Spotify's own Home used to have. The wash is a
 // layer inside the page's scroll view, under its content, so it scrolls away with the shelves; the
-// base grey the page and the shelves paint over it goes clear in Native/Appearance/Repaint.x, and
-// Spotify's own scrim behind the header goes with it, since it would only mute the colour.
+// base gray the page and the shelves paint over it goes clear in Native/Appearance/Repaint.x, and
+// Spotify's own scrim behind the header goes with it, since it would only mute the color.
 //
-// Which colour it fades, how strong it is and how far down it reaches come from the choice tables
+// Which color it fades, how strong it is and how far down it reaches come from the choice tables
 // in HomeGradientChoices.m, read on every layout pass, so all three apply without restarting
 // Spotify. The switch itself is read once, in the %ctor, and still needs a restart.
 //
@@ -18,7 +18,7 @@
 #import "Native/Appearance/Repaint.h"
 #import "Home.h"
 
-// Colour level behind the header before it starts to go, and colour above the content as well, for
+// Color level behind the header before it starts to go, and color above the content as well, for
 // the rubber band of an overscroll to pull down into.
 static const CGFloat kLevelHeight = 52;
 static const CGFloat kOverscroll = 600;
@@ -27,7 +27,7 @@ static const CGFloat kOverscroll = 600;
 // that list of names.
 //
 // Sampled off the design: #0B4110 at the top of the screen, level behind the header, gone by 390pt,
-// which is Medium at Medium. The other seven colours are that one taken around the wheel.
+// which is Medium at Medium. The other seven colors are that one taken around the wheel.
 static const uint32_t kTints[] = {0x0B4110, 0x0B4138, 0x0B2B41, 0x160B41, 0x330B41, 0x410B2E, 0x410B10, 0x412A0B};
 static const CGFloat kStrengths[] = {0.62, 1.0, 1.45};
 // 0 stands for the whole screen, which is only known once the page has been laid out.
@@ -49,7 +49,7 @@ static UIColor *unpacked(uint32_t rgb) {
                            alpha:1];
 }
 
-// Strength is the colour itself taken up or down rather than its alpha, so that Subtle stays as
+// Strength is the color itself taken up or down rather than its alpha, so that Subtle stays as
 // saturated as Bold instead of washing out into the page behind it.
 static uint32_t strengthened(uint32_t rgb, CGFloat factor) {
     uint32_t out = 0;
@@ -75,7 +75,7 @@ static uint32_t strengthened(uint32_t rgb, CGFloat factor) {
     return CAGradientLayer.class;
 }
 
-// The page lays out on every scroll, so a pass that changes neither the colour nor how far it
+// The page lays out on every scroll, so a pass that changes neither the color nor how far it
 // reaches leaves the layer alone.
 - (void)paintColor:(uint32_t)color span:(CGFloat)span {
     if (color == _color && span == _span) return;

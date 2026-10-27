@@ -3,7 +3,7 @@
 // Both are drawn from what Spotify's own button shows, and neither keeps state of its own. The glyph is
 // looked for past what is hidden behind it -- a play button's glow ring is a hidden view holding an image
 // of its own, and taken for the glyph it put a soft green ring in the capsule (device, 2026-09-17) -- and
-// it is watched afterwards, because Spotify swaps play for pause without laying the header out again.
+// it is watched afterward, because Spotify swaps play for pause without laying the header out again.
 #import "Core/SGCore.h"
 #import "SGRActionRow.h"
 #import "SGRGlass.h"
@@ -11,7 +11,6 @@
 #import "SGRTokens.h"
 #import "SGRAccent.h"
 #import "SGRDownload.h"
-#import "SGRReveal.h"
 
 // The capsule: the glyph is Spotify's own 48pt canvas with the triangle small in the middle of it, so the
 // lead is short and the gap to the word comes out of the canvas itself.
@@ -118,6 +117,8 @@ static NSString *wordIn(UIView *button) {
         _title.text = word;
         self.accessibilityLabel = word;
         [self setNeedsLayout];
+        // The header sizes the capsule to its word ("Play", "Shuffle Play" with shuffle on).
+        [self.superview setNeedsLayout];
     }
     if (![_glyph.tintColor isEqual:content]) _glyph.tintColor = content;
 
@@ -265,7 +266,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     return YES;
 }
 
-// Draws `offSymbol`, or `onSymbol` in the accent colour, switching between them in place.
+// Draws `offSymbol`, or `onSymbol` in the accent color, switching between them in place.
 - (void)sgr_showOn:(BOOL)on off:(NSString *)offSymbol on:(NSString *)onSymbol source:(UIView *)source {
     if (_stateShown != on) {
         UIImage *image = [UIImage systemImageNamed:on ? onSymbol : offSymbol];
@@ -280,7 +281,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
         } else {
             _glyph.image = image;
         }
-        // On is saved or followed, in the accent colour, as downloaded is.
+        // On is saved or followed, in the accent color, as downloaded is.
         _glyph.tintColor = on ? SGRAccent() : SGRPrimary();
         if (first) [self setNeedsLayout];
     }
@@ -322,8 +323,8 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     _downloadTimer.tolerance = interval * 0.2;
 }
 
-// The glyph is taken as Spotify drew it, colour and all: the shuffle button turns its own glyph the accent
-// colour while shuffle is on, and a copy rendered as a template would lose that.
+// The glyph is taken as Spotify drew it, color and all: the shuffle button turns its own glyph the accent
+// color while shuffle is on, and a copy rendered as a template would lose that.
 - (void)feedFrom:(UIView *)source {
     if (!source) return;
     _source = source;
@@ -347,8 +348,8 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     UIImageView *glyph = glyphIn(source, 0);
     NSString *word = source.accessibilityLabel ?: wordIn(source);
     if (word && ![self.accessibilityLabel isEqualToString:word]) self.accessibilityLabel = word;
-    // A button that says "on" with its dot is drawn in our colours, on and off. One expected to have a dot
-    // and found without keeps Spotify's colours, which are then all that tells on from off.
+    // A button that says "on" with its dot is drawn in our colors, on and off. One expected to have a dot
+    // and found without keeps Spotify's colors, which are then all that tells on from off.
     BOOL hasDot = NO;
     BOOL on = self.onGlyphColor && indicatorOn(source, &hasDot);
     UIColor *ownColor = !self.onGlyphColor ? self.glyphColor
@@ -363,7 +364,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     }
     UIColor *tint = ownColor ?: (glyph ? glyph.tintColor : SGRPrimary());
     if (tint && ![_glyph.tintColor isEqual:tint]) {
-        // Turning on or off is a moment of its own: the colour fades across rather than jumping.
+        // Turning on or off is a moment of its own: the color fades across rather than jumping.
         BOOL fade = self.window && _glyph.tintColor && hasDot;
         if (fade) {
             [UIView transitionWithView:_glyph duration:0.2 options:UIViewAnimationOptionTransitionCrossDissolve
@@ -425,6 +426,7 @@ static const CGFloat kCornerSide = 16;
 // Spotify's ⋯ from the same event, so a sheet Spotify puts up in that same turn would ask which page it
 // belonged to before a target added after -sgr_tap had answered.
 static __weak UIView *sg_morePage;
+static __weak SGRMirrorButton *sg_moreButton;
 static NSTimeInterval sg_moreTappedAt;
 static char kRecorderKey;
 
@@ -433,14 +435,43 @@ UIView *SGRPinnedMoreRecentPage(void) {
     return sg_morePage;
 }
 
+SGRMirrorButton *SGRPinnedMoreRecentButton(void) {
+    if (!sg_moreButton || CACurrentMediaTime() - sg_moreTappedAt > SGRPinnedMoreWindow) return nil;
+    return sg_moreButton;
+}
+
 @interface SGRPinnedMoreRecorder : NSObject
 @end
 @implementation SGRPinnedMoreRecorder
 - (void)sgr_moreTapped:(SGRMirrorButton *)button {
     sg_morePage = button.superview;
+    sg_moreButton = button;
     sg_moreTappedAt = CACurrentMediaTime();
 }
 @end
+
+// Over the page's list and its header both, and put back on top whenever Spotify adds to the page.
+static void keepOnTop(UIView *page, UIView *button) {
+    if (button.superview != page) [page addSubview:button];
+    else if (page.subviews.lastObject != button) [page bringSubviewToFront:button];
+}
+
+// Level with the window's safe area at the top, kCornerSide in from the trailing edge of the page. The height is measured in the window and converted back, never from the page's own safe area: a
+// page under a navigation bar counts the bar into its inset, so the playlist's read 116 where the window's
+// reads 62 and the button sat a bar's height below the back button. The inset from the side is taken from
+// the page's own bounds and not converted from the window: the swipe back slides the page across the
+// window, and a frame converted from the window's x would hold the button still while the page left under
+// it, over the screen below, until the page was gone and took it along.
+static void placeInCorner(UIView *page, UIView *button) {
+    UIWindow *window = page.window;
+    UIView *space = window ?: page;
+    CGFloat side = SGRGlassCircleSize;
+    CGFloat x = page.bounds.size.width - kCornerSide - side;
+    CGFloat y = space.safeAreaInsets.top;
+    if (window) y = [page convertPoint:CGPointMake(0, y) fromView:nil].y;
+    CGRect frame = CGRectMake(x, y, side, side);
+    if (!CGRectIsEmpty(frame) && !CGRectEqualToRect(button.frame, frame)) button.frame = frame;
+}
 
 SGRMirrorButton *SGRPinnedMore(UIView *page, const void *key, UIView *source) {
     if (!page) return nil;
@@ -448,7 +479,7 @@ SGRMirrorButton *SGRPinnedMore(UIView *page, const void *key, UIView *source) {
     if (!button) {
         button = [[SGRMirrorButton alloc] initWithFrame:CGRectZero];
         button.fallbackGlyph = [UIImage systemImageNamed:@"ellipsis"];
-        // ⋯ sits in an Encore Tertiary button in Spotify's own row, which draws it grey; in the corner of
+        // ⋯ sits in an Encore Tertiary button in Spotify's own row, which draws it gray; in the corner of
         // the page it is the one control there and reads white, like the back button opposite it.
         button.glyphColor = SGRPrimary();
         // Held by the button, which is held by the page, so the recorder lives exactly as long as both.
@@ -457,25 +488,9 @@ SGRMirrorButton *SGRPinnedMore(UIView *page, const void *key, UIView *source) {
         [button addTarget:recorder action:@selector(sgr_moreTapped:) forControlEvents:UIControlEventTouchDown];
         objc_setAssociatedObject(page, key, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    // Over the page's list and its header both, and put back on top whenever Spotify adds to the page -- under
-    // the curtain while the page has one, so it comes in with the rest of the page.
-    if (button.superview != page) [page addSubview:button];
-    SGRRevealBringToFront(page, button);
+    keepOnTop(page, button);
     if (source) [button feedFrom:source];
     if (button.hidden != (source == nil)) button.hidden = source == nil;
-
-    // Measured in the window and converted back, never from the page's own safe area: a page under a
-    // navigation bar counts the bar into its inset, so the playlist's read 116 where the window's reads 62
-    // and the button sat a bar's height below the back button (device, trees/continuous/1.txt 2026-09-20).
-    UIWindow *window = page.window;
-    CGFloat side = SGRGlassCircleSize;
-    CGRect frame;
-    if (window) {
-        CGRect inWindow = CGRectMake(window.bounds.size.width - kCornerSide - side, window.safeAreaInsets.top, side, side);
-        frame = [page convertRect:inWindow fromView:nil];
-    } else {
-        frame = CGRectMake(page.bounds.size.width - kCornerSide - side, page.safeAreaInsets.top, side, side);
-    }
-    if (!CGRectIsEmpty(frame) && !CGRectEqualToRect(button.frame, frame)) button.frame = frame;
+    placeInCorner(page, button);
     return button;
 }

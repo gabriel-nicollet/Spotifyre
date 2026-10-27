@@ -12,7 +12,6 @@
 #import "App/Onboarding/Onboarding.h"
 #import <dlfcn.h>
 
-NSString *const SGSigningHelpURL = @"";
 
 static NSString *const kWarned = @"spotifyglass.signing.warned";
 static BOOL sg_fixPending;
@@ -70,6 +69,9 @@ static void showFix(void) {
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy the bundle id" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         UIPasteboard.generalPasteboard.string = appID;
     }]];
+    if (SGRepoURL) [sheet addAction:[UIAlertAction actionWithTitle:@"Read more" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        SGOpenURL([SGRepoURL stringByAppendingString:@"#signing"]);
+    }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:sheet animated:YES completion:nil];
 }
@@ -105,6 +107,62 @@ void SGCheckSigningOnce(void) {
             else showFix();
         });
     }];
+}
+
+#pragma mark - when the signature runs out
+
+// embedded.mobileprovision is a CMS envelope around a plain XML plist, so the plist is cut out by its
+// first "<?xml" and its last "</plist>" rather than taken through a CMS decoder. No profile is a build
+// installed without one (TrollStore, a jailbreak), which never runs out.
+static NSDictionary *profile(void) {
+    static NSDictionary *cached;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *path = [NSBundle.mainBundle pathForResource:@"embedded" ofType:@"mobileprovision"];
+        NSData *data = path ? [NSData dataWithContentsOfFile:path] : nil;
+        if (!data) return;
+        NSData *open = [@"<?xml" dataUsingEncoding:NSUTF8StringEncoding], *close = [@"</plist>" dataUsingEncoding:NSUTF8StringEncoding];
+        NSRange start = [data rangeOfData:open options:0 range:NSMakeRange(0, data.length)];
+        NSRange end = [data rangeOfData:close options:NSDataSearchBackwards range:NSMakeRange(0, data.length)];
+        if (start.location == NSNotFound || end.location == NSNotFound || NSMaxRange(end) <= start.location) return;
+        NSData *plist = [data subdataWithRange:NSMakeRange(start.location, NSMaxRange(end) - start.location)];
+        id parsed = [NSPropertyListSerialization propertyListWithData:plist options:0 format:NULL error:NULL];
+        if ([parsed isKindOfClass:NSDictionary.class]) cached = parsed;
+    });
+    return cached;
+}
+
+static NSDate *dateIn(NSString *key) {
+    id date = profile()[key];
+    return [date isKindOfClass:NSDate.class] ? date : nil;
+}
+
+static NSDate *expiry(void) {
+    return dateIn(@"ExpirationDate");
+}
+
+// A free Apple ID's profile lasts seven days, a paid account's up to a year; a day over a week allows
+// for the clock the profile was cut by.
+BOOL SGSigningWeekLong(void) {
+    NSDate *created = dateIn(@"CreationDate"), *expires = expiry();
+    return created && expires && [expires timeIntervalSinceDate:created] < 8 * 24 * 60 * 60;
+}
+
+// The row's value has little room, so it is the day; a week-long profile, which runs out at an hour of
+// a day this week, gives the hour under the title.
+SGModRow *SGSigningExpiryRow(void) {
+    NSDate *expires = expiry();
+    if (!expires) return nil;
+    BOOL week = SGSigningWeekLong();
+    NSDateFormatter *day = [NSDateFormatter new];
+    if (week) [day setLocalizedDateFormatFromTemplate:@"EEEMMMd"];   // "Mon, Oct 12"
+    else day.dateStyle = NSDateFormatterMediumStyle;                 // "Oct 6, 2027"
+    NSString *value = [day stringFromDate:expires];
+    SGModRow *row = SGStatRow(@"Signed until", ^NSString *{ return value; });
+    if (week) row.subtitle = [NSString stringWithFormat:@"At %@. A free Apple ID signs for 7 days.",
+                              [NSDateFormatter localizedStringFromDate:expires dateStyle:NSDateFormatterNoStyle
+                                                             timeStyle:NSDateFormatterShortStyle]];
+    return row;
 }
 
 void SGShowSigningFixIfPending(void) {

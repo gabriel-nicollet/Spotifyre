@@ -17,7 +17,14 @@ const NSTimeInterval SGRCrossfade = 0.35;
 
 // A layout spring settles in about this long without overshooting; a press gives a little back.
 static const NSTimeInterval kLayoutDuration = 0.45, kPressDuration = 0.32;
+// The tab bar's minimize runs on every scroll, so it is quicker than the 0.3 to 0.4 s Apple gives a
+// repositioning spring.
+static const NSTimeInterval kBarDuration = 0.26;
 static const CGFloat kPressDamping = 0.62;
+// A response lands within the press feedback's budget, on a curve that is most of the way there at once.
+static const NSTimeInterval kRespondDuration = 0.2;
+// An exit is quicker still; Native/Player/PlayerGestures.x keeps its own copy of the value.
+static const NSTimeInterval kExitDuration = 0.15;
 
 UIColor *SGRPrimary(void) {
     return UIColor.whiteColor;
@@ -31,7 +38,7 @@ UIColor *SGRTertiary(void) {
     return [UIColor colorWithWhite:1 alpha:SGRIncreaseContrast() ? 0.60 : 0.40];
 }
 
-// Read per call: the accent is stored as it is picked, and the colour row reads it the same way.
+// Read per call: the accent is stored as it is picked, and the color row reads it the same way.
 UIColor *SGRAccent(void) {
     return SGRAccentColor() ?: [UIColor colorWithRed:0x1E / 255.0 green:0xD7 / 255.0 blue:0x60 / 255.0 alpha:1];
 }
@@ -51,7 +58,7 @@ UIColor *SGRHairline(void) {
 UIColor *SGRElevated(UIColor *field) {
     CGFloat r = 0, g = 0, b = 0, a = 1;
     if (![field getRed:&r green:&g blue:&b alpha:&a]) return [UIColor colorWithWhite:1 alpha:0.08];
-    // 12% towards white keeps a card on a black field clear of the greys SGRAmoled.x turns black.
+    // 12% toward white keeps a card on a black field clear of the grays SGRAmoled.x turns black.
     CGFloat lift = 0.12;
     return [UIColor colorWithRed:r + (1 - r) * lift green:g + (1 - g) * lift blue:b + (1 - b) * lift alpha:1];
 }
@@ -85,7 +92,7 @@ BOOL SGRIncreaseContrast(void) {
 
 void SGRAnimate(SGRMotion motion, void (^animations)(void), void (^completion)(BOOL finished)) {
     if (!animations) return;
-    if (motion != SGRMotionFade && SGRReduceMotion()) {
+    if ((motion == SGRMotionLayout || motion == SGRMotionPress || motion == SGRMotionBar) && SGRReduceMotion()) {
         [UIView performWithoutAnimation:animations];
         if (completion) completion(YES);
         return;
@@ -95,11 +102,40 @@ void SGRAnimate(SGRMotion motion, void (^animations)(void), void (^completion)(B
         case SGRMotionLayout:
             [UIView animateWithDuration:kLayoutDuration delay:0 usingSpringWithDamping:1 initialSpringVelocity:0 options:options animations:animations completion:completion];
             break;
+        case SGRMotionBar:
+            [UIView animateWithDuration:kBarDuration delay:0 usingSpringWithDamping:1 initialSpringVelocity:0 options:options animations:animations completion:completion];
+            break;
         case SGRMotionPress:
             [UIView animateWithDuration:kPressDuration delay:0 usingSpringWithDamping:kPressDamping initialSpringVelocity:0 options:options animations:animations completion:completion];
             break;
         case SGRMotionFade:
             [UIView animateWithDuration:SGRCrossfade delay:0 options:options | UIViewAnimationOptionCurveEaseInOut animations:animations completion:completion];
             break;
+        case SGRMotionRespond: {
+            // UIView's own curves are too soft for this; a property animator takes any curve, and like the
+            // others it starts from what is on screen, so it can take over a fade halfway out.
+            UICubicTimingParameters *curve = [[UICubicTimingParameters alloc] initWithControlPoint1:CGPointMake(0.23, 1)
+                                                                                     controlPoint2:CGPointMake(0.32, 1)];
+            UIViewPropertyAnimator *animator = [[UIViewPropertyAnimator alloc] initWithDuration:kRespondDuration timingParameters:curve];
+            [animator addAnimations:animations];
+            if (completion) [animator addCompletion:^(UIViewAnimatingPosition position) { completion(position == UIViewAnimatingPositionEnd); }];
+            [animator startAnimation];
+            break;
+        }
+        case SGRMotionExit:
+            [UIView animateWithDuration:kExitDuration delay:0 options:options | UIViewAnimationOptionCurveEaseOut animations:animations completion:completion];
+            break;
     }
+}
+
+void SGRAnimateLayout(UIView *host, void (^animations)(void), void (^completion)(BOOL finished)) {
+    if (!animations) return;
+    if (!SGRReduceMotion() || !host.window) {
+        SGRAnimate(SGRMotionLayout, animations, completion);
+        return;
+    }
+    // Snapshot the host, so the layout changes in place while the old picture dissolves.
+    [UIView transitionWithView:host duration:0.2
+        options:UIViewAnimationOptionTransitionCrossDissolve | UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
+        animations:animations completion:completion];
 }

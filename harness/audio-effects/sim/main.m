@@ -19,6 +19,15 @@
 
 static const float kAmplitude = 0.25f;
 
+// SpeedPitch.x hooks Spotify's player state; this stands in for it.
+@interface SPTPlayerState : NSObject
+@end
+@implementation SPTPlayerState
+- (double)playbackSpeed {
+    return 1;
+}
+@end
+
 static atomic_bool sg_mute;
 static atomic_uint_fast64_t sg_phase;
 static double sg_generatorRate;
@@ -40,8 +49,9 @@ static OSStatus generate(void *refCon, AudioUnitRenderActionFlags *flags, const 
 
 enum { kProbeCalls = 64 };
 typedef struct { float left, right; UInt32 frames; bool silent; } ProbeCall;
-static ProbeCall sg_calls[kProbeCalls];
-static atomic_uint sg_callCount;
+// One ring per output: [0] the chain the script starts with, [1] the second chain run beside it.
+static ProbeCall sg_calls[2][kProbeCalls];
+static atomic_uint sg_callCount[2];
 
 static OSStatus probe(void *refCon, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *timestamp, UInt32 bus,
                       UInt32 frames, AudioBufferList *data) {
@@ -55,21 +65,22 @@ static OSStatus probe(void *refCon, AudioUnitRenderActionFlags *flags, const Aud
         left += l[i] * l[i];
         right += r[i] * r[i];
     }
-    unsigned n = atomic_load(&sg_callCount);
-    sg_calls[n % kProbeCalls] = (ProbeCall){(float)(left / frames), (float)(right / frames), frames, (*flags & kAudioUnitRenderAction_OutputIsSilence) != 0};
-    atomic_store(&sg_callCount, n + 1);
+    int which = (int)(intptr_t)refCon;
+    unsigned n = atomic_load(&sg_callCount[which]);
+    sg_calls[which][n % kProbeCalls] = (ProbeCall){(float)(left / frames), (float)(right / frames), frames, (*flags & kAudioUnitRenderAction_OutputIsSilence) != 0};
+    atomic_store(&sg_callCount[which], n + 1);
     return noErr;
 }
 
-// The level of the last `calls` renders, in dB RMS, per channel.
-static void level(unsigned calls, double *left, double *right, unsigned *frames, unsigned *silentCalls) {
-    unsigned n = atomic_load(&sg_callCount);
+// The level of output `which`'s last `calls` renders, in dB RMS, per channel.
+static void levelOf(int which, unsigned calls, double *left, double *right, unsigned *frames, unsigned *silentCalls) {
+    unsigned n = atomic_load(&sg_callCount[which]);
     double l = 0, r = 0;
     unsigned count = 0;
     *frames = 0;
     *silentCalls = 0;
     for (unsigned i = 0; i < calls && i < n && i < kProbeCalls; i++) {
-        ProbeCall call = sg_calls[(n - 1 - i) % kProbeCalls];
+        ProbeCall call = sg_calls[which][(n - 1 - i) % kProbeCalls];
         l += call.left;
         r += call.right;
         *frames = call.frames;
@@ -80,17 +91,56 @@ static void level(unsigned calls, double *left, double *right, unsigned *frames,
     *right = count ? 10 * log10(r / count + 1e-20) : -200;
 }
 
-static int sg_failures;
+static void level(unsigned calls, double *left, double *right, unsigned *frames, unsigned *silentCalls) {
+    levelOf(0, calls, left, right, frames, silentCalls);
+}
 
-static void report(NSString *what, double wantLeft, double wantRight) {
+static int sg_failures;
+static void reportReader(double wantLeft, double wantRight);
+
+static void reportOutput(int which, NSString *what, double wantLeft, double wantRight) {
     double left, right;
     unsigned frames, silent;
-    level(8, &left, &right, &frames, &silent);
+    levelOf(which, 8, &left, &right, &frames, &silent);
     BOOL ok = (isnan(wantLeft) || fabs(left - wantLeft) < 0.6) && (isnan(wantRight) || fabs(right - wantRight) < 0.6);
     if (!ok) sg_failures++;
     NSLog(@"[harness] %@ %-44@ left %6.1f dB, right %6.1f dB (want %@, %@), slices of %u, %u silent; status \"%@\"", ok ? @"  ok  " : @"FAILED",
           what, left, right, isnan(wantLeft) ? @"any" : [NSString stringWithFormat:@"%.1f", wantLeft],
           isnan(wantRight) ? @"any" : [NSString stringWithFormat:@"%.1f", wantRight], frames, silent, SGDSPStatus());
+    reportReader(wantLeft, wantRight);
+}
+
+#pragma mark - the output's reader (SGAudioSetOutputReader)
+
+// What AudioEffects.x hands its one reader: the buffer after the effects, mixed to mono. The sine is in one
+// channel only, so the mix is it at half, 6 dB down.
+static float sg_readerLevels[kProbeCalls];
+static atomic_uint sg_readerCalls;
+static atomic_uint_fast64_t sg_readerRate;
+
+static void reader(const float *samples, uint32_t count, double rate) {
+    double sum = 0;
+    for (uint32_t i = 0; i < count; i++) sum += samples[i] * samples[i];
+    unsigned n = atomic_load(&sg_readerCalls);
+    sg_readerLevels[n % kProbeCalls] = count ? (float)(sum / count) : 0;
+    atomic_store(&sg_readerCalls, n + 1);
+    atomic_store(&sg_readerRate, (uint64_t)rate);
+}
+
+static void reportReader(double wantLeft, double wantRight) {
+    if (isnan(wantLeft) || isnan(wantRight)) return;
+    unsigned n = atomic_load(&sg_readerCalls), count = 0;
+    double sum = 0;
+    for (unsigned i = 0; i < 8 && i < n; i++, count++) sum += sg_readerLevels[(n - 1 - i) % kProbeCalls];
+    double got = count ? 10 * log10(sum / count + 1e-20) : -200, want = MAX(wantLeft, wantRight) - 6.02;
+    BOOL ok = count && (want < -150 ? got < -150 : fabs(got - want) < 0.6);
+    if (!ok) sg_failures++;
+    NSLog(@"[harness] %@        the reader: %6.1f dB (want %.1f) at %llu Hz, %u calls", ok ? @"  ok  " : @"FAILED", got, want,
+          (unsigned long long)atomic_load(&sg_readerRate), n);
+}
+
+static void report(NSString *what, double wantLeft, double wantRight) {
+    reportOutput(0, what, wantLeft, wantRight);
 }
 
 #pragma mark - the chain
@@ -106,12 +156,13 @@ static void check(OSStatus status, const char *what) {
     if (status) NSLog(@"[harness] %s failed: %d", what, (int)status);
 }
 
-@interface SGDSPHarnessDelegate : UIResponder <UIApplicationDelegate, UIWindowSceneDelegate>
+@interface SGDSPHarnessDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
 
 @implementation SGDSPHarnessDelegate {
     AudioUnit _converter, _mixer, _output;
+    AudioUnit _secondConverter, _secondMixer, _secondOutput;
 }
 
 // Spotify's way: float, one buffer per channel, converter -> mixer -> RemoteIO, slices of 4096.
@@ -136,8 +187,32 @@ static void check(OSStatus status, const char *what) {
     for (int i = 0; i < 3; i++) check(AudioUnitSetProperty(units[i], kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &slice, sizeof slice), "slice");
     for (int i = 0; i < 3; i++) check(AudioUnitInitialize(units[i]), "initialize");
     check(AudioOutputUnitStart(_output), "start");
-    check(AudioUnitAddRenderNotify(_output, probe, NULL), "probe");
+    check(AudioUnitAddRenderNotify(_output, probe, (void *)0), "probe");
     [self logScopes];
+}
+
+// A second chain, Spotify's way at `rate`, started beside the first, the way Spotify runs a chain per sample
+// rate; its own probe is output 1's.
+- (void)startSecondChainAt:(double)rate {
+    _secondConverter = make(kAudioUnitType_FormatConverter, kAudioUnitSubType_AUConverter);
+    _secondMixer = make(kAudioUnitType_Mixer, kAudioUnitSubType_MultiChannelMixer);
+    _secondOutput = make(kAudioUnitType_Output, kAudioUnitSubType_RemoteIO);
+    AURenderCallbackStruct callback = {generate, NULL};
+    check(AudioUnitSetProperty(_secondConverter, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callback, sizeof callback), "callback");
+    AudioStreamBasicDescription format = {rate, kAudioFormatLinearPCM, kAudioFormatFlagsNativeFloatPacked | kAudioFormatFlagIsNonInterleaved, 4, 1, 4, 2, 32, 0};
+    AudioUnit units[] = {_secondConverter, _secondMixer, _secondOutput};
+    for (int i = 0; i < 3; i++) {
+        if (i < 2) check(AudioUnitSetProperty(units[i], kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &format, sizeof format), "format out");
+        check(AudioUnitSetProperty(units[i], kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof format), "format in");
+    }
+    AudioUnitConnection toMixer = {_secondConverter, 0, 0}, toOutput = {_secondMixer, 0, 0};
+    check(AudioUnitSetProperty(_secondMixer, kAudioUnitProperty_MakeConnection, kAudioUnitScope_Input, 0, &toMixer, sizeof toMixer), "connect mixer");
+    check(AudioUnitSetProperty(_secondOutput, kAudioUnitProperty_MakeConnection, kAudioUnitScope_Input, 0, &toOutput, sizeof toOutput), "connect output");
+    UInt32 slice = 4096;
+    for (int i = 0; i < 3; i++) check(AudioUnitSetProperty(units[i], kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &slice, sizeof slice), "slice");
+    for (int i = 0; i < 3; i++) check(AudioUnitInitialize(units[i]), "initialize");
+    check(AudioOutputUnitStart(_secondOutput), "start");
+    check(AudioUnitAddRenderNotify(_secondOutput, probe, (void *)1), "probe");
 }
 
 // What the client format is and what the notify gets: the output scope, the hardware's.
@@ -156,7 +231,7 @@ static void check(OSStatus status, const char *what) {
 // still gets the output side's float, now with the engine following the rate change.
 - (void)startInt16ChainAt:(double)rate {
     AudioOutputUnitStop(_output);
-    AudioUnitRemoveRenderNotify(_output, probe, NULL);
+    AudioUnitRemoveRenderNotify(_output, probe, (void *)0);
     AudioUnit old[] = {_output, _mixer, _converter};
     for (int i = 0; i < 3; i++) {
         if (!old[i]) continue;
@@ -179,7 +254,7 @@ static void check(OSStatus status, const char *what) {
     check(AudioUnitInitialize(_converter), "initialize converter");
     check(AudioUnitInitialize(_output), "initialize output");
     check(AudioOutputUnitStart(_output), "start");
-    check(AudioUnitAddRenderNotify(_output, probe, NULL), "probe");
+    check(AudioUnitAddRenderNotify(_output, probe, (void *)0), "probe");
     [self logScopes];
 }
 
@@ -187,14 +262,8 @@ static void check(OSStatus status, const char *what) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
 }
 
-- (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
-    UISceneConfiguration *config = [[UISceneConfiguration alloc] initWithName:@"Harness" sessionRole:session.role];
-    config.delegateClass = self.class;
-    return config;
-}
-
-- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
-    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [UIViewController new];
     [self.window makeKeyAndVisible];
     [AVAudioSession.sharedInstance setCategory:AVAudioSessionCategoryPlayback error:nil];
@@ -202,6 +271,7 @@ static void check(OSStatus status, const char *what) {
     double sine = 20 * log10(kAmplitude / M_SQRT2), nothing = -200, any = NAN;
     NSLog(@"[harness] the sine's level is %.1f dB RMS in the left channel", sine);
     SGDSPSetSwitch(SGKeyDSP, NO);
+    SGAudioSetOutputReader(reader);
     [self startSpotifyChainAt:44100];
 
     NSArray *script = @[
@@ -233,14 +303,23 @@ static void check(OSStatus status, const char *what) {
             SGDSPSetNumber(SGKeyDSPPostGain, 0);
             SGDSPSetSwitch(SGKeyDSPLiveprog, YES);
         }, @(nothing), @(sine)],
+        // Two outputs at once: the effects follow the one Spotify started last, and the other plays as it is.
+        @[@"a 44.1 kHz float chain started beside it", ^{ [self startSecondChainAt:44100]; }, @(sine), @(nothing), @(nothing), @(sine)],
+        @[@"44.1 kHz chain stopped: back on the 16-bit one", ^{
+            check(AudioOutputUnitStop(self->_secondOutput), "stop");
+            // The effects' notify went back on after the probe; the probe goes after it again, to read what it left.
+            AudioUnitRemoveRenderNotify(self->_output, probe, (void *)0);
+            check(AudioUnitAddRenderNotify(self->_output, probe, (void *)0), "probe");
+        }, @(nothing), @(sine)],
         @[@"master off again", ^{ SGDSPSetSwitch(SGKeyDSP, NO); }, @(sine), @(nothing)],
     ];
     __block NSString *label = nil;
-    __block double wantLeft = 0, wantRight = 0;
+    __block double wantLeft = 0, wantRight = 0, wantSecondLeft = NAN, wantSecondRight = NAN;
     double step = 2.5, at = 1;
     for (NSArray *entry in script) {
         [self after:at do:^{
             if (label) report(label, wantLeft, wantRight);
+            if (label && !isnan(wantSecondLeft)) reportOutput(1, [label stringByAppendingString:@" (2nd)"], wantSecondLeft, wantSecondRight);
             if ([label hasPrefix:@"the source goes silent"]) {
                 // The tail: the level over the renders since the source stopped, loud at first, then less.
                 double left, right;
@@ -256,6 +335,8 @@ static void check(OSStatus status, const char *what) {
             label = entry[0];
             wantLeft = [entry[2] doubleValue];
             wantRight = [entry[3] doubleValue];
+            wantSecondLeft = entry.count > 5 ? [entry[4] doubleValue] : NAN;
+            wantSecondRight = entry.count > 5 ? [entry[5] doubleValue] : NAN;
             ((void (^)(void))entry[1])();
         }];
         if ([entry[0] hasPrefix:@"the source goes silent"]) {
@@ -277,6 +358,7 @@ static void check(OSStatus status, const char *what) {
         NSLog(@"[harness] %@: %d failed", sg_failures ? @"FAILED" : @"all passed", sg_failures);
         exit(sg_failures ? 1 : 0);
     }];
+    return YES;
 }
 
 @end

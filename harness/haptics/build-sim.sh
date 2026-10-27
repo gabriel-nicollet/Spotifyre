@@ -12,8 +12,7 @@ SRC=../../tweak/Sources
 OUT=build/sim
 HAPTICS="$SRC/Shared/Haptics"
 EXTRA=""
-AUDIO=""
-SETTINGS="$SRC/Shared/Haptics/HapticsSettings.m $SRC/Shared/Haptics/SGFeedback.m $SRC/Settings/SGPage.m $SRC/Settings/SGPageStyle.m $SRC/Settings/SGModPage.m $SRC/Settings/SGGlowSwitch.m"
+SETTINGS="$SRC/Shared/Haptics/HapticsSettings.m $SRC/Shared/Haptics/SGVibrationsPreview.m $SRC/Shared/Haptics/SGFeedback.m $SRC/Settings/SGPage.m $SRC/Settings/SGPageStyle.m $SRC/Settings/SGModPage.m $SRC/Settings/SGGlowSwitch.m"
 if [ "$1" = before ]; then
     HAPTICS=$2
     OUT=build/sim-before
@@ -23,14 +22,12 @@ fi
 rm -rf "$OUT"
 mkdir -p "$OUT/gen" "$OUT/HapticsHarness.app"
 "$THEOS/bin/logos.pl" -c generator=internal "$HAPTICS/MusicHaptics.x" > "$OUT/gen/MusicHaptics.m"
-if [ "$1" != before ]; then
-    AUDIO="$SRC/Shared/Audio/SGAudioSourceQueue.m"
-    "$THEOS/bin/logos.pl" -c generator=internal "$SRC/Shared/Audio/SGAudioPipeline.x" > "$OUT/gen/SGAudioPipeline.m"
-fi
+# Shared/Player keeps Spotify's outputs apart and tells Music Haptics which is the music's.
+"$THEOS/bin/logos.pl" -c generator=internal "$SRC/Shared/Player/SpeedPitch.x" > "$OUT/gen/SpeedPitch.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O1 -isysroot "$SDK" -Wno-deprecated-declarations \
-    $EXTRA -I"$SRC" -I"$SRC/Shared/Haptics" -Isim \
-    sim/main.m sim/fakehaptics.m "$OUT"/gen/*.m $AUDIO "$HAPTICS/SGMusicAnalyzer.m" $SETTINGS \
+    $EXTRA -I"$SRC" -I"$SRC/Shared/Haptics" -I"$SRC/Shared/Player" -Isim \
+    sim/main.m sim/fakehaptics.m ../scene.m "$OUT/gen/MusicHaptics.m" "$OUT/gen/SpeedPitch.m" "$SRC/Shared/Player/SGTimePitch.m" "$HAPTICS/SGMusicAnalyzer.m" $SETTINGS \
     "$SRC/Core/SGRebind.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGViewTree.m" "$SRC/Core/SGFlagForce.m" \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework AudioToolbox -framework AVFoundation -framework Foundation \
     -o "$OUT/HapticsHarness.app/HapticsHarness"
@@ -44,7 +41,15 @@ cat > "$OUT/HapticsHarness.app/Info.plist" <<'PLIST'
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>UILaunchScreen</key><dict/>
-<key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+<key>UIApplicationSceneManifest</key><dict>
+  <key>UIApplicationSupportsMultipleScenes</key><false/>
+  <key>UISceneConfigurations</key><dict>
+    <key>UIWindowSceneSessionRoleApplication</key><array><dict>
+      <key>UISceneConfigurationName</key><string>Default</string>
+      <key>UISceneDelegateClassName</key><string>SGRHarnessScene</string>
+    </dict></array>
+  </dict>
+</dict>
 </dict></plist>
 PLIST
 echo "built $OUT/HapticsHarness.app"

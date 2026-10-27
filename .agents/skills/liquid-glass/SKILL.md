@@ -186,6 +186,12 @@ For platform-specific details, see [references/platform-specifics.md](references
 - **iPadOS**: Larger grid sizes; sidebar adaptable tab views
 - **Conditional compilation**: Use `#if os(macOS)` / `#if os(iOS)` for platform-specific code
 
+## UIKit
+
+The tweak is UIKit and Objective-C. For `UIGlassEffect`, `UIGlassContainerEffect`, `cornerConfiguration`,
+scroll edge effects, glass bar items and buttons, and the tweak's own glass rules, see
+[references/uikit.md](references/uikit.md).
+
 ## Common Pitfalls
 
 For detailed pitfalls and solutions, see [references/pitfalls-and-solutions.md](references/pitfalls-and-solutions.md).

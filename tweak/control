@@ -1,7 +1,7 @@
-Package: com.spotipw
-Name: Spotifyre
+Package: com.vitrine.tweak
+Name: Vitrine
 Architecture: iphoneos-arm
 Description: Liquid Glass for the Spotify iOS app
-Maintainer: Spotifyre
-Author: Spotifyre
+Maintainer: Vitrine
+Author: Vitrine
 Section: Tweaks

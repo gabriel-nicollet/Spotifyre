@@ -1,20 +1,22 @@
 // The redesign's now playing bar: the glass card it becomes (NowPlayingBar.x), Spotify's device button
 // on that card hidden on request (BarConnect.x), glass behind the bar's and the tab bar's stand-ins while
-// the player opens and closes (BarTransition.x), and the bar's rows on Mod Settings' Player page
+// the player opens and closes (BarTransition.x), and the bar's rows in Mod Settings
 // (NowPlayingBarSettings.m). The redesign keeps its own copy of the hide switch and its own key; the
 // native look's lives in Native/NowPlayingBar/.
 #import <UIKit/UIKit.h>
 
-@class SGModSection;
+@class SGModRow;
 
 #define SGRHideBarConnect @"spotifyglass.redesign.hide.barConnect"   // the device button on the card
-// The mini player in the tab bar, Apple Music style: the tab bar becomes a UITabBarController's, with
-// the mod's own mini player (MiniPlayer.m) as its bottom accessory, and Spotify's bar goes invisible
-// under it. Off unless set; read at launch.
-#define SGRKeyInlinePlayer @"spotifyglass.redesign.inlinePlayer"
-BOOL SGRInlinePlayer(void);
+// The device button kept on the card in the minimized tab bar's row (NowPlayingBar.x), off unless set: by
+// default the row has the cover, the title and play alone, as the Music app's. Read each time the card goes
+// into the row, so a change shows the next time the bar minimizes.
+#define SGRKeyBarInlineConnect @"spotifyglass.redesign.nowPlayingBar.inlineConnect"
 
-NSArray<SGModSection *> *SGRNowPlayingSections(void);
+// The bar's rows, the Mini player section of the Player page (Redesigned/Player/PlayerSettings.m): Apple
+// Music style (the tab bar's Minimize on scroll, Redesigned/Navbar/Navbar.h), the device button in that
+// row, and the device button hidden on the full card.
+NSArray<SGModRow *> *SGRNowPlayingBarRows(void);
 
 // The bar's glass card in `host`'s coordinates, with its corner radius; CGRectNull before the bar has
 // been styled or while it is out of a window (NowPlayingBar.x). The bar keeps its geometry while
@@ -22,17 +24,6 @@ NSArray<SGModSection *> *SGRNowPlayingSections(void);
 CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius);
 // The round artwork on that card in `host`'s coordinates; CGRectNull when none was found.
 CGRect SGRNowPlayingArtworkFrameIn(UIView *host);
-
-// With the mini player on, those two answer for the mini player, and Spotify's bar, invisible, stays
-// what the mini player reads and works through:
-// the picture Spotify's bar shows now, nil before it has one, and the view that shows it;
-UIImage *SGRNowPlayingArtworkImage(void);
-UIImageView *SGRNowPlayingArtworkView(void);
-// a tap on Spotify's bar, which opens the player; NO when nothing on the bar took it.
-BOOL SGROpenPlayerFromBar(void);
-
-// MiniPlayer.m: the accessory's content view, and its card and artwork in `host`'s coordinates
-// (CGRectNull while it is not in a window).
-UIView *SGRMakeMiniPlayer(void);
-CGRect SGRMiniPlayerFrameIn(UIView *host, CGFloat *radius);
-CGRect SGRMiniPlayerArtworkFrameIn(UIView *host);
+// Lays the bar out again at once, into the minimized tab bar's slot or back above the bar
+// (Navbar.h's SGRTabBarInlineSlot); TabBar.x calls it inside its own animation.
+void SGRNowPlayingBarFollowTabBar(void);

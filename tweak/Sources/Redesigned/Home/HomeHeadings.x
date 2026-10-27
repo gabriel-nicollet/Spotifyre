@@ -22,7 +22,7 @@
 #import "Redesigned/Kit/SGRKit.h"
 #import "Home.h"
 
-static char kTitleKey, kShowAllKey, kHeldKey, kTriesKey;
+static char kTitleKey, kShowAllKey, kHeldKey, kTriesKey, kAskedKey;
 
 // How often a heading with no title yet is looked at again.
 static const NSUInteger kTries = 3;
@@ -45,13 +45,6 @@ static UIView *headingAround(UIView *button) {
     return nil;
 }
 
-static BOOL shown(UIView *view, UIView *root) {
-    for (UIView *v = view; v && v != root; v = v.superview) {
-        if (v.hidden) return NO;
-    }
-    return YES;
-}
-
 // The label that is the title: the largest text showing under the button, its own label aside. A label the stack
 // has not sized yet counts, since the constraints take its place from the layout rather than from its bounds.
 static UILabel *titleLabelIn(UIView *button, UILabel *mine) {
@@ -59,7 +52,7 @@ static UILabel *titleLabelIn(UIView *button, UILabel *mine) {
     SGForEachView(button, ^(UIView *v) {
         if (v == mine || ![v isKindOfClass:UILabel.class]) return;
         UILabel *label = (UILabel *)v;
-        if (!label.text.length || !shown(label, button)) return;
+        if (!label.text.length || !SGShownUnder(label, button)) return;
         if (!title || label.font.pointSize > title.font.pointSize) title = label;
     });
     return title;
@@ -68,6 +61,18 @@ static UILabel *titleLabelIn(UIView *button, UILabel *mine) {
 static void restyle(UIView *button) {
     UIView *heading = headingAround(button);
     if (!heading) return;
+    // The heading names the shelf (HomeShelves.m). The page's list may have sized the shelf before the heading
+    // was in; one switched off, or the one Top picks is to draw, is then measured again now that it is known. The
+    // large shelf's heading goes with the band above its cards (HomeTopPicks.x).
+    UIView *shelf = heading.superview;
+    while (shelf && ![shelf isKindOfClass:UICollectionView.class]) shelf = shelf.superview;
+    NSString *identity = SGRHomeShelfIdentity(shelf);
+    if (identity && ![objc_getAssociatedObject(shelf, &kAskedKey) isEqualToString:identity]) {
+        objc_setAssociatedObject(shelf, &kAskedKey, identity, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        SGRHomeNoteShelf(identity);
+        BOOL wanted = !SGRHomeInTopPicks(heading) && SGEnabled(SGRKeyHomeTopPicks) && [identity isEqualToString:SGRHomeTopPicksFrom()];
+        if (SGRHomeShelfHidden(identity) || wanted) SGRHomeMeasureAgain(heading);
+    }
     UILabel *mine = objc_getAssociatedObject(button, &kTitleKey);
     UILabel *theirs = titleLabelIn(button, mine);
     SGRHeadingHold *held = objc_getAssociatedObject(button, &kHeldKey);
@@ -101,7 +106,7 @@ static void restyle(UIView *button) {
     // Whether "Show all" is offered is read off the hidden flags, not off its width: it has none to go by until
     // the layout resolves, and a title held to the heading's own edge then ran under it.
     UIView *showAll = SGRFindByIdentifier(heading, @"Components.UI.NavigationButtonHome", &kShowAllKey);
-    BOOL offered = showAll && shown(showAll, heading);
+    BOOL offered = showAll && SGShownUnder(showAll, heading);
     UIView *limit = offered ? showAll : heading;
     if (added || held.label != theirs || held.limit != limit) {
         if (held.constraints) [NSLayoutConstraint deactivateConstraints:held.constraints];

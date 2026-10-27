@@ -48,7 +48,7 @@ static UIView *mockButton(NSString *symbol) {
     UIView *page = root.view;
     page.backgroundColor = UIColor.blackColor;
 
-    // Something with colour and detail under the glass, so a shape that is refracting the page reads as glass
+    // Something with color and detail under the glass, so a shape that is refracting the page reads as glass
     // rather than as a flat disc. The player's field is artwork blurred behind the header the same way.
     CAGradientLayer *field = [CAGradientLayer layer];
     field.frame = CGRectMake(0, 0, page.bounds.size.width, 420);

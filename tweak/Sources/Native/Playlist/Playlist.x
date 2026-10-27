@@ -139,7 +139,7 @@ static void collapseCover(UIViewController *headerVC, UIView *layout, UIView *co
 
 static char kBackdropKey, kSourceKey;
 
-// The cover blurred behind the header in place of Spotify's colour wash. The header's background
+// The cover blurred behind the header in place of Spotify's color wash. The header's background
 // (trees/test6.txt) is a HeaderView under _backgroundViewContainer holding the wash, then a black
 // view that fades in as the page scrolls; the backdrop goes between them so the scroll still darkens
 // it, and its scrim ends in the black of the rows below. No cover, no backdrop: the wash stays.

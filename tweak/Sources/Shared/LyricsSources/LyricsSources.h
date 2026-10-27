@@ -19,26 +19,22 @@
 // unset or 0 takes whatever translation the source has.
 #define SGKeyLyricsTranslationLanguage @"spotifyglass.lyricsTranslationLanguage"
 
-// What is shown with a source's lines: its name, or the whole line a source's terms ask for (the
-// catalogue it passed on, the people who made the sync), with the pages it has to lead to. A
-// required credit shows whether or not Show source is on.
-@interface SGLyricsCredit : NSObject
-@property (nonatomic, copy) NSString *text;
-@property (nonatomic, copy) NSArray<NSString *> *linkTitles;
-@property (nonatomic, copy) NSArray<NSURL *> *links;
-@property (nonatomic) BOOL required;
+// A page a credit names someone on: "Uploader: name" and the address it opens.
+@interface SGLyricsLink : NSObject
+@property (nonatomic, copy) NSString *title;
+@property (nonatomic, copy) NSURL *url;
 @end
-
-SGLyricsCredit *SGLyricsCreditNamed(NSString *name);
-// One link opens straight away, several are offered in a sheet.
-void SGLyricsOpenCredit(SGLyricsCredit *credit);
 
 // What a source answers with, and what the chain merges several of into one.
 @interface SGLyricsResult : NSObject
-@property (nonatomic, copy) NSString *provider;   // the key of the source the lines came from
-// A source's own credit for this answer, nil for its name alone. In the chain's merged result, the
-// credit of the karaokeLines' source, and pageCredit that of the texts', which can be another.
-@property (nonatomic, strong) SGLyricsCredit *credit, *pageCredit;
+// What the credit names: the source's name, unless it gave a fuller credit of its own.
+@property (nonatomic, copy) NSString *provider;
+// Who made the lines, linked from the credit; and whether the source's terms ask for the credit to
+// show wherever its lines do, Show source or not.
+@property (nonatomic, copy) NSArray<SGLyricsLink *> *creditLinks;
+@property (nonatomic) BOOL creditRequired;
+// The source of the text Spotify's own page shows, when it is not the one the lines came from.
+@property (nonatomic, copy) NSString *pageProvider;
 @property (nonatomic) BOOL synced;                // the lines have starts of their own
 @property (nonatomic) BOOL wordTimed;             // the words inside them are timed, not estimated
 // Every line as Spotify's lyrics page takes it: ♪ over a break and an empty last line where the
@@ -73,7 +69,7 @@ typedef void (^SGLyricsAsk)(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
 @property (nonatomic, copy) NSString *name;     // "BiniLyrics", what the credit reads
 @property (nonatomic, copy) NSString *detail;   // one line under the name on the Lyrics page
 // Searches by title and artist, so it has nothing to ask with until someone has named the track.
-// Musixmatch and Spicy Lyrics match by Spotify's id and can go without.
+// Musixmatch matches by Spotify's id and can go without.
 @property (nonatomic) BOOL needsName;
 @property (nonatomic, copy) SGLyricsAsk ask;
 @end
@@ -86,12 +82,6 @@ SGLyricsProvider *SGLyricsProviderFor(NSString *key);
 NSArray<NSString *> *SGLyricsOrder(void);
 void SGLyricsSetOrder(NSArray<NSString *> *keys);
 BOOL SGLyricsEnabled(void);   // any source at all is on
-BOOL SGEeveeLoaded(void);   // EeveeSpotify injected at all, found by its classes or a dylib named for it
-// EeveeSpotify injected with its own lyrics on. It answers color-lyrics in the same delegate calls with a
-// fetch that blocks the calling thread, and LyricsHook makes those calls from the main queue.
-BOOL SGLyricsEeveeReplaces(void);
-// A source is on and EeveeSpotify is not replacing lyrics; what the hooks go by, read once at launch.
-BOOL SGLyricsActive(void);
 
 // Asks the sources in order and merges what they give, on the main queue. nil when none had lyrics.
 void SGLyricsFetch(NSString *trackID, void (^done)(SGLyricsResult *result));
@@ -111,23 +101,26 @@ void SGLyricsNoteSpotifyHas(NSString *trackID, BOOL has);
 id SGLyricsForcedFlag(NSString *key);
 // Set on the requests the mod sends to spclient itself, so the request hook leaves them alone.
 extern NSString *const SGLyricsOwnRequestKey;
-// The credit of the lines the lyrics view shows for the track, nil until they arrive; nil is set as
-// Spotify's.
-SGLyricsCredit *SGLyricsCreditFor(NSString *trackID);
-void SGLyricsSetCredit(NSString *trackID, SGLyricsCredit *credit);
-// The credit of the lines put on Spotify's own lyrics page, nil where it shows Spotify's.
-SGLyricsCredit *SGLyricsPageCreditFor(NSString *trackID);
-void SGLyricsSetPageCredit(NSString *trackID, SGLyricsCredit *credit);
+// The name of the source the lines shown for the track came from, nil until they arrive.
+NSString *SGLyricsCreditFor(NSString *trackID);
+void SGLyricsSetCredit(NSString *trackID, NSString *name);
+// What the walk learned of a credit, by its text: whether it must show, and the links it carries.
+// SGLyricsCreditLinks takes the credit or any text holding it, as Spotify's "Lyrics provided by ..."
+// does. Main queue.
+BOOL SGLyricsCreditRequired(NSString *credit);
+NSArray<SGLyricsLink *> *SGLyricsCreditLinks(NSString *text);
+// Opens one link at once; two or more as an action sheet held to `from`.
+void SGLyricsOpenCreditLinks(NSArray<SGLyricsLink *> *links, UIView *from);
 // Turns an install's old Musixmatch switches into an order. Called once, before anything reads one.
 void SGLyricsMigrateLegacyKeys(void);
 
 // The requests the sources share; each calls back on the main queue, with nil when it failed.
 NSURL *SGLyricsURL(NSString *base, NSDictionary<NSString *, NSString *> *query);
 void SGLyricsGetJSON(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root));
+// The same with the reply's status and headers, and the body read whatever the status: an error's
+// body says why. response is nil when the request never got an answer.
+void SGLyricsGetJSONReply(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root, NSHTTPURLResponse *response));
 void SGLyricsGetText(NSURL *url, void (^done)(NSString *text));
-// For a source that reads the status and headers too: the body is read whatever the status.
-void SGLyricsGetJSONReply(NSURL *url, NSDictionary<NSString *, NSString *> *headers,
-                          void (^done)(id root, NSHTTPURLResponse *response));
 // For the one source that is asked a question rather than sent to an address. body is anything
 // NSJSONSerialization writes; nothing is sent at all when it is not.
 void SGLyricsPostJSON(NSURL *url, NSDictionary<NSString *, NSString *> *headers, id body, void (^done)(id root));
@@ -141,8 +134,12 @@ BOOL SGLyricsReplyFailed(NSURLResponse *response, NSError *error);
 // line's translation and pronunciation added where the head has them; nil when the document holds no
 // line the page could show.
 NSArray<SGKaraokeLine *> *SGTTMLLines(NSString *xml);
-// Whether a pronunciation or a translation reads the same as its line, letters and digits alone.
-BOOL SGLyricsReadsSame(NSString *text, NSString *other);
+// The letters and digits of a text alone, lowercased: a pronunciation or a translation equal to its
+// line's this way reads the same as the line and is left out.
+NSString *SGLyricsBareText(NSString *text);
+// A line's pronunciation: timed `words` where the source has them, else `plain` estimated across the
+// line's own time; nil when it has neither or reads the same as `of`.
+SGKaraokeLine *SGLyricsPronunciation(NSArray<SGKaraokeWord *> *words, NSString *plain, SGKaraokeLine *of);
 
 // The languages a translation can be asked for in, as language tags ("en", "es"), the first one ""
 // for whatever the source has; SGKeyLyricsTranslationLanguage indexes it, so it only ever grows at
@@ -156,16 +153,45 @@ NSString *SGLyricsTranslationLanguage(void);
 // The sources themselves, each in its own file.
 extern SGLyricsAsk SGBiniLyricsAsk;
 extern SGLyricsAsk SGMusixmatchAsk;
+// Musixmatch's community translations of a track into `language`, by SGMusixmatchLineKey of each original
+// line, or nil when there are none. Main queue, and at once when the answer is in. Asked once per
+// track and language a launch, again only after an answer cut short.
+void SGMusixmatchTranslations(NSString *trackID, NSString *language, void (^done)(NSDictionary<NSString *, NSString *> *byLine));
+NSString *SGMusixmatchLineKey(NSString *text);
+// Copies of the lines with the translations matched in, in a new array; nil when none matched.
+NSArray<SGKaraokeLine *> *SGMusixmatchTranslatedLines(NSArray<SGKaraokeLine *> *lines, NSDictionary<NSString *, NSString *> *byLine);
 extern SGLyricsAsk SGUnisonAsk;
 extern SGLyricsAsk SGNetEaseAsk;
 extern SGLyricsAsk SGLrcLibAsk;
 extern SGLyricsAsk SGSpicyLyricsAsk;
+extern SGLyricsAsk SGQQMusicAsk;
+extern SGLyricsAsk SGKuGouAsk;
 
-// SpicyLyrics.m asks with a publishable key the user made on Spicy Lyrics' developer platform, and
-// with none asks nothing. Posted on the main queue when the key or what the server said of it changes.
-extern NSNotificationName const SGSpicyLyricsKeyDidChangeNotification;
-NSString *SGSpicyLyricsKeyShown(void);            // its ends only, nil without a key
-NSString *SGSpicyLyricsSetKey(NSString *text);    // what is wrong with it, nil once stored; empty removes it
-NSString *SGSpicyLyricsProblem(void);             // why it asks nothing, nil while the key works
+// LrcLib.m. Timed LRC as a synced result, nil when no line in it is timed.
+SGLyricsResult *SGLyricsLRCResult(NSString *lrc);
+// NetEase.m. Word timed lines from NetEase's yrc, or with krc from KuGou's KRC text; nil for none.
+NSArray<SGKaraokeLine *> *SGLyricsPieceLines(NSString *body, BOOL krc);
+// QQMusic.m, for it and KuGou. A title as the two are matched by: lowercased, without spaces,
+// punctuation or symbols, ideographic and full width ones included. The artist without whoever is
+// featured ("A feat. B" is A). Whether a credited name and the track's artist name the same one: the
+// key of either holds the other's, the featured artists left out.
+NSString *SGLyricsMatchKey(NSString *text);
+NSString *SGLyricsLeadArtist(NSString *artist);
+BOOL SGLyricsSameArtist(NSString *credited, NSString *artist);
+// What the two catalogs are asked as: a browser.
+#define SGLyricsBrowserAgent @"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+// KuGou.m. A download's base64 content as lines, nil when it is not KRC or holds no timed line.
+NSArray<SGKaraokeLine *> *SGKuGouLines(NSString *content);
+
+// SpicyLyrics.m. Its key in the order; whether the user's own API key is in the Keychain; what keeps
+// it from answering, for its row on the sources page ("Needs a key", why the key was refused), nil
+// while nothing does; the Lyrics page's row that sets or removes the key; and an API response as
+// lines, nil when it has none.
+extern NSString *const SGSpicyLyricsKey;
+BOOL SGSpicyLyricsKeySet(void);
+NSString *SGSpicyLyricsStatus(void);
+@class SGModRow;
+SGModRow *SGSpicyLyricsKeyRow(void);
+SGLyricsResult *SGSpicyLyricsResult(id root);
 
 UIViewController *SGLyricsSourcesPage(void);   // the ordered list on the Lyrics page

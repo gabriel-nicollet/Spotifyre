@@ -1,24 +1,24 @@
-// Search redesign: each category card as Liquid Glass tinted by its own colour. Under the glass, the card's colour runs
+// Search redesign: each category card as Liquid Glass tinted by its own color. Under the glass, the card's color runs
 // diagonally from itself at the top leading corner to a darker shade of it at the bottom trailing one; the glass is the
-// clear style with that colour at 35% for its tint, so its rim catches the colour and its body stays as vivid as
+// clear style with that color at 35% for its tint, so its rim catches the color and its body stays as vivid as
 // Spotify's card. The cover and the title stay Spotify's, over the glass. The card takes the card radius, continuous;
-// the title moves in with it; and the card gives a little under a press, which Spotify showed by darkening the colour
+// the title moves in with it; and the card gives a little under a press, which Spotify showed by darkening the color
 // the glass now covers. Picked on the iOS 27 simulator against plain tinted glass (flat on black), regular glass over
-// the colour (muddy) and the cover under clear glass (smeared), 2026-09-17.
+// the color (muddy) and the cover under clear glass (smeared), 2026-09-17.
 //
-// Under Reduce Transparency, or before iOS 26, the card is the colour alone.
+// Under Reduce Transparency, or before iOS 26, the card is the color alone.
 //
 // Tree (trees/clean/search/01.txt:332-339): Control<Box> id=Components.UI.CategoryCardBrowse 177x108 >
 // Encore.Box 177x108 clips > UIView r=4 clips (the Box's content view) > Encore.ImageView (the cover, turned 25 degrees
-// at the trailing edge) and SPTEncoreLabel {8, 8} 120x18 (the title). The colour is in no view: Box's layoutSubviews sets
-// the path and the fill colour of its animationLayer, a CAShapeLayer among its layer's sublayers, from the card's colour
+// at the trailing edge) and SPTEncoreLabel {8, 8} 120x18 (the title). The color is in no view: Box's layoutSubviews sets
+// the path and the fill color of its animationLayer, a CAShapeLayer among its layer's sublayers, from the card's color
 // set on every pass (Encore_LayoutKit.Box's fields, and -[Box layoutSubviews] calling setPath: and setFillColor:,
-// 2026-09-17). So the colour is read off that layer, and the layer is hidden rather than cleared, since Spotify fills it again.
+// 2026-09-17). So the color is read off that layer, and the layer is hidden rather than cleared, since Spotify fills it again.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Search.h"
 
-// The tint the glass takes of the card's colour, and how dark the far corner of the colour under it gets.
+// The tint the glass takes of the card's color, and how dark the far corner of the color under it gets.
 static const CGFloat kTintAlpha = 0.35;
 static const CGFloat kFarBrightness = 0.55;
 // Where the title's top leading corner moves to, clear of the larger corner.
@@ -148,7 +148,7 @@ static void paint(SGRSearchCardParts *parts, UIColor *color) {
     }
 }
 
-// The title's own position, before the move, is where Spotify's layout put its centre.
+// The title's own position, before the move, is where Spotify's layout put its center.
 static void moveTitleIn(UIView *content) {
     for (UIView *sub in content.subviews) {
         if (![NSStringFromClass(sub.class) containsString:@"EncoreLabel"]) continue;
@@ -177,7 +177,7 @@ static void style(UIView *box) {
         logOnce([NSString stringWithFormat:@"a category card without its %@, left as Spotify's", content ? @"fill layer" : @"content view"]);
         return;
     }
-    // A pressed card's fill is Spotify's pressed shade; the colour is taken while it is not pressed.
+    // A pressed card's fill is Spotify's pressed shade; the color is taken while it is not pressed.
     CGColorRef fillColor = fill.fillColor;
     SGRSearchCardParts *parts = partsIn(box, content);
     if (fillColor && CGColorGetAlpha(fillColor) > 0 && ![box isHighlighted]) paint(parts, [UIColor colorWithCGColor:fillColor]);
@@ -185,7 +185,7 @@ static void style(UIView *box) {
     hideFills(box);
 
     // The card is cut at the card radius by the Box, which clips already and which Spotify gives no radius. Spotify puts
-    // its own 4pt back on the content view between layout passes, and the colour and the cover then showed past the glass
+    // its own 4pt back on the content view between layout passes, and the color and the cover then showed past the glass
     // at the corners (on the phone, 2026-09-17); the content view keeps the card radius only for as long as it lasts.
     if (content.layer.cornerRadius != SGRRadiusCard && objc_getAssociatedObject(box, &kRoundedKey)) {
         logOnce([NSString stringWithFormat:@"Spotify set a card's content radius back to %.0f; the Box's corner holds", content.layer.cornerRadius]);
@@ -202,7 +202,7 @@ static void style(UIView *box) {
     }
     moveTitleIn(content);
     roundCover(content);
-    logOnce(parts.glass ? @"category cards on tinted glass" : @"category cards on their colour, no glass");
+    logOnce(parts.glass ? @"category cards on tinted glass" : @"category cards on their color, no glass");
 }
 
 %hook _TtCE16Encore_LayoutKitO16EncoreFoundation6Encore3Box

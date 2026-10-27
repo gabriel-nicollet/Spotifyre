@@ -1,5 +1,5 @@
-// LRCLIB, the floor of the order. It is an open library with no key and no catalogue to license, so
-// it holds what the rest cannot: the tracks Apple's word by word programme never reached, and the
+// LRCLIB, the floor of the order. It is an open library with no key and no catalog to license, so
+// it holds what the rest cannot: the tracks Apple's word by word program never reached, and the
 // ones Musixmatch may show nobody. It times lines and not words, which is the whole point of putting
 // it last — the estimate inside a line is still a sweep, where Spotify's own lyrics only scroll.
 //
@@ -15,7 +15,7 @@ static NSString *const kSearch = @"https://lrclib.net/api/search";
 static const NSInteger kLengthSlack = 4;
 
 static NSDictionary<NSString *, NSString *> *headers(void) {
-    return @{@"User-Agent": @"Spotifyre/" @SG_VERSION};
+    return @{@"User-Agent": @"Vitrine " @SG_VERSION};
 }
 
 // [00:34.30] Look — the timestamp in minutes, seconds and hundredths, or thousandths where a line
@@ -64,23 +64,28 @@ static NSArray<SGKaraokeLine *> *linesFromLRC(NSString *lrc) {
     return SGKaraokeEstimatedLines(starts, texts);
 }
 
+SGLyricsResult *SGLyricsLRCResult(NSString *lrc) {
+    NSArray<SGKaraokeLine *> *lines = [lrc isKindOfClass:NSString.class] ? linesFromLRC(lrc) : nil;
+    if (!lines) return nil;
+    SGLyricsResult *result = [SGLyricsResult new];
+    result.synced = YES;
+    result.karaokeLines = lines;
+    NSArray<NSNumber *> *starts;
+    NSArray<NSString *> *texts;
+    SGLyricsPageLines(lines, &starts, &texts);
+    result.starts = starts;
+    result.texts = texts;
+    return result;
+}
+
 static SGLyricsResult *resultFrom(NSDictionary *record) {
     if (![record isKindOfClass:NSDictionary.class]) return nil;
     SGLyricsResult *result = [SGLyricsResult new];
     result.instrumental = [record[@"instrumental"] boolValue];
     if (result.instrumental) return result;
     id synced = record[@"syncedLyrics"], plain = record[@"plainLyrics"];
-    NSArray<SGKaraokeLine *> *lines = [synced isKindOfClass:NSString.class] ? linesFromLRC(synced) : nil;
-    if (lines) {
-        result.synced = YES;
-        result.karaokeLines = lines;
-        NSArray<NSNumber *> *starts;
-        NSArray<NSString *> *texts;
-        SGLyricsPageLines(lines, &starts, &texts);
-        result.starts = starts;
-        result.texts = texts;
-        return result;
-    }
+    SGLyricsResult *timed = SGLyricsLRCResult(synced);
+    if (timed) return timed;
     // Nothing timed, but the words still beat an empty page when no other source has any.
     if (![plain isKindOfClass:NSString.class] || ![plain length]) return nil;
     NSMutableArray<NSNumber *> *starts = [NSMutableArray array];

@@ -1,4 +1,4 @@
-// Full screen player: glass where Liquid Glass belongs and nowhere else, and the album colour
+// Full screen player: glass where Liquid Glass belongs and nowhere else, and the album color
 // behind it traded for the cover art.
 //
 // Glass is the navigation layer floating over content, so only the header's two round buttons get
@@ -11,10 +11,10 @@
 // Tree (trees/now-playing.txt): NowPlaying_ModesImpl units, each a child controller whose view
 // holds one UIStackView row; the header row is chevron 48x48, playlist name 110x48, more 48x48.
 //
-// The background is one plane the size of the screen painted the album colour, Spotify's gradients
+// The background is one plane the size of the screen painted the album color, Spotify's gradients
 // on top of it, and it is NPVBackgroundViewController's own view. Glass over a flat fill samples
 // that same flat fill back, which is why the header panes cannot be made out on it; white text and
-// Spotify's green both sit badly on saturated colour as well. SGKeyPlayerBackdrop strips the plane
+// Spotify's green both sit badly on saturated color as well. SGKeyPlayerBackdrop strips the plane
 // and puts the cover behind the player instead, shrunk until none of the picture is left in it,
 // blurred, under a scrim ending near black so the cards scrolled up from below meet it. The switch
 // covers what that field changes around it too: the artwork takes corners and a shadow so it sits

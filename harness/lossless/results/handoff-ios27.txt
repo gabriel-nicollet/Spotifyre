@@ -1,0 +1,61 @@
+iOS 27.0 arm64 simulator; generated local audio; stand-in stage, not actual Sing
+PASS native FLAC -> complete planar PCM
+PASS decoded stereo waveform matches generated recording
+PASS a file exactly filling its PCM budget is accepted
+PASS ALAC converts to planar 48 kHz
+PASS PCM budget rejects oversized decode
+PASS cancelled preparation returns no asset
+PASS decoder rejects network URL
+PASS publish source/asset anchor
+PASS frame-aligned replacement, both channels
+PASS invalid generation/output/rate/anchor/EOF/layout preserves native span
+PASS invalid generation/output/rate/anchor/EOF/layout preserves native span
+PASS invalid generation/output/rate/anchor/EOF/layout preserves native span
+PASS invalid generation/output/rate/anchor/EOF/layout preserves native span
+PASS invalid generation/output/rate/anchor/EOF/layout preserves native span
+PASS invalid generation/output/rate/anchor/EOF/layout preserves native span
+PASS invalid generation/output/rate/anchor/EOF/layout preserves native span
+PASS late publication rejected after cancellation
+PASS publish independently owned PCM
+PASS published snapshot retains decoded storage
+PASS cancel releases storage after readers leave
+PASS concurrent publication/cancel keeps whole snapshots
+PASS create audio unit
+PASS create audio unit
+PASS create audio unit
+PASS native input callback
+PASS input format
+PASS output format
+PASS slice
+PASS input format
+PASS output format
+PASS slice
+PASS input format
+PASS slice
+PASS connect converter
+PASS connect mixer
+PASS initialize
+PASS initialize
+PASS initialize
+PASS start
+PASS real mixer-to-RemoteIO seam reached
+PASS prepare real output source
+PASS replacement runs with no Sing stage registered
+PASS existing stage receives replacement PCM
+PASS source waveform and native advancement agree
+PASS speed processing pulls the same source before the stage
+PASS cancelled source stops replacement
+PASS re-arm current occurrence
+PASS seek/repeat generation rejects late preparation
+PASS pause original output
+PASS pause stops native decoder advancement
+PASS resume original output
+PASS re-arm after output restart
+PASS native stall invalidates the recording/frame anchor
+PASS native silent/stalled spans cannot be replaced
+PASS native recovery cannot reuse the pre-stall anchor
+PASS format notification
+PASS format notification invalidates prepared source
+PASS dispose mixer during running output
+PASS mixer disposal invalidates source
+RESULT failures=0 nativeFrames=239905 replacementFrames=119012 stageFrames=87965

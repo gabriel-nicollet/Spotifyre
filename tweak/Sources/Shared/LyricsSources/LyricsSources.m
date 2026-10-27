@@ -10,10 +10,11 @@
 #import "Core/SGCore.h"
 #import "LyricsSources.h"
 #import "Shared/Lyrics/Lyrics.h"
-#import "Headers/SPTPlayer.h"
+#import "Shared/LocalFiles/LocalFiles.h"
+#import "Shared/LocalFiles/LocalLyrics.h"
+#import "Settings/SGSourcesPage.h"
 #import "Settings/SGPageStyle.h"
-#import <mach-o/dyld.h>
-#import <objc/runtime.h>
+#import "Headers/SPTPlayer.h"
 #import <stdatomic.h>
 
 static const NSTimeInterval kTimeout = 6;
@@ -25,7 +26,7 @@ static NSString *const kLegacyMusixmatch = @"spotifyglass.musixmatchLyrics";
 static NSString *const kLegacyAllTracks = @"spotifyglass.musixmatchAllTracks";
 static NSString *const kLegacyNetEase = @"spotifyglass.neteaseWordTiming";
 
-@implementation SGLyricsCredit
+@implementation SGLyricsLink
 @end
 
 @implementation SGLyricsResult
@@ -71,18 +72,25 @@ static NSMutableURLRequest *requestFor(NSURL *url, NSDictionary<NSString *, NSSt
     return request;
 }
 
-static void send(NSURLRequest *request, void (^done)(NSData *body)) {
+// The body whatever the status, and the reply it came with; nil for both when there was none.
+static void sendForReply(NSURLRequest *request, void (^done)(NSData *body, NSHTTPURLResponse *response)) {
     if (!request) {
-        dispatch_async(dispatch_get_main_queue(), ^{ done(nil); });
+        dispatch_async(dispatch_get_main_queue(), ^{ done(nil, nil); });
         return;
     }
     NSURL *url = request.URL;
     [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+        NSHTTPURLResponse *reply = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
         SGLyricsNoteReply(response, error);
-        if (error || status >= 400) SGLog(@"lyrics: %@ answered %ld, error %@", url.host, (long)status, error);
-        dispatch_async(dispatch_get_main_queue(), ^{ done(status >= 400 ? nil : data); });
+        if (error || reply.statusCode >= 400) SGLog(@"lyrics: %@ answered %ld, error %@", url.host, (long)reply.statusCode, error);
+        dispatch_async(dispatch_get_main_queue(), ^{ done(data, reply); });
     }] resume];
+}
+
+static void send(NSURLRequest *request, void (^done)(NSData *body)) {
+    sendForReply(request, ^(NSData *body, NSHTTPURLResponse *reply) {
+        done(reply.statusCode >= 400 ? nil : body);
+    });
 }
 
 static id jsonIn(NSData *body) {
@@ -95,26 +103,16 @@ void SGLyricsGetJSON(NSURL *url, NSDictionary<NSString *, NSString *> *headers, 
     });
 }
 
+void SGLyricsGetJSONReply(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root, NSHTTPURLResponse *response)) {
+    sendForReply(requestFor(url, headers), ^(NSData *body, NSHTTPURLResponse *reply) {
+        done(jsonIn(body), reply);
+    });
+}
+
 void SGLyricsGetText(NSURL *url, void (^done)(NSString *text)) {
     send(requestFor(url, nil), ^(NSData *body) {
         done(body.length ? [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding] : nil);
     });
-}
-
-void SGLyricsGetJSONReply(NSURL *url, NSDictionary<NSString *, NSString *> *headers,
-                          void (^done)(id root, NSHTTPURLResponse *response)) {
-    NSURLRequest *request = requestFor(url, headers);
-    if (!request) {
-        dispatch_async(dispatch_get_main_queue(), ^{ done(nil, nil); });
-        return;
-    }
-    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        SGLyricsNoteReply(response, error);
-        if (error) SGLog(@"lyrics: %@ failed, error %@", url.host, error);
-        NSHTTPURLResponse *http = [response isKindOfClass:NSHTTPURLResponse.class] ? (NSHTTPURLResponse *)response : nil;
-        id root = jsonIn(data);
-        dispatch_async(dispatch_get_main_queue(), ^{ done(root, http); });
-    }] resume];
 }
 
 void SGLyricsPostJSON(NSURL *url, NSDictionary<NSString *, NSString *> *headers, id body, void (^done)(id root)) {
@@ -170,17 +168,20 @@ NSArray<SGLyricsProvider *> *SGLyricsAllProviders(void) {
             provider.detail = detail;
             // A source that matches by Spotify's own track id has everything it needs from the
             // start; the rest wait for the player to name the track before they can search.
-            provider.needsName = ![@[@"musixmatch", @"spicylyrics"] containsObject:key];
+            provider.needsName = ![key isEqualToString:@"musixmatch"] && ![key isEqualToString:SGSpicyLyricsKey];
             provider.ask = ask;
             return provider;
         };
         all = @[
-            make(@"spicylyrics", @"Spicy Lyrics", @"Community syncs, word timing", SGSpicyLyricsAsk),
             make(@"binilyrics", @"BiniLyrics", @"Apple Music word timing", SGBiniLyricsAsk),
-            make(@"musixmatch", @"Musixmatch", @"Spotify's licensed catalogue", SGMusixmatchAsk),
+            make(@"musixmatch", @"Musixmatch", @"Spotify's licensed catalog", SGMusixmatchAsk),
             make(@"unison", @"Unison", @"Hand-timed, few tracks", SGUnisonAsk),
             make(@"netease", @"NetEase", @"Word timing, censored", SGNetEaseAsk),
             make(@"lrclib", @"LRCLIB", @"Line timing, open fallback", SGLrcLibAsk),
+            make(SGSpicyLyricsKey, @"Spicy Lyrics", @"Community word syncs, your own key", SGSpicyLyricsAsk),
+            make(@"qqmusic", @"QQ Music", @"Line timing, Chinese catalog", SGQQMusicAsk),
+            make(@"kugou", @"KuGou", @"Word timing, Chinese catalog", SGKuGouAsk),
+            make(SGImportedLRCKey, @"Imported LRC", @"Your own .lrc files", SGImportedLRCAsk),
         ];
     });
     return all;
@@ -202,9 +203,17 @@ static NSArray<NSString *> *fromLegacyKeys(void) {
     return order;
 }
 
+// With nothing stored and nothing to carry over, every source is on: the user's own files first, word
+// timing ahead of line timing, and the two Chinese catalogs last, asked only once the rest have missed.
+// Spicy Lyrics passes straight on without its key.
+static NSArray<NSString *> *defaultOrder(void) {
+    return @[SGImportedLRCKey, SGSpicyLyricsKey, @"binilyrics", @"musixmatch", @"unison", @"netease", @"lrclib", @"qqmusic", @"kugou"];
+}
+
 NSArray<NSString *> *SGLyricsOrder(void) {
     id stored = [NSUserDefaults.standardUserDefaults arrayForKey:SGKeyLyricsProviders];
-    NSArray *keys = [stored isKindOfClass:NSArray.class] ? stored : fromLegacyKeys();
+    NSArray *legacy = fromLegacyKeys();
+    NSArray *keys = [stored isKindOfClass:NSArray.class] ? stored : legacy.count ? legacy : defaultOrder();
     NSMutableArray<NSString *> *order = [NSMutableArray array];
     for (id key in keys) {
         if ([key isKindOfClass:NSString.class] && SGLyricsProviderFor(key) && ![order containsObject:key]) [order addObject:key];
@@ -216,46 +225,10 @@ void SGLyricsSetOrder(NSArray<NSString *> *keys) {
     [NSUserDefaults.standardUserDefaults setObject:keys ?: @[] forKey:SGKeyLyricsProviders];
 }
 
+// With EeveeSpotify injected, its own lyrics answer Spotify's requests and the mod's stand aside: two
+// tweaks holding and answering the same request froze Spotify after launch.
 BOOL SGLyricsEnabled(void) {
-    return SGLyricsOrder().count > 0;
-}
-
-// Every EeveeSpotify fork keeps its source here, 4 being Do Not Replace Lyrics; unset is its default,
-// which replaces.
-static NSString *const kEeveeLyricsSource = @"lyricsSource";
-static const NSInteger kEeveeNotReplaced = 4;
-
-BOOL SGEeveeLoaded(void) {
-    static BOOL loaded;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        loaded = objc_getClass("_TtC12EeveeSpotify27EeveeSettingsViewController") != nil;
-        for (uint32_t i = 0, count = _dyld_image_count(); i < count && !loaded; i++) {
-            const char *path = _dyld_get_image_name(i);
-            const char *name = path ? strrchr(path, '/') : NULL;
-            loaded = name && strcasestr(name, "eevee");
-        }
-    });
-    return loaded;
-}
-
-BOOL SGLyricsEeveeReplaces(void) {
-    if (!SGEeveeLoaded()) return NO;
-    id source = [NSUserDefaults.standardUserDefaults objectForKey:kEeveeLyricsSource];
-    return ![source respondsToSelector:@selector(integerValue)] || [source integerValue] != kEeveeNotReplaced;
-}
-
-BOOL SGLyricsActive(void) {
-    static BOOL active;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        active = SGLyricsEnabled();
-        if (active && SGLyricsEeveeReplaces()) {
-            active = NO;
-            SGLog(@"lyrics: EeveeSpotify replaces lyrics itself, the sources stay off");
-        }
-    });
-    return active;
+    return SGLyricsOrder().count > 0 && !SGLyricsStandAsideForEevee();
 }
 
 #pragma mark - what is known about the track
@@ -268,6 +241,15 @@ BOOL SGLyricsActive(void) {
 static SGLyricsQuery *queryFor(NSString *trackID) {
     SGLyricsQuery *query = [SGLyricsQuery new];
     query.trackID = trackID;
+    // A local file is named by its own key: its tags, and the names the user gave it over them.
+    NSDictionary *local = SGLocalFileInfo(trackID);
+    if (local) {
+        query.title = local[@"title"];
+        query.artist = local[@"artist"];
+        query.album = local[@"album"];
+        query.seconds = [local[@"seconds"] integerValue];
+        return query;
+    }
     SPTPlayerTrack *track = SGKaraokeTrackFor(trackID);
     if (!track) return query;
     query.title = track.trackTitle;
@@ -289,11 +271,11 @@ static void learnFrom(SGLyricsQuery *query, SGLyricsResult *result) {
 
 #pragma mark - the walk
 
-// Main queue only, except sg_missing and the credits.
+// Main queue only, except sg_missing and sg_credits.
 static NSMutableDictionary<NSString *, id> *sg_kept;
 static NSMutableDictionary<NSString *, NSMutableArray *> *sg_waiting;
 static NSMutableSet<NSString *> *sg_missing;
-static NSMutableDictionary<NSString *, SGLyricsCredit *> *sg_credits, *sg_pageCredits;
+static NSMutableDictionary<NSString *, NSString *> *sg_credits;
 // Spotify's own has_lyrics per track, as its metadata said. The player's metadata is read many
 // times a second while a list scrolls, so a value already noted costs one lookup and no write.
 static NSMutableDictionary<NSString *, NSNumber *> *sg_spotifyHas;
@@ -306,7 +288,6 @@ static void setUp(void) {
         sg_waiting = [NSMutableDictionary dictionary];
         sg_missing = [NSMutableSet set];
         sg_credits = [NSMutableDictionary dictionary];
-        sg_pageCredits = [NSMutableDictionary dictionary];
         sg_spotifyHas = [NSMutableDictionary dictionary];
     });
 }
@@ -342,6 +323,52 @@ static BOOL named(SGLyricsQuery *query) {
     return query.title.length && query.artist.length;
 }
 
+// The credits that carry links or must show, by their text, as their sources answered. Main queue.
+static NSMutableDictionary<NSString *, SGLyricsResult *> *sg_noted;
+static const NSUInteger kNotedCredits = 100;
+
+static void noteCredit(SGLyricsResult *result) {
+    if (!result.provider.length || !(result.creditRequired || result.creditLinks.count)) return;
+    if (!sg_noted) sg_noted = [NSMutableDictionary dictionary];
+    if (sg_noted.count >= kNotedCredits) [sg_noted removeAllObjects];
+    sg_noted[result.provider] = result;
+}
+
+BOOL SGLyricsCreditRequired(NSString *credit) {
+    return credit && sg_noted[credit].creditRequired;
+}
+
+NSArray<SGLyricsLink *> *SGLyricsCreditLinks(NSString *text) {
+    if (!text.length) return nil;
+    SGLyricsResult *exact = sg_noted[text];
+    if (exact) return exact.creditLinks;
+    // The longest credit the text holds, so "Spicy Lyrics, synced by a" is not read as a shorter one.
+    SGLyricsResult *found = nil;
+    for (NSString *credit in sg_noted) {
+        if ([text containsString:credit] && credit.length > found.provider.length) found = sg_noted[credit];
+    }
+    return found.creditLinks;
+}
+
+void SGLyricsOpenCreditLinks(NSArray<SGLyricsLink *> *links, UIView *from) {
+    if (!links.count) return;
+    if (links.count == 1) {
+        [UIApplication.sharedApplication openURL:links.firstObject.url options:@{} completionHandler:nil];
+        return;
+    }
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:nil message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    for (SGLyricsLink *link in links) {
+        NSURL *url = link.url;
+        [sheet addAction:[UIAlertAction actionWithTitle:link.title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = from;
+    sheet.popoverPresentationController.sourceRect = from.bounds;
+    [SGTopController() presentViewController:sheet animated:YES completion:nil];
+}
+
 // One walk down the order for one track.
 @interface SGLyricsWalk : NSObject
 @property (nonatomic, copy) NSArray<NSString *> *order;
@@ -357,16 +384,18 @@ static BOOL named(SGLyricsQuery *query) {
 @implementation SGLyricsWalk
 @end
 
-// A walk that ends with nothing is only an answer when every source got to search. One that passed a
-// source over for want of a name asked it nothing, and keeping that as "no lyrics" would stick to the
-// track: every later request would get the kept nil, and the lyrics card would be taken off the track
-// for the rest of the session. The same goes for a walk during which a request failed: a busy
-// server's 503 read as "no lyrics" hid a track's lyrics until Spotify was restarted.
+// Musixmatch's community translations are not waited for here: the lines take them as they are kept
+// for the lyrics view (Shared/Lyrics/KaraokeSource.x), whichever source won, Spotify included.
 static void finish(SGLyricsWalk *walk) {
     SGLyricsQuery *query = walk.query;
     SGLyricsResult *merged = walk.merged;
     NSString *trackID = query.trackID;
     SGLyricsResult *lyrics = merged.karaokeLines.count || merged.texts.count ? merged : nil;
+    // A walk that ends with nothing is only an answer when every source got to search. One that passed a
+    // source over for want of a name asked it nothing, and keeping that as "no lyrics" would stick to the
+    // track: every later request would get the kept nil, and the lyrics card would be taken off the track
+    // for the rest of the session. The same goes for a walk during which a request failed: a busy
+    // server's 503 read as "no lyrics" hid a track's lyrics until Spotify was restarted.
     BOOL everyoneAsked = !walk.passedOver.count;
     BOOL failed = atomic_load(&sg_failures) != walk.failuresAtStart;
     if (lyrics || (everyoneAsked && !failed) || merged.instrumental) {
@@ -420,25 +449,25 @@ static void step(SGLyricsWalk *walk) {
     }
     provider.ask(query, ^(SGLyricsResult *fresh) {
         learnFrom(query, fresh);
+        noteCredit(fresh);
         if (fresh.instrumental) {
             SGLog(@"lyrics: %@ is instrumental, by %@", query.trackID, provider.key);
             merged.instrumental = YES;
             finish(walk);
             return;
         }
-        SGLyricsCredit *credit = fresh.credit ?: SGLyricsCreditNamed(provider.name);
         if (betterLines(merged, fresh)) {
             merged.karaokeLines = fresh.karaokeLines;
             merged.wordTimed = fresh.wordTimed;
-            merged.provider = provider.name;
-            merged.credit = credit;
+            merged.provider = fresh.provider ?: provider.name;
         }
         if (betterTexts(merged, fresh)) {
             merged.starts = fresh.starts;
             merged.texts = fresh.texts;
             merged.synced = fresh.synced;
-            merged.pageCredit = credit;
-            if (!merged.provider) merged.provider = provider.name;
+            if (!merged.provider) merged.provider = fresh.provider ?: provider.name;
+            // Spotify's page names the source of its own text, which can be another than the lines'.
+            merged.pageProvider = fresh.provider ?: provider.name;
         }
         step(walk);
     });
@@ -532,7 +561,7 @@ NSString *const SGLyricsOwnRequestKey = @"spotifyglass.ownRequest";
 id SGLyricsForcedFlag(NSString *key) {
     static BOOL on;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ on = SGLyricsActive(); });
+    dispatch_once(&once, ^{ on = SGLyricsEnabled(); });
     if (!on) return nil;
     if ([key isEqualToString:@"ios-nowplaying-scroll-impl.scroll_cards_async_loading_timeout_ms"]) return @5000;
     return nil;
@@ -555,7 +584,7 @@ NSArray<NSString *> *SGLyricsTranslationLanguageNames(void) {
     NSLocale *english = [NSLocale localeWithLocaleIdentifier:@"en"];
     NSMutableArray<NSString *> *names = [NSMutableArray array];
     for (NSString *tag in SGLyricsTranslationLanguages()) {
-        [names addObject:tag.length ? [english localizedStringForLocaleIdentifier:tag] ?: tag : @"Any"];
+        [names addObject:tag.length ? [english localizedStringForLocaleIdentifier:tag] ?: tag : @"Any · iPhone's language"];
     }
     return names;
 }
@@ -566,64 +595,18 @@ NSString *SGLyricsTranslationLanguage(void) {
     return index > 0 && index < (NSInteger)tags.count ? tags[(NSUInteger)index] : nil;
 }
 
-SGLyricsCredit *SGLyricsCreditNamed(NSString *name) {
-    SGLyricsCredit *credit = [SGLyricsCredit new];
-    credit.text = name;
-    return credit;
+NSString *SGLyricsCreditFor(NSString *trackID) {
+    setUp();
+    @synchronized (sg_credits) { return trackID ? sg_credits[trackID] : nil; }
 }
 
-void SGLyricsOpenCredit(SGLyricsCredit *credit) {
-    NSArray<NSURL *> *links = credit.links;
-    if (links.count == 1) {
-        SGOpenURL(links.firstObject.absoluteString);
-        return;
-    }
-    if (!links.count) return;
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:credit.text message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [links enumerateObjectsUsingBlock:^(NSURL *link, NSUInteger i, BOOL *stop) {
-        NSString *title = i < credit.linkTitles.count ? credit.linkTitles[i] : link.host;
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            SGOpenURL(link.absoluteString);
-        }]];
-    }];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    UIViewController *top = SGTopController();
-    sheet.popoverPresentationController.sourceView = top.view;
-    sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(top.view.bounds), CGRectGetMaxY(top.view.bounds), 0, 0);
-    [top presentViewController:sheet animated:YES completion:nil];
-}
-
-static SGLyricsCredit *creditIn(NSMutableDictionary<NSString *, SGLyricsCredit *> *credits, NSString *trackID) {
-    @synchronized (credits) { return trackID ? credits[trackID] : nil; }
-}
-
-static void keepCredit(NSMutableDictionary<NSString *, SGLyricsCredit *> *credits, NSString *trackID, SGLyricsCredit *credit) {
+void SGLyricsSetCredit(NSString *trackID, NSString *name) {
+    setUp();
     if (!trackID.length) return;
-    @synchronized (credits) {
-        if (credits.count >= kKeptTracks) [credits removeAllObjects];
-        credits[trackID] = credit;
+    @synchronized (sg_credits) {
+        if (sg_credits.count >= kKeptTracks) [sg_credits removeAllObjects];
+        sg_credits[trackID] = name ?: @"Spotify";
     }
-}
-
-SGLyricsCredit *SGLyricsCreditFor(NSString *trackID) {
-    setUp();
-    return creditIn(sg_credits, trackID);
-}
-
-void SGLyricsSetCredit(NSString *trackID, SGLyricsCredit *credit) {
-    setUp();
-    keepCredit(sg_credits, trackID, credit.text.length ? credit : SGLyricsCreditNamed(@"Spotify"));
-}
-
-SGLyricsCredit *SGLyricsPageCreditFor(NSString *trackID) {
-    setUp();
-    return creditIn(sg_pageCredits, trackID);
-}
-
-void SGLyricsSetPageCredit(NSString *trackID, SGLyricsCredit *credit) {
-    setUp();
-    keepCredit(sg_pageCredits, trackID, credit);
 }
 
 // Once, at launch: the keys Musixmatch owned alone become an order, so the Lyrics page opens on what
@@ -636,4 +619,15 @@ void SGLyricsMigrateLegacyKeys(void) {
     SGLyricsSetOrder(order);
     SGSetEnabled(SGKeyLyricsAllTracks, SGFlag(kLegacyAllTracks, NO));
     SGLog(@"lyrics: carried the Musixmatch switches over as %@", [order componentsJoinedByString:@", "]);
+}
+
+UIViewController *SGLyricsSourcesPage(void) {
+    NSMutableArray<SGSource *> *all = [NSMutableArray array];
+    for (SGLyricsProvider *provider in SGLyricsAllProviders()) {
+        // The page is made on every open, so a key refused since the last one says so here.
+        NSString *detail = [provider.key isEqualToString:SGSpicyLyricsKey] ? SGSpicyLyricsStatus() ?: provider.detail : provider.detail;
+        [all addObject:[SGSource sourceWithKey:provider.key name:provider.name detail:detail]];
+    }
+    return SGSourcesPageMake(@"Lyrics sources", @"Asked top to bottom until one has word timing. Sources get only the track, never your account.",
+                             all, ^NSArray<NSString *> * { return SGLyricsOrder(); }, ^(NSArray<NSString *> *keys) { SGLyricsSetOrder(keys); });
 }

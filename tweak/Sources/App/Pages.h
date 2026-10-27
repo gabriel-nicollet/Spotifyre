@@ -3,14 +3,18 @@
 // Redesigned UI switch, so a page opened after flipping it shows what the restart will bring.
 #import <UIKit/UIKit.h>
 
-@class SGModSection;
+@class SGModRow;
 
 // Redesigned UI, the one switch between the two looks, and what its ⓘ reads out.
 void SGSetRedesignedUI(BOOL on);
 extern NSString *const SGRedesignedUIInfo;
-NSString *SGRedesignUntestedWarning(void);   // below iOS 26, shown before the redesign is picked
+// Below iOS 26: what turning the redesign on risks there, for the switch's alert and the tour.
+NSString *SGRedesignUntestedWarning(void);
 
-SGModSection *SGAppearanceSection(void);   // the Appearance card at the top of Mod Settings
+// Redesigned UI as a glowing switch with its ⓘ, offering to restart Spotify when flipped; below iOS 26 it
+// warns first. It leads Mod Settings' main page.
+SGModRow *SGRedesignedUIRow(void);
+UIViewController *SGAppearancePage(void);   // the stored look's accent and AMOLED, the font and the app icon
 UIViewController *SGPlayerSettingsPage(void);
-UIViewController *SGLyricsSettingsPage(void);  // its sources in either look, and the redesign's display
+UIViewController *SGLyricsSettingsPage(void);   // with Sing (Shared/Sing) on it
 UIViewController *SGNavbarPage(void);       // the tab editor of whichever look is stored

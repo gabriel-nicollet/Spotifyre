@@ -119,7 +119,7 @@ static CAShapeLayer *newStroke(CGFloat width) {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
     UIBezierPath *capsule = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(bounds, kRimWidth / 2, kRimWidth / 2) cornerRadius:bounds.size.height / 2];
-    // A square the capsule's diagonal across, so the colours cover the rim at every angle of the turn.
+    // A square the capsule's diagonal across, so the colors cover the rim at every angle of the turn.
     CGFloat side = ceil(hypot(bounds.size.width, bounds.size.height)) + 2;
     CGRect square = CGRectMake(CGRectGetMidX(bounds) - side / 2, CGRectGetMidY(bounds) - side / 2, side, side);
 
@@ -156,7 +156,7 @@ static CAShapeLayer *newStroke(CGFloat width) {
     _knob.layer.cornerRadius = side / 2;
 }
 
-// Colours for the state. Off is meant to tempt: the rainbow already circles the rim, softer, with a
+// Colors for the state. Off is meant to tempt: the rainbow already circles the rim, softer, with a
 // fainter glow. On it comes in full, glow and all.
 - (void)paint {
     BOOL on = self.on;

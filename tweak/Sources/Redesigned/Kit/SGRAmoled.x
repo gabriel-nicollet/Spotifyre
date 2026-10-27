@@ -1,6 +1,6 @@
 // The redesign's AMOLED background, always on: its copy of Native/Appearance/Amoled.x without the switch.
-// AMOLED background: Spotify paints its base surface #121212; with the switch on, that grey and
-// the gradients fading into it go pure black. Lighter greys stay (#1F1F1F placeholders, #292929
+// AMOLED background: Spotify paints its base surface #121212; with the switch on, that gray and
+// the gradients fading into it go pure black. Lighter grays stay (#1F1F1F placeholders, #292929
 // cards), so elevated surfaces still read against the black.
 //
 // Trees: #121212 sits on the Home, Search, Library and settings scroll views, on list rows, the
@@ -52,7 +52,7 @@ static CGColorRef copyBlack(CGColorRef color) {
 %end
 
 // Spotify's settings list paints nothing of its own and shows whatever sits under it, which is not
-// the base grey the hooks above turn black. The list is the top surface, so it takes the black.
+// the base gray the hooks above turn black. The list is the top surface, so it takes the black.
 %hook _TtC21Settings_PlatformImpl26SettingsListViewController
 - (void)viewDidLayoutSubviews {
     %orig;

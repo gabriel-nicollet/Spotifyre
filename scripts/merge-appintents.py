@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Adds the actions of a Metadata.appintents to the app's own inside an IPA, in place.
+"""Adds the actions, enums and App Shortcuts of a Metadata.appintents to the app's own inside an IPA, in place.
 
   scripts/merge-appintents.py <ipa> <Payload/X.app/> <Metadata.appintents dir>
 
 The system looks an intent up in the metadata of the bundle that runs it, and a LiveActivityIntent
-runs in the app, so the widget's intents have to be listed in Spotify's file next to its own.
+runs in the app, so the widget's intents have to be listed in Spotify's file next to its own. Spotify
+9.1.78 has no file, so ours goes in whole; with one, each list and table gets ours added, and the rest
+(an App Shortcuts provider among it) stays the app's where it has its own.
 """
 import json
 import os
@@ -23,7 +25,16 @@ with zipfile.ZipFile(ipa) as z:
 with open(os.path.join(ours, "extract.actionsdata")) as f:
     added = json.load(f)
 
-merged = added if theirs is None else {**theirs, "actions": {**theirs["actions"], **added["actions"]}}
+def merge(key):
+    mine, app = added[key], theirs.get(key)
+    if isinstance(mine, dict) and isinstance(app, dict):
+        return {**app, **mine}
+    if isinstance(mine, list) and isinstance(app, list):
+        return app + mine
+    return mine if app is None else app
+
+
+merged = added if theirs is None else {**theirs, **{key: merge(key) for key in added}}
 
 with tempfile.TemporaryDirectory() as tmp:
     os.makedirs(os.path.join(tmp, os.path.dirname(member)))

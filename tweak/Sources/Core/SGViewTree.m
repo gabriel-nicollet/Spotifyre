@@ -18,6 +18,13 @@ BOOL SGIsInside(UIView *view, UIView *root) {
     return NO;
 }
 
+BOOL SGShownUnder(UIView *view, UIView *root) {
+    for (UIView *v = view; v && v != root; v = v.superview) {
+        if (v.hidden) return NO;
+    }
+    return YES;
+}
+
 UIStackView *SGRowIn(UIView *host) {
     __block UIStackView *row = nil;
     SGForEachView(host, ^(UIView *v) {
@@ -67,7 +74,7 @@ BOOL SGIsLightColor(CGColorRef color) {
     return YES;
 }
 
-// Lighter greys (#1F1F1F placeholders, #292929 cards) and translucent paint stay.
+// Lighter grays (#1F1F1F placeholders, #292929 cards) and translucent paint stay.
 BOOL SGIsBaseSurface(CGColorRef color) {
     if (!color || CFGetTypeID(color) != CGColorGetTypeID() || CGColorGetAlpha(color) < 0.95) return NO;
     const CGFloat *c = CGColorGetComponents(color);

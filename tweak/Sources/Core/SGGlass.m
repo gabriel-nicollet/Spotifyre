@@ -1,7 +1,7 @@
 #import "SGGlass.h"
 #import "SGRuntime.h"
 
-// +effectWithStyle: is the only initialiser UIGlassEffect has; a bare -init leaves the material
+// +effectWithStyle: is the only initializer UIGlassEffect has; a bare -init leaves the material
 // unresolved and the pane renders as a plain blur, while the capsule shape, which is the view's
 // own property, still comes out right. Spotify's own Reprise glass builds its effect the same way.
 UIVisualEffect *SGGlassEffect(void) {
@@ -68,4 +68,9 @@ void SGShapeGlass(UIView *glass, CGFloat radius, BOOL capsule) {
         glass.layer.cornerCurve = kCACornerCurveContinuous;
         glass.clipsToBounds = YES;
     }
+}
+
+void SGPresentDark(UIViewController *controller) {
+    controller.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    controller.presentationController.overrideTraitCollection = [UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleDark];
 }

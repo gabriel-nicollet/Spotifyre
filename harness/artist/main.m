@@ -71,7 +71,7 @@
 @end
 @implementation MockRequestToken
 - (void)cancel {
-    NSLog(@"[harness] collection subscription cancelled");
+    NSLog(@"[harness] collection subscription canceled");
     if (self.onCancel) self.onCancel();
 }
 @end
@@ -289,7 +289,7 @@ static NSArray<NSArray *> *musicList(void) {
     wash.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
 
     UIView *titleBox = box(header, UIView.class, CGRectMake(16, 334.67, 370, 54), nil);
-    label(titleBox, CGRectMake(0, 0, 370, 54), @"Shawn Mendes", 45, UIColor.whiteColor, @"Encore.AdaptiveTitle");
+    label(titleBox, CGRectMake(0, 0, 370, 54), NSProcessInfo.processInfo.environment[@"HARNESS_ARTIST"] ?: @"Shawn Mendes", 45, UIColor.whiteColor, @"Encore.AdaptiveTitle");
     UIView *badge = box(header, UIStackView.class, CGRectMake(16, 390.67, 114.67, 24), @"ImageHeaderView.VerifiedBadge");
     label(badge, CGRectMake(20, 4, 94, 15), @"Verified by Spotify", 11, UIColor.whiteColor, @"Encore.Label");
     UIView *meta = box(header, UIView.class, CGRectMake(16, 432.67, 370, 15.33), nil);
@@ -355,6 +355,46 @@ static NSArray<NSArray *> *musicList(void) {
     if (collapsed) scroll.contentOffset = CGPointMake(0, 468);
 
     [self.window makeKeyAndVisible];
+
+    // `logo`: an artist's logo arriving with the page on screen, at 2.5 s, and taken away again at 4.5 s (run
+    // with `-spotifyglass.redesign.artist.logo NO` so Apple Music's own does not arrive too). The logo and the
+    // name cross over while the block makes room, the logo starting from the name's place.
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"logo"]) {
+        UIView *rootView = root.view;
+        __block UIView *info = nil;
+        UIImage *logo = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(600, 200)] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            [UIColor.whiteColor setFill];
+            [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 600, 200) cornerRadius:40] fill];
+        }];
+        void (^report)(NSString *) = ^(NSString *when) {
+            UIView *picture = [info valueForKey:@"_logo"], *title = [info valueForKey:@"_title"];
+            NSLog(@"[harness] logo %@: logo %@ alpha %.2f hidden %d at %@ (fading %@, moving %@), name alpha %.2f at %@", when,
+                  [(UIImageView *)picture image] ? @"drawn" : @"empty", picture.alpha, picture.hidden, NSStringFromCGRect(picture.frame),
+                  [picture.layer animationForKey:@"opacity"] ? @"yes" : @"no", [picture.layer animationForKey:@"position"] ? @"yes" : @"no",
+                  title.alpha, NSStringFromCGRect(title.frame));
+        };
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:rootView];
+            while (queue.count && !info) {
+                UIView *v = queue.firstObject;
+                [queue removeObjectAtIndex:0];
+                if ([NSStringFromClass(v.class) isEqualToString:@"SGRHeaderInfo"]) info = v;
+                [queue addObjectsFromArray:v.subviews];
+            }
+            report(@"before");
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            [info performSelector:NSSelectorFromString(@"showTitleImage:") withObject:logo];
+            report(@"arriving");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ report(@"arrived"); });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [info performSelector:NSSelectorFromString(@"showTitleImage:") withObject:nil];
+                report(@"leaving");
+            });
+#pragma clang diagnostic pop
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ report(@"gone"); });
+        });
+    }
 
     // What the redesign's Follow draws: nothing before the state, then the glyph for it. A tap on it at
     // 2.5 s, which Spotify answers with Following.
