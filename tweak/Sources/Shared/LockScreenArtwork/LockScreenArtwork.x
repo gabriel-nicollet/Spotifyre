@@ -2,8 +2,6 @@
 // is put on every dictionary that goes out, so the lock screen lyrics' rewrites carry it too.
 #import <MediaPlayer/MediaPlayer.h>
 
-// Temporary startup isolation: skip all Lock Screen Artwork setup and MPNowPlayingInfoCenter hook registration.
-#define SG_LOCKSCREEN_ARTWORK_DIAGNOSTIC_DISABLE_HOOKS 1
 #import "Core/SGCore.h"
 #import "LockScreenArtwork.h"
 #import "SGAppleArtwork.h"
@@ -274,18 +272,19 @@ static SGArtworkWatcher *sg_watcher;
 %end
 
 %ctor {
-#if SG_LOCKSCREEN_ARTWORK_DIAGNOSTIC_DISABLE_HOOKS
-    SGLog(@"lock artwork: diagnostic bypass; hooks not registered");
-    return;
-#endif
     if (!SGAnimatedArtworkAvailable()) {
         SGLog(@"lock artwork: off, animated artwork needs iOS 26");
         return;
     }
-    sg_lock = [NSObject new];
-    sg_watcher = [SGArtworkWatcher new];
-    SGAddPlayerStateObserver(sg_watcher);
-    %init;
-    SGRequireClasses(@[@"MPNowPlayingInfoCenter"]);
-    SGLog(@"lock artwork: on");
+    // Install after Spotify's launch path. MPNowPlayingInfoCenter is touched during startup;
+    // registering its hooks from the constructor was part of the launch-watchdog investigation.
+    // Register even when the setting starts off so it can be enabled without a restart.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        sg_lock = [NSObject new];
+        sg_watcher = [SGArtworkWatcher new];
+        SGAddPlayerStateObserver(sg_watcher);
+        %init;
+        SGRequireClasses(@[@"MPNowPlayingInfoCenter"]);
+        SGLog(@"lock artwork: on");
+    });
 }

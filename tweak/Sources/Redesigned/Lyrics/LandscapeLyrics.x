@@ -126,7 +126,10 @@ static void pageChanged(BOOL onScreen) {
 }
 
 static BOOL containsLyricsFullscreenView(UIView *view) {
-    if ([NSStringFromClass(view.class) isEqualToString:@"_TtC32Lyrics_FullscreenElementPageImpl14FullscreenView"]) return YES;
+    // Spotify renames the generated Swift class between releases. Keep the recognizable
+    // feature suffix, but do not require one exact mangled module/class length.
+    NSString *name = NSStringFromClass(view.class);
+    if ([name containsString:@"Lyrics_FullscreenElementPageImpl"] && [name containsString:@"FullscreenView"]) return YES;
     for (UIView *child in view.subviews) if (containsLyricsFullscreenView(child)) return YES;
     return NO;
 }
@@ -160,7 +163,6 @@ static BOOL containsLyricsFullscreenView(UIView *view) {
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
-    SGRequireClasses(@[@"_TtC32Lyrics_FullscreenElementPageImpl14FullscreenView"]);
     [UIDevice.currentDevice beginGeneratingDeviceOrientationNotifications];
     [NSNotificationCenter.defaultCenter addObserverForName:UIDeviceOrientationDidChangeNotification
         object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) { deviceOrientationChanged(note); }];

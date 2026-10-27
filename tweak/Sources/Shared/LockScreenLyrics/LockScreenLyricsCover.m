@@ -80,29 +80,29 @@ UIImage *SGLyricsCoverImage(UIImage *cover, NSString *previous, NSString *curren
 
         CGFloat margin = size.width * 0.075, width = size.width - margin * 2, gap = size.height * 0.025;
         NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
-        style.alignment = NSTextAlignmentCenter;
+        style.alignment = NSTextAlignmentLeft;
         NSShadow *shadow = [NSShadow new];
         shadow.shadowColor = [UIColor colorWithWhite:0 alpha:0.5];
         shadow.shadowBlurRadius = size.width * 0.02;
-        UIFont *main = fitted(current ?: @"", size.width * (0.105 + MIN(0.045, MAX(0.0, (SGRLyricsStyleFontSize() - 20.0) / 24.0 * 0.045))), width, 5, SGRLyricsStyleFontWeight());
-        UIFont *small = [UIFont systemFontOfSize:MAX(10, main.pointSize * 0.55) weight:UIFontWeightSemibold];
-        // Heights first, so the line being sung sits at the middle however long the others are.
+        UIFont *main = fitted(current ?: @"", size.width * (0.068 + MIN(0.020, MAX(0.0, (SGRLyricsStyleFontSize() - 20.0) / 24.0 * 0.020))), width, 3, SGRLyricsStyleFontWeight());
+        UIFont *small = [UIFont systemFontOfSize:MAX(10, main.pointSize * 0.72) weight:UIFontWeightSemibold];
+        // Match the lock-screen reference: the active line is prominent and left aligned,
+        // with the upcoming line directly below it over the softly blurred cover.
         CGSize (^measure)(NSString *, UIFont *, CGFloat) = ^CGSize(NSString *text, UIFont *font, CGFloat maxHeight) {
             if (!text.length) return CGSizeZero;
             CGRect box = [text boundingRectWithSize:CGSizeMake(width, maxHeight) options:NSStringDrawingUsesLineFragmentOrigin
                                          attributes:@{NSFontAttributeName: font, NSParagraphStyleAttributeName: style} context:nil];
             return CGSizeMake(width, MIN(maxHeight, ceil(box.size.height)));
         };
-        CGSize mainSize = measure(current, main, size.height * 0.52), previousSize = measure(previous, small, size.height * 0.16), nextSize = measure(next, small, size.height * 0.16);
-        CGFloat middle = size.height / 2;
+        CGSize mainSize = measure(current, main, size.height * 0.26), nextSize = measure(next, small, size.height * 0.16);
         void (^draw)(NSString *, UIFont *, CGFloat, CGRect, CGFloat) = ^(NSString *text, UIFont *font, CGFloat alpha, CGRect box, CGFloat unused) {
             if (!text.length) return;
             [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin attributes:@{
                 NSFontAttributeName: font, NSParagraphStyleAttributeName: style, NSShadowAttributeName: shadow,
                 NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:alpha]} context:nil];
         };
-        draw(current, main, 1, CGRectMake(margin, middle - mainSize.height / 2, width, mainSize.height), 0);
-        draw(previous, small, 0.45, CGRectMake(margin, middle - mainSize.height / 2 - gap - previousSize.height, width, previousSize.height), 0);
-        draw(next, small, 0.45, CGRectMake(margin, middle + mainSize.height / 2 + gap, width, nextSize.height), 0);
+        CGFloat currentY = size.height * 0.40;
+        draw(current, main, 1, CGRectMake(margin, currentY, width, mainSize.height), 0);
+        draw(next, small, 0.56, CGRectMake(margin, currentY + mainSize.height + gap, width, nextSize.height), 0);
     }];
 }

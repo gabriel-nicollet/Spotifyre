@@ -414,11 +414,14 @@ static void workerStatus(void *context, int32_t status) {
     NSString *model = SGSingModelPath();
     if (model == _model || [model isEqualToString:_model]) return;
     _model = model;
+    // Switching between installed separators is a model change too. Retire the old worker and
+    // purge its warm Core ML instance before the next session starts with the newly selected path.
+    [self stop:NO unload:YES];
     if (!model) {
         _wanted = NO; _blockedTrack = nil; _waitingForCommand = NO;
-        [self stop:NO unload:YES];
     }
     [self updateAvailability];
+    if (model && _wanted) { [self startTimer]; [self reconcile]; }
 }
 // Sing's switch, turned while Spotify runs. Off stops the work the same way and leaves nothing on screen.
 - (void)setConfigured:(BOOL)configured {

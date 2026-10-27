@@ -6,8 +6,6 @@
 // was left on until the sound starts again.
 #import <MediaPlayer/MediaPlayer.h>
 
-// Temporary diagnostic: prevent Logos from registering any Lock Screen Lyrics hooks.
-#define SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_DISABLE_HOOKS 1
 #import "Core/SGCore.h"
 #import "LockScreenLyrics.h"
 #import "Shared/Lyrics/Lyrics.h"
@@ -29,7 +27,7 @@ static NSString *sg_shownLine;
 static BOOL sg_resending;
 // What the cover was last drawn for: the track and the line's index, or nil with no line.
 static NSString *sg_shownCover;
-static NSTimer *sg_timer;
+static dispatch_source_t sg_timer;
 
 static NSString *textOf(NSArray<SGKaraokeWord *> *words) {
     SGKaraokeLine *line = [SGKaraokeLine new];
@@ -156,12 +154,17 @@ static void tick(void) {
 static void setTicking(BOOL on) {
     if (on == (sg_timer != nil)) return;
     if (!on) {
-        [sg_timer invalidate];
+        dispatch_source_cancel(sg_timer);
         sg_timer = nil;
         return;
     }
-    sg_timer = [NSTimer timerWithTimeInterval:kTick repeats:YES block:^(NSTimer *t) { tick(); }];
-    [NSRunLoop.mainRunLoop addTimer:sg_timer forMode:NSRunLoopCommonModes];
+    // Run on a strict dispatch timer: run-loop timers are throttled with the display asleep,
+    // which used to leave the lock-screen line stale until the next Spotify update.
+    sg_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, DISPATCH_TIMER_STRICT, dispatch_get_main_queue());
+    uint64_t interval = (uint64_t)(kTick * NSEC_PER_SEC);
+    dispatch_source_set_timer(sg_timer, dispatch_time(DISPATCH_TIME_NOW, interval), interval, 10 * NSEC_PER_MSEC);
+    dispatch_source_set_event_handler(sg_timer, ^{ tick(); });
+    dispatch_resume(sg_timer);
 }
 
 // Whether the sound is moving. A rate Spotify did not report at all counts as moving: the line would
@@ -225,13 +228,14 @@ static BOOL playingBy(NSDictionary *info) {
 
 %ctor {
     sg_lock = [NSObject new];
-    if (!SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_DISABLE_HOOKS) {
+    // Register after Spotify has finished constructing its launch UI. These hooks were
+    // temporarily disabled while investigating a launch watchdog; doing the work lazily
+    // keeps the cold-start path clear. Register even when currently disabled so switching it
+    // on in Settings takes effect without restarting Spotify.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         %init;
         SGLog(@"lock screen lyrics: hook ready, artist line %d, cover %d",
-              SGFlag(SGKeyLockScreenLyrics, NO),
-              SGFlag(SGKeyLockScreenLyricsCover, NO));
-    } else {
-        SGLog(@"lock screen lyrics: diagnostic build, hooks not registered");
-    }
+              SGFlag(SGKeyLockScreenLyrics, NO), SGFlag(SGKeyLockScreenLyricsCover, NO));
+    });
 }
 

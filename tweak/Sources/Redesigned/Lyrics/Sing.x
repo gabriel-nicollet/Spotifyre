@@ -17,7 +17,7 @@ void SGRSingApplyVocalsOnly(void) {
 
 void SGRSingApplySpatialVoice(void) {
     if (!SGRedesignedUI()) return;
-    SGSingSetSpatialVoice(SGFlag(SGRKeySingSpatialVoice, NO) && SGSingModelCurrentState() == SGSingModelInstalled);
+    SGSingSetSpatialVoice(SGFlag(SGRKeySingSpatialVoice, NO) && SGSingModelPath() != nil);
     SGRSpatialVoiceApplySettings();
 }
 

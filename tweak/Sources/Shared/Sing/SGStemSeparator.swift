@@ -1,8 +1,8 @@
 // Sing's separator: the Mel-Band RoFormer vocal model (harness/sing/model.json has its provenance) run by
 // Core ML on this iPhone. The compiled graph is the model's spectral core alone: the worker takes the STFT
 // and its inverse with Accelerate (SGStemSpectralDSP.swift), and Core ML turns one two-second spectrum into
-// the spectrum of its vocals. The same model is loaded twice, once for the CPU, which is all iOS lets an app
-// in the background use, and once for the CPU and the GPU, used while Spotify is the active app. Nothing
+// the spectrum of its vocals. Each model is loaded for CPU, which iOS allows in the background, and for its
+// foreground accelerator: the GPU for the full and light exports, or Neural Engine for the ANE export. Nothing
 // here runs on the render thread or on UIKit's, and no audio leaves the process.
 import CoreML
 import Foundation
@@ -29,12 +29,14 @@ enum SGStemShape {
 actor SGStemSeparator {
     let windowFrames = SGStemShape.windowFrames
     private let cpu: MLModel
-    private var gpu: MLModel?            // nil when it could not be loaded; the CPU model then does everything
-    private var gpuFailed = false        // a GPU prediction failed since Spotify was last inactive
+    private var gpu: MLModel?            // nil when acceleration could not be loaded; CPU then does everything
+    private var gpuFailed = false        // an accelerated prediction failed since Spotify was last inactive
     private var lastAccelerated: Bool?
     private let dsp: SGStemSpectralDSP
     private let tensor: MLMultiArray
     private let provider: MLDictionaryFeatureProvider
+    private let inputType: MLMultiArrayDataType
+    private let outputType: MLMultiArrayDataType
     private var running = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
@@ -50,16 +52,21 @@ actor SGStemSeparator {
               let input = description.inputDescriptionsByName["spectrum"]?.multiArrayConstraint,
               let output = description.outputDescriptionsByName["vocals_spectrum"]?.multiArrayConstraint,
               input.shape == shape, output.shape == shape,
-              input.dataType == .float32, output.dataType == .float32 else { throw SGStemError.invalidModel }
-        let tensor = try MLMultiArray(shape: shape, dataType: .float32)
+              [MLMultiArrayDataType.float32, .float16].contains(input.dataType),
+              [MLMultiArrayDataType.float32, .float16].contains(output.dataType) else { throw SGStemError.invalidModel }
+        let tensor = try MLMultiArray(shape: shape, dataType: input.dataType)
         guard tensor.strides.map(\.intValue) == Self.strides else { throw SGStemError.invalidInput }
         self.tensor = tensor
         self.provider = try MLDictionaryFeatureProvider(dictionary: ["spectrum": tensor])
+        self.inputType = input.dataType
+        self.outputType = output.dataType
         self.cpu = cpu
         self.dsp = try SGStemSpectralDSP()
         let accelerated = MLModelConfiguration()
-        accelerated.computeUnits = .cpuAndGPU
-        // Without the GPU copy the CPU one still does the work, only more slowly in the foreground.
+        // The ANE export is the same separator weights laid out for the Neural Engine; the two
+        // other exports use the GPU when available. CPU remains the safe background path.
+        accelerated.computeUnits = modelURL.lastPathComponent.contains("ane") ? .cpuAndNeuralEngine : .cpuAndGPU
+        // Without an accelerated copy the CPU one still does the work, only more slowly.
         do { self.gpu = try await MLModel.load(contentsOf: modelURL, configuration: accelerated) }
         catch {
             try Task.checkCancellation()
@@ -95,7 +102,7 @@ actor SGStemSeparator {
         try encode(pcm)
         let accelerated = active && !gpuFailed
         if lastAccelerated != accelerated {
-            NSLog("[spotifyglass] Sing Core ML compute policy: %@", accelerated ? "foreground CPU/GPU" : "CPU only")
+            NSLog("[spotifyglass] Sing Core ML compute policy: %@", accelerated ? "foreground accelerator" : "CPU only")
             lastAccelerated = accelerated
         }
         return try predict(accelerated: accelerated)
@@ -120,8 +127,16 @@ actor SGStemSeparator {
     }
 
     private func encode(_ pcm: [Float]) throws {
-        try dsp.encode(pcm, into: UnsafeMutableBufferPointer(
-            start: tensor.dataPointer.assumingMemoryBound(to: Float.self), count: tensor.count))
+        var values = [Float](repeating: 0, count: tensor.count)
+        try values.withUnsafeMutableBufferPointer { try dsp.encode(pcm, into: $0) }
+        if inputType == .float32 {
+            values.withUnsafeBufferPointer { source in
+                tensor.dataPointer.copyMemory(from: source.baseAddress!, byteCount: values.count * MemoryLayout<Float>.size)
+            }
+        } else {
+            let destination = tensor.dataPointer.assumingMemoryBound(to: Float16.self)
+            for index in values.indices { destination[index] = Float16(values[index]) }
+        }
     }
 
     private func predict(accelerated: Bool) throws -> [Float] {
@@ -141,8 +156,14 @@ actor SGStemSeparator {
         } else { result = try cpu.prediction(from: provider) }
         try Task.checkCancellation()
         guard let output = result.featureValue(for: "vocals_spectrum")?.multiArrayValue,
-              output.shape.map(\.intValue) == SGStemShape.spectrum, output.dataType == .float32,
+              output.shape.map(\.intValue) == SGStemShape.spectrum, output.dataType == outputType,
               output.strides.map(\.intValue) == Self.strides else { throw SGStemError.invalidOutput }
-        return try dsp.decode(UnsafeBufferPointer(start: output.dataPointer.assumingMemoryBound(to: Float.self), count: output.count))
+        if outputType == .float32 {
+            return try dsp.decode(UnsafeBufferPointer(start: output.dataPointer.assumingMemoryBound(to: Float.self), count: output.count))
+        }
+        let half = output.dataPointer.assumingMemoryBound(to: Float16.self)
+        var values = [Float](repeating: 0, count: output.count)
+        for index in values.indices { values[index] = Float(half[index]) }
+        return try values.withUnsafeBufferPointer { try dsp.decode($0) }
     }
 }

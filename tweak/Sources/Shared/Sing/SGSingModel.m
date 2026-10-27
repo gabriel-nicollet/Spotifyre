@@ -1,4 +1,5 @@
 #import "SGSingModel.h"
+#import "SGSingAlternateModels.h"
 #import "SGStemWorker.h"
 #import "Core/SGLog.h"
 #import "Core/SGPrefs.h"
@@ -382,7 +383,7 @@ NSString *SGSingModelFailure(void) { return sg_failure; }
 
 NSString *SGSingModelPath(void) {
     load();
-    return sg_installed ? installedModel().path : nil;
+    return SGSingEffectiveModelPath(sg_installed ? installedModel().path : nil);
 }
 
 NSString *SGSingModelBytesText(int64_t bytes) {
@@ -459,8 +460,11 @@ void SGSingModelRemove(void) {
     memset(sg_bytes, 0, sizeof sg_bytes);
     // The warm model goes now; its files after anything already queued for them.
     SGStemWorkerPurge();
-    NSURL *folder = singFolder();
-    dispatch_async(disk(), ^{ [NSFileManager.defaultManager removeItemAtURL:folder error:nil]; });
+    NSURL *installed = installedModel(), *folder = staging();
+    dispatch_async(disk(), ^{
+        [NSFileManager.defaultManager removeItemAtURL:installed error:nil];
+        [NSFileManager.defaultManager removeItemAtURL:folder error:nil];
+    });
     post(NO);
 }
 

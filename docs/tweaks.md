@@ -99,10 +99,6 @@ Shared:
                   source is on. None of it runs while EeveeSpotify is injected with its own lyrics on (SGLyricsActive()):
                   its hook on the same delegate calls blocks on a lyrics fetch, and LyricsHook calls it from the main
                   queue. The Lyrics page says so
-    (DIAGNOSTIC STATE, unverified on device: LockScreenLyrics/ and LockScreenArtwork/ below are kept in
-                  the tree but their %ctor registers no hook while the startup deadlock is investigated
-                  (SG_LOCKSCREEN_LYRICS_DIAGNOSTIC_DISABLE_HOOKS, SG_LOCKSCREEN_ARTWORK_DIAGNOSTIC_DISABLE_HOOKS
-                  = 1), so neither feature is active in a build until that is set back to 0)
     LockScreenLyrics/ the line being sung in the system's now playing, and as a switch of its own the lyrics on the cover: the
                   artwork is a card of the line, the one before and the one after over the blurred cover
                   (LockScreenLyricsCover.m), a still per line; while it is on the animated artwork is not sent
@@ -143,11 +139,13 @@ Shared:
                   uses the GPU in the foreground and its warm CPU model in the background. The audible
                   clock follows emitted source samples while delayed audio drains. Model loading overlaps source capture;
                   verified continuous next-track PCM keeps its worker and reserve across a natural transition.
-                  Redesigned/Lyrics owns the Now Playing microphone control and Mod Settings' Karaoke page. The voice
-                  model (about 470 MB) is not in the IPA: SGSingModel.m downloads its files from the model host in a
-                  background URL session, checks each against a size and a SHA-256 pinned in the code, and moves
-                  them into Application Support/spoti.pw/Sing only when all are right (SingModel.x reconnects at
-                  launch). Tested against harness/sing/ (the download against a local server, model_test.py)
+                  Redesigned/Lyrics owns the Now Playing microphone control and Mod Settings' Karaoke page. The full
+                  voice model (about 470 MB) and two alternatives (a faster Neural Engine export and a roughly 31 MB
+                  light model) are downloaded outside the IPA. Each alternative's files are checked against pinned
+                  sizes and SHA-256 hashes before Core ML can use them; each background URL session reconnects at
+                  launch (SingModel.x). The full model remains the default when installed, with the other installed
+                  models available from Karaoke settings. Tested against harness/sing/ (the original download against
+                  a local server, model_test.py)
     Player/       the player's open and close announced (PlayerEvents.x), what the player is doing read through
                   one hook for every feature that wants it (PlayerState.x), the lock screen widget's flags, and in the
                   more button's menu Speed and pitch: both done to Spotify's audio by Apple's time and pitch unit, put

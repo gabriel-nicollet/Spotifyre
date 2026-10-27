@@ -9,6 +9,7 @@
 #import "Settings/SGPageStyle.h"
 #import "Shared/Sing/SGSingController.h"
 #import "Shared/Sing/SGSingModel.h"
+#import "Shared/Sing/SGSingAlternateModels.h"
 #import "Shared/Sing/SGSingDSP.h"
 #import "Shared/Player/PlayerState.h"
 #import "Shared/Lyrics/Lyrics.h"
@@ -327,7 +328,7 @@ static NSString *aboutSize(void) {
 
 static NSString *footer(void) {
     return [NSString stringWithFormat:@"Sing controls the song from the microphone in its lyrics. At 100 percent it leaves the mix unchanged; below 100 percent it reduces the vocals and overall level, and above 100 percent it takes the instrumental out until 110 percent is vocals only. "
-            "It works on iOS 27 only. Its voice model, %@, is downloaded once and runs only on this iPhone. "
+            "It works on iOS 27 only. The full voice model is %@; two smaller alternatives are available below. Models are downloaded once and run only on this iPhone. "
             "Vocals only plays the singing alone, with the instrumental taken out, and the microphone's slider has no say "
             "while it is on. The switches and the download apply straight away.", aboutSize()];
 }
@@ -396,8 +397,10 @@ static void startDownload(void) {
 
 static void confirmRemove(void) {
     BOOL installed = SGSingModelCurrentState() == SGSingModelInstalled;
+    BOOL hasAlternative = SGSingAlternateModelInstalled(SGSingAlternateModelANE) || SGSingAlternateModelInstalled(SGSingAlternateModelLight);
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Remove the voice model?"
-        message:installed ? [NSString stringWithFormat:@"Sing is unavailable until it is downloaded again (%@).", aboutSize()]
+        message:installed ? (hasAlternative ? [NSString stringWithFormat:@"The full model will be removed (%@). Sing will switch to another downloaded model if one is available.", aboutSize()]
+                                             : [NSString stringWithFormat:@"Sing is unavailable until it is downloaded again (%@).", aboutSize()])
                           : [NSString stringWithFormat:@"The %@ downloaded so far are deleted, and the next download starts over.",
                              SGSingModelBytesText(SGSingModelReceived())]
         preferredStyle:UIAlertControllerStyleAlert];
@@ -406,6 +409,45 @@ static void confirmRemove(void) {
         SGSingModelRemove();
     }]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
+}
+
+static NSString *alternateModelStatus(SGSingAlternateModel model) {
+    if (SGSingAlternateModelInstalled(model)) return @"Downloaded";
+    if (SGSingAlternateModelDownloading(model)) {
+        double progress = SGSingAlternateModelProgress(model);
+        return progress >= 0 ? [NSString stringWithFormat:@"Downloading %d%%", (int)lrint(progress * 100)] : @"Downloading…";
+    }
+    return @"Not downloaded";
+}
+
+static void alternateModelAction(SGSingAlternateModel model) {
+    if (SGSingAlternateModelDownloading(model)) { SGSingAlternateModelCancel(model); return; }
+    if (SGSingAlternateModelInstalled(model)) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Remove this model?"
+            message:@"The downloaded files will be deleted. Sing will use another installed model if one is available."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Remove" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { SGSingAlternateModelRemove(model); }]];
+        [SGTopController() presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    NSString *space=SGSingAlternateModelSpaceProblem(model);
+    if(space) { tell(@"Not enough space",space); return; }
+    SGSingModelCheckNetwork(^(SGSingModelNetwork network) {
+        if (network == SGSingModelOffline) { tell(@"No internet connection", @"Connect to Wi-Fi to download this Sing model."); return; }
+        BOOL metered = network == SGSingModelMetered;
+        void (^download)(BOOL) = ^(BOOL allowsMetered) {
+            if (!allowsMetered && metered) return;
+            SGSingAlternateModelDownload(model, allowsMetered);
+        };
+        if (!metered) { download(NO); return; }
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Download over cellular?"
+            message:[NSString stringWithFormat:@"This model is %@. Continue over cellular?", SGSingModelBytesText(SGSingAlternateModelSize(model))]
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Download" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { download(YES); }]];
+        [SGTopController() presentViewController:alert animated:YES completion:nil];
+    });
 }
 
 // Below iOS 27 the switch is a row saying what is missing.
@@ -421,36 +463,51 @@ static SGModSection *karaokeSection(void) {
     applySpatialValues();
     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
-    SGModRow *model = SGStatActionRow(@"Voice model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
+    SGModRow *model = SGStatActionRow(@"Full quality model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
     model.progress = ^double {
         return SGSingModelCurrentState() == SGSingModelDownloading ? (double)SGSingModelReceived() / SGSingModelSize() : -1;
     };
     model.refreshOn = SGSingModelDidChangeNotification;
 
-    SGModRow *download = SGActionRow(@"Download voice model", nil, ^{ startDownload(); });
+    SGModRow *modelChoice = SGChoiceRow(@"Separator model", @"Choose the model used by Sing and Spatial Voice", SGKeySingModelVariant,
+        @[@"Full · best quality", @"Neural Engine · faster", @"Light · smaller"], SGSingAlternateModelFull);
+    modelChoice.choiceNotes = @[[NSString stringWithFormat:@"About %@. Preferred automatically when multiple models are installed.", SGSingModelBytesText(SGSingAlternateModelSize(SGSingAlternateModelFull))],
+        [NSString stringWithFormat:@"About %@. Same separator with a faster Neural Engine export.", SGSingModelBytesText(SGSingAlternateModelSize(SGSingAlternateModelANE))],
+        [NSString stringWithFormat:@"About %@. Smallest download, with more vocals left in the instrumental.", SGSingModelBytesText(SGSingAlternateModelSize(SGSingAlternateModelLight))]];
+    modelChoice.choiceFooter = @"The selected model is used after it has downloaded. If it is missing, Sing uses the best available installed model.";
+    modelChoice.chosen = ^(NSInteger index) { SGSingAlternateModelSelect((SGSingAlternateModel)index); };
+
+    SGModRow *ane = SGStatActionRow(@"Neural Engine model", @"Tap to download, cancel, or remove", ^NSString *{ return alternateModelStatus(SGSingAlternateModelANE); }, ^{ alternateModelAction(SGSingAlternateModelANE); });
+    ane.progress = ^double { return SGSingAlternateModelDownloading(SGSingAlternateModelANE) ? SGSingAlternateModelProgress(SGSingAlternateModelANE) : -1; };
+    ane.refreshOn = SGSingModelDidChangeNotification;
+    SGModRow *light = SGStatActionRow(@"Light model", @"Tap to download, cancel, or remove", ^NSString *{ return alternateModelStatus(SGSingAlternateModelLight); }, ^{ alternateModelAction(SGSingAlternateModelLight); });
+    light.progress = ^double { return SGSingAlternateModelDownloading(SGSingAlternateModelLight) ? SGSingAlternateModelProgress(SGSingAlternateModelLight) : -1; };
+    light.refreshOn = SGSingModelDidChangeNotification;
+
+    SGModRow *download = SGActionRow(@"Download full quality model", nil, ^{ startDownload(); });
     download.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelMissing; };
-    SGModRow *cancel = SGActionRow(@"Cancel download", nil, ^{ SGSingModelCancel(); });
+    SGModRow *cancel = SGActionRow(@"Cancel full model download", nil, ^{ SGSingModelCancel(); });
     cancel.visible = ^BOOL {
         SGSingModelState state = SGSingModelCurrentState();
         return state == SGSingModelDownloading || state == SGSingModelChecking;
     };
     // Removing also takes what a stopped download kept, which can be most of the model.
-    SGModRow *remove = SGActionRow(@"Remove voice model", nil, ^{ confirmRemove(); });
+    SGModRow *remove = SGActionRow(@"Remove full quality model", nil, ^{ confirmRemove(); });
     remove.color = SGRed();
     remove.visible = ^BOOL {
         SGSingModelState state = SGSingModelCurrentState();
         return state == SGSingModelInstalled || (state == SGSingModelMissing && SGSingModelReceived() > 0);
     };
-    return SGNotedSection(@"Karaoke", @[sing, model, download, cancel, remove], footer());
+    return SGNotedSection(@"Karaoke", @[sing, model, modelChoice, ane, light, download, cancel, remove], footer());
 }
 
 static SGModSection *spatialVoiceSection(void) {
     if (!SGSingSupported()) return SGSection(@"Spatial Voice", @[]);
-    BOOL installed = SGSingModelCurrentState() == SGSingModelInstalled;
+    BOOL installed = SGSingModelPath() != nil;
     NSString *gatingInfo = @"Download the Sing voice model above to enable Spatial Voice. Tuning works with any headphones; AirPods are required only for head tracking.";
     SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep vocals focused in front", SGRKeySingSpatialVoice);
     spatial.info = installed ? @"Adjust the vocal stem's position and character. AirPods are needed for head tracking; effect tuning works with other headphones." : gatingInfo;
-    spatial.enabled = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled; };
+    spatial.enabled = ^BOOL { return SGSingModelPath() != nil; };
     spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); applySpatialValues(); };
     SGModRow *gain = SGSliderRow(@"Vocal level", @"Relative vocal gain", -12, 6, 0.5,
         ^double { return spatialValue(SGRKeySpatialGainDB, 0.0); },
@@ -489,9 +546,9 @@ static SGModSection *spatialVoiceSection(void) {
     SGModRow *demo = SGActionRow(@"Play Spatial Voice demo", @"Hear the supplied vocal and soundtrack stems", ^{ promptDemo(); });
     demo.value = ^NSString *{ return [[SGSpatialVoiceDemo shared] isPlaying] ? @"Playing · Tap to stop" : @"Preview"; };
     NSArray<SGModRow *> *tunedRows = @[gain, reverb, echo, width, distance, eq];
-    for (SGModRow *row in tunedRows) row.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled && SGFlag(SGRKeySingSpatialVoice, NO); };
-    low.visible = mid.visible = high.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled && SGFlag(SGRKeySingSpatialVoice, NO) && SGFlag(SGRKeySpatialEQ, NO); };
-    demo.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelInstalled && SGFlag(SGRKeySingSpatialVoice, NO); };
+    for (SGModRow *row in tunedRows) row.visible = ^BOOL { return SGSingModelPath() != nil && SGFlag(SGRKeySingSpatialVoice, NO); };
+    low.visible = mid.visible = high.visible = ^BOOL { return SGSingModelPath() != nil && SGFlag(SGRKeySingSpatialVoice, NO) && SGFlag(SGRKeySpatialEQ, NO); };
+    demo.visible = ^BOOL { return SGSingModelPath() != nil && SGFlag(SGRKeySingSpatialVoice, NO); };
     spatial.visible = ^BOOL { return YES; };
     return SGNotedSection(@"Spatial Voice", @[spatial, gain, reverb, echo, width, distance, eq, low, mid, high, demo],
         @"AirPods are required for head tracking. Effect tuning works with other headphones.");
@@ -516,9 +573,14 @@ UIViewController *SGRKaraokeSettingsPage(void) {
 // Beside the main page's row: what Sing would do now, or how far its model has come.
 NSString *SGRKaraokeSummary(void) {
     if (!SGSingSupported()) return @"Needs iOS 27";
+    if (SGSingModelPath()) return SGFlag(SGRKeySing, NO) ? @"On" : @"Off";
     SGSingModelState state = SGSingModelCurrentState();
     if (state == SGSingModelDownloading) return [NSString stringWithFormat:@"%lld %%", SGSingModelReceived() * 100 / SGSingModelSize()];
     if (state == SGSingModelChecking) return @"Checking…";
+    if (SGSingAlternateModelDownloading(SGSingAlternateModelANE))
+        return [NSString stringWithFormat:@"Neural Engine %d%%", (int)lrint(SGSingAlternateModelProgress(SGSingAlternateModelANE) * 100)];
+    if (SGSingAlternateModelDownloading(SGSingAlternateModelLight))
+        return [NSString stringWithFormat:@"Light model %d%%", (int)lrint(SGSingAlternateModelProgress(SGSingAlternateModelLight) * 100)];
     if (!SGFlag(SGRKeySing, NO)) return @"Off";
-    return state == SGSingModelInstalled ? @"On" : @"No model";
+    return @"No model";
 }
