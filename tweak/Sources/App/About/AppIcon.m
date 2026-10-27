@@ -13,15 +13,15 @@ static NSString *const SGAppIconSelectionKey = @"spotifyglass.appIcon.selection"
 // In the order the list shows them: the file in icons/, and the name the list gives it. Spotify is the
 // IPA's own icon, iOS's primary one.
 static NSArray<NSString *> *iconFiles(void) {
-    return @[@"Spotify", @"Glass", @"SpotifyGreen", @"SpotifyWhite", @"SpotifyPink", @"SpotifyBlue", @"SpotifyPurple",
-             @"SpotifyOrange", @"SpotifyLime", @"SpotifyreOriginalFlame", @"SpotifyreOriginalFlat",
+    return @[@"Spotify", @"Glass", @"Green", @"White", @"Pink", @"Blue", @"Purple", @"Orange", @"Lime",
+             @"SpotifyreOriginalFlame", @"SpotifyreOriginalFlat",
              @"SpotifyreAmberFlame", @"SpotifyreAmberFlat", @"SpotifyreBlueFlame", @"SpotifyreBlueFlat",
              @"SpotifyrePinkFlame", @"SpotifyrePinkFlat", @"SpotifyrePurpleFlame", @"SpotifyrePurpleFlat"];
 }
 
 static NSArray<NSString *> *iconTitles(void) {
-    return @[@"Spotify", @"Liquid Glass", @"Spotify Green", @"Spotify White", @"Spotify Pink", @"Spotify Blue", @"Spotify Purple",
-             @"Spotify Orange", @"Spotify Lime", @"Spotifyre Original · Flame", @"Spotifyre Original · Flat",
+    return @[@"Spotify", @"Liquid Glass", @"Green", @"White", @"Pink", @"Blue", @"Purple", @"Orange", @"Lime",
+             @"Spotifyre Original · Flame", @"Spotifyre Original · Flat",
              @"Spotifyre Amber · Flame", @"Spotifyre Amber · Flat", @"Spotifyre Blue · Flame", @"Spotifyre Blue · Flat",
              @"Spotifyre Pink · Flame", @"Spotifyre Pink · Flat", @"Spotifyre Purple · Flame", @"Spotifyre Purple · Flat"];
 }
