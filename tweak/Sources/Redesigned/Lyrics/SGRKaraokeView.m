@@ -1913,7 +1913,12 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
     // In the redesigned player's lyrics view, translation lives in the player's top-right ⋯ menu.
     // Keep this corner control for pronunciation only there; the full-screen Lyrics page retains
     // its complete translation menu.
-    BOOL playerOwnsTranslation = self.keepsSing;
+    Class playerTranslator = NSClassFromString(@"SGRLyricsTranslator");
+    SEL availableSelector = NSSelectorFromString(@"isAvailable");
+    BOOL playerMenuCanTranslate = playerTranslator && [playerTranslator respondsToSelector:availableSelector]
+        && ((BOOL (*)(id, SEL))objc_msgSend)(playerTranslator, availableSelector);
+    // Fall back to the full local menu if the player menu's translator is unavailable.
+    BOOL playerOwnsTranslation = self.keepsSing && playerMenuCanTranslate;
     NSString *language = SGLyricsGeminiLanguage();
     BOOL gemini = SGGeminiKeySet(), onDevice = SGOnDeviceTranslation.translationAvailable;
     BOOL intelligence = [SGOnDeviceTranslation appleIntelligenceAvailable:language];
