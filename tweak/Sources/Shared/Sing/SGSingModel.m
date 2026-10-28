@@ -692,7 +692,6 @@ void SGSingModelCheckNetwork(void (^done)(SGSingModelNetwork network)) {
         nw_path_status_t status = nw_path_get_status(path);
         SGSingModelNetwork network = status != nw_path_status_satisfied ? SGSingModelOffline
             : (nw_path_is_expensive(path) || nw_path_is_constrained(path)) ? SGSingModelMetered : SGSingModelUnmetered;
-        nw_path_monitor_set_update_handler(monitor, NULL);
         nw_path_monitor_cancel(monitor);
         dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(network); });
     });
