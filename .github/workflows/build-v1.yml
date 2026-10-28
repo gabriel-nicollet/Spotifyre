@@ -1,9 +1,12 @@
-name: V1 Spotifyre build
+name: V1 Spotifyre hybrid IPA build
 
 on:
-  push:
-    branches: [V1-Spotifyre]
   workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "Direct link to your decrypted Spotify IPA"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +18,9 @@ jobs:
       THEOS: ${{ github.workspace }}/theos
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: V1-Spotifyre
+      - uses: levibostian/action-hide-sensitive-inputs@v1
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
@@ -23,13 +29,28 @@ jobs:
           repository: theos/theos
           path: theos
           submodules: recursive
-      - name: Install tools
-        run: brew install make dpkg ldid
-      - name: Flag table
-        env:
-          SG_FLAG_LIST: ${{ secrets.SG_FLAG_LIST }}
+      - name: Install build tools
         run: |
-          [ -n "$SG_FLAG_LIST" ] || { echo "::error::the SG_FLAG_LIST secret is not set"; exit 1; }
-          echo "$SG_FLAG_LIST" | base64 -d | gunzip > tweak/Sources/Shared/Flags/SGFlagList.m
-      - name: Build release package
-        run: env -u MAKELEVEL gmake -C tweak clean package
+          brew install make dpkg ldid
+          python3 -m pip install --break-system-packages git+https://github.com/asdfzxcvbn/pyzule-rw.git
+      - name: Download decrypted Spotify IPA
+        env:
+          IPA_URL: ${{ inputs.ipa_url }}
+        run: |
+          mkdir -p ipa
+          curl --fail --location --silent --show-error "$IPA_URL" -o ipa/spotify.ipa
+          test -s ipa/spotify.ipa
+          file ipa/spotify.ipa
+          unzip -tq ipa/spotify.ipa
+      - name: Build Vitrine hybrid IPA
+        run: |
+          test -x scripts/pipeline.sh || chmod +x scripts/pipeline.sh
+          test -x scripts/extract-flags.py || chmod +x scripts/extract-flags.py
+          make release IPA=ipa/spotify.ipa
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: V1-Spotifyre-hybrid-IPA
+          path: out/*.ipa
+          if-no-files-found: error
+          retention-days: 7
