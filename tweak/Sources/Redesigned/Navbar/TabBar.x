@@ -166,7 +166,7 @@ UIImage *SGRNavbarGlyph(NSDictionary *entry, BOOL active) {
 
 // NavigationUI_TabBarImpl's TabBarItemElementUI answers a tap recognizer (-handleTap), so the tap is
 // replayed through the recognizer's own target-action pairs, the same call a real touch ends in.
-static BOOL fireTapRecognizers(UIView *view) {
+BOOL SGRFireTapRecognizers(UIView *view) {
     Ivar targetsIvar = class_getInstanceVariable(UIGestureRecognizer.class, "_targets");
     if (!targetsIvar) return NO;
     BOOL fired = NO;
@@ -190,7 +190,7 @@ static BOOL fireTapRecognizers(UIView *view) {
 static void forwardTap(UIView *item) {
     __block BOOL sent = NO;
     SGForEachView(item, ^(UIView *v) {
-        if (!sent) sent = fireTapRecognizers(v);
+        if (!sent) sent = SGRFireTapRecognizers(v);
     });
     SGForEachView(item, ^(UIView *v) {
         if (sent || ![v isKindOfClass:UIControl.class]) return;
