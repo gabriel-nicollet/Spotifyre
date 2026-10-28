@@ -1,0 +1,35 @@
+name: V1 Spotifyre build
+
+on:
+  push:
+    branches: [V1-Spotifyre]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      THEOS: ${{ github.workspace }}/theos
+    steps:
+      - uses: actions/checkout@v5
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/checkout@v5
+        with:
+          repository: theos/theos
+          path: theos
+          submodules: recursive
+      - name: Install tools
+        run: brew install make dpkg ldid
+      - name: Flag table
+        env:
+          SG_FLAG_LIST: ${{ secrets.SG_FLAG_LIST }}
+        run: |
+          [ -n "$SG_FLAG_LIST" ] || { echo "::error::the SG_FLAG_LIST secret is not set"; exit 1; }
+          echo "$SG_FLAG_LIST" | base64 -d | gunzip > tweak/Sources/Shared/Flags/SGFlagList.m
+      - name: Build release package
+        run: env -u MAKELEVEL gmake -C tweak clean package
