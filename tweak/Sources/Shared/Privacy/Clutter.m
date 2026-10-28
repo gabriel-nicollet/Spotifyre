@@ -1,5 +1,6 @@
 #import "Core/SGCore.h"
 #import "Privacy.h"
+#import "Shared/AdBlock/AdBlock.h"
 
 static NSString *const socialProofFlags[] = {
     @"ios-feature-search.social_proof_playlist_enabled",

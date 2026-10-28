@@ -4,8 +4,7 @@
 
 #define SGKeyBlockTelemetry @"spotifyglass.blockTelemetry"
 
-// Hide optional video and social-proof sections from search results. Off unless switched on.
-#define SGKeyHideSearchVideos @"spotifyglass.hideSearchVideos"
+// Hide optional social-proof sections from search results. Off unless switched on.
 #define SGKeyHideSocialProof @"spotifyglass.hideSocialProof"
 
 // Clean shared links (CleanLinks.m, CleanLinks.x): the tracking parameters taken off the open.spotify.com links
