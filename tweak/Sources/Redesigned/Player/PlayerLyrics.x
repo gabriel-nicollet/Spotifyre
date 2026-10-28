@@ -150,6 +150,9 @@ static BOOL keepsTitle(void) {
         _lyrics.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         // Sing's mic stays while the lines are on their own, moving down with them (setAlone).
         _lyrics.keepsSing = YES;
+        // The pronunciation and translation entries are the ⋯ menu's (PlayerMenu.m), as Spotifyre has them, not a button
+        // in the corner across from the mic.
+        _lyrics.extrasInMenu = YES;
     }
     if (_lyrics.superview != _stage) [_stage addSubview:_lyrics];
     _lyrics.frame = _stage.bounds;

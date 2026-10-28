@@ -9,6 +9,10 @@
 //                             three, named for what it switches to
 //     Lyrics Source           a song's lyrics from another source than the one the order chose (issue #67), in a
 //                             popover from the ⋯ that asks every source and lists each as it answers
+//     Pronunciation, Translation and the translators
+//                             while the lyrics are up: Show or Hide Pronunciation and Translation, who made a saved
+//                             translation, and the ways to have one made (SGRKaraokeMenuItems), which the lyrics
+//                             had as a button in their bottom leading corner (Spotifyre moved them here)
 //
 // The item says under its name what is not as Spotify plays it, so the menu reads as a settings summary.
 #import "Core/SGCore.h"
@@ -17,6 +21,7 @@
 #import "Shared/Player/SpeedPitch.h"
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsSources/LyricsSources.h"
+#import "Redesigned/Lyrics/SGRKaraokeView.h"
 #import "Settings/SGPageStyle.h"
 #import "Player.h"
 
@@ -221,6 +226,11 @@ static NSArray<UIMenuElement *> *playerItems(void) {
     }
     UIAction *lyrics = lyricsSourceItem();
     if (lyrics) [items addObject:lyrics];
+    // Pronunciation and translation, while the lyrics are up: the entries the corner button of the lyrics had.
+    if (SGRPlayerLyricsOpen()) {
+        NSArray<UIMenuElement *> *text = SGRKaraokeMenuItems();
+        if (text.count) [items addObjectsFromArray:text];
+    }
     return items;
 }
 

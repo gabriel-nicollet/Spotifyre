@@ -1308,7 +1308,11 @@ typedef struct {
 @end
 
 @interface SGRKaraokeView () <UIScrollViewDelegate, SGPlayerStateObserver>
+- (NSArray<UIMenuElement *> *)extrasItems;   // for SGRKaraokeMenuItems, which comes after the class
 @end
+
+// The view whose pronunciation and translation menu the player's ⋯ holds (extrasInMenu), for SGRKaraokeMenuItems.
+static __weak SGRKaraokeView *sg_menuKaraoke;
 
 @implementation SGRKaraokeView {
     UIScrollView *_scroll;
@@ -1612,6 +1616,14 @@ typedef struct {
 
 // In the caller's animation: the glass dematerializes by its effect and the glyph fades by its alpha, the
 // one view of the two with no glass in it.
+- (void)setExtrasInMenu:(BOOL)inMenu {
+    if (_extrasInMenu == inMenu) return;
+    _extrasInMenu = inMenu;
+    if (inMenu) sg_menuKaraoke = self;
+    else if (sg_menuKaraoke == self) sg_menuKaraoke = nil;
+    [self offerExtras];
+}
+
 - (void)setExtrasHidden:(BOOL)hidden {
     [self stir];
     _extrasHidden = hidden;
@@ -1970,9 +1982,10 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
     for (SGRKaraokeLineView *view in _shown.allValues) [view.layer removeAnimationForKey:@"blur"];
 }
 
-// The button shows only for a song with a pronunciation or a translation to show, and its menu only
-// what the song has: a switch for each, reading what tapping it will do.
-- (void)offerExtras {
+// What the menu offers: a switch for each of the pronunciation and the translation, reading what tapping it will do,
+// and the translators for a song with lines left to translate. nil for a song with neither a pronunciation nor a
+// translation to show, nor a way to have one made.
+- (NSArray<UIMenuElement *> *)extrasItems {
     NSString *language = SGLyricsTranslationTarget();
     // A translator is offered only for a song in another language than the one it would translate into,
     // and the translators are asked after (an AI translator's key is a Keychain read).
@@ -1982,38 +1995,8 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
     BOOL ai = wanted && SGAITranslatorReady();
     BOOL translatable = ai || onDevice || intelligence;
     BOOL offered = _lines && !_sample && (_hasSpoken || _hasTranslation || translatable);
-    if (!offered) {
-        _extrasBox.hidden = YES;
-        [self setNeedsLayout];
-        return;
-    }
-    if (!_extras) {
-        // The Kit's glass, as the mic across from it has (setExtrasHidden:), which turns solid under Reduce
-        // Transparency, with a plain button over it.
-        _extrasBox = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kExtrasSide, kExtrasSide)];
-        _extrasBox.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
-        config.image = [UIImage systemImageNamed:@"translate"];
-        config.preferredSymbolConfigurationForImage = [UIImageSymbolConfiguration configurationWithPointSize:kExtrasGlyph weight:UIImageSymbolWeightSemibold];
-        config.baseForegroundColor = UIColor.whiteColor;
-        _extras = [UIButton buttonWithConfiguration:config primaryAction:nil];
-        _extras.frame = _extrasBox.bounds;
-        _extras.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        _extras.showsMenuAsPrimaryAction = YES;
-        _extras.preferredMenuElementOrder = UIContextMenuConfigurationElementOrderFixed;
-        _extras.accessibilityLabel = @"Pronunciation and translation";
-        [_extrasBox addSubview:_extras];
-        [self addSubview:_extrasBox];
-        self.extrasHidden = _extrasHidden;
-    }
-    // While a translation is worked out the glyph turns into a spinner, and the menu has nothing to ask a second time.
+    if (!offered) return nil;
     BOOL translating = _translating && _translating == _lines;
-    UIButtonConfiguration *config = _extras.configuration;
-    if (config.showsActivityIndicator != translating) {
-        config.showsActivityIndicator = translating;
-        _extras.configuration = config;
-        _extras.accessibilityValue = translating ? @"Translating" : nil;
-    }
     NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
     if (_hasSpoken) {
         BOOL on = SGFlag(SGRKeyLyricsPronunciation, NO);
@@ -2075,6 +2058,51 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
                       ^(NSArray<SGKaraokeLine *> *lines, NSString *track, NSString *to, SGRTranslated progress, SGRTranslated done) {
             SGLyricsTranslateWithAI(track, lines, to, done);
         });
+    }
+    // The corner button turns its glyph into a spinner while a translation is worked out; the ⋯ menu says it here.
+    if (translating && _extrasInMenu) {
+        UIAction *working = [UIAction actionWithTitle:@"Translating Lyrics…" image:[UIImage systemImageNamed:@"translate"] identifier:nil handler:^(UIAction *action) {}];
+        working.attributes = UIMenuElementAttributesDisabled;
+        [items addObject:working];
+    }
+    return items;
+}
+
+// The button shows only for a song with a pronunciation or a translation to show, and its menu only what the
+// song has (extrasItems). In the player the ⋯ menu holds them instead (extrasInMenu), and there is no button.
+- (void)offerExtras {
+    NSArray<UIMenuElement *> *items = _extrasInMenu ? nil : [self extrasItems];
+    if (!items) {
+        _extrasBox.hidden = YES;
+        [self setNeedsLayout];
+        return;
+    }
+    if (!_extras) {
+        // The Kit's glass, as the mic across from it has (setExtrasHidden:), which turns solid under Reduce
+        // Transparency, with a plain button over it.
+        _extrasBox = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kExtrasSide, kExtrasSide)];
+        _extrasBox.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
+        config.image = [UIImage systemImageNamed:@"translate"];
+        config.preferredSymbolConfigurationForImage = [UIImageSymbolConfiguration configurationWithPointSize:kExtrasGlyph weight:UIImageSymbolWeightSemibold];
+        config.baseForegroundColor = UIColor.whiteColor;
+        _extras = [UIButton buttonWithConfiguration:config primaryAction:nil];
+        _extras.frame = _extrasBox.bounds;
+        _extras.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _extras.showsMenuAsPrimaryAction = YES;
+        _extras.preferredMenuElementOrder = UIContextMenuConfigurationElementOrderFixed;
+        _extras.accessibilityLabel = @"Pronunciation and translation";
+        [_extrasBox addSubview:_extras];
+        [self addSubview:_extrasBox];
+        self.extrasHidden = _extrasHidden;
+    }
+    // While a translation is worked out the glyph turns into a spinner, and the menu has nothing to ask a second time.
+    BOOL translating = _translating && _translating == _lines;
+    UIButtonConfiguration *config = _extras.configuration;
+    if (config.showsActivityIndicator != translating) {
+        config.showsActivityIndicator = translating;
+        _extras.configuration = config;
+        _extras.accessibilityValue = translating ? @"Translating" : nil;
     }
     _extras.menu = [UIMenu menuWithChildren:items];
     _extrasBox.hidden = NO;
@@ -2570,3 +2598,11 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
 }
 
 @end
+
+NSArray<UIMenuElement *> *SGRKaraokeMenuItems(void) {
+    SGRKaraokeView *view = sg_menuKaraoke;
+    if (!view || !view.window || !view.extrasInMenu) return nil;
+    NSArray<UIMenuElement *> *items = [view extrasItems];
+    if (!items.count) return nil;
+    return @[[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:items]];
+}

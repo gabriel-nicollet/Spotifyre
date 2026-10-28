@@ -23,6 +23,10 @@
 // The mic stays when the extras go, for a host that lets it take its own touches while its controls are
 // hidden (the player's lines on their own, Redesigned/Player/PlayerLyrics.x), so Sing is always in reach.
 @property (nonatomic) BOOL keepsSing;
+// The pronunciation and translation menu is the host's own ⋯ menu's (SGRKaraokeMenuItems), not a button in the
+// bottom leading corner: Spotifyre's, for the player, whose ⋯ is at the top trailing corner. The button is
+// never made while it is set, and the page's own host (KaraokePage.x, which has no ⋯) leaves it unset.
+@property (nonatomic) BOOL extrasInMenu;
 // How far down a tap on the lines seeks, from the view's top; 0 is all the way. Below it, and above
 // seeksBelow, the tap is the host's (the player's lines on their own, over the controls that faded).
 @property (nonatomic) CGFloat seeksAbove;
@@ -31,3 +35,8 @@
 // or a line's explain bubble.
 - (BOOL)tapSeeksAt:(CGPoint)point;
 @end
+
+// What the pronunciation and translation menu offers now for the song the player's lyrics show, as one inline
+// group for the ⋯ menu to hold; nil while no such view is on screen or the song has nothing to show or translate.
+// Built as the ⋯ menu opens, so it reads the song as it is. Main thread.
+NSArray<UIMenuElement *> *SGRKaraokeMenuItems(void);
