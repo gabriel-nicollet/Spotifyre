@@ -35,6 +35,7 @@ static __weak UIVisualEffectView *sg_cardGlass;
 static __weak UIView *sg_cardArtwork;
 static __weak UIView *sg_progress;
 static __weak UIViewController *sg_container;
+static __weak UIView *sg_barContainer;
 // The container's view while it stands in the minimized tab bar's row, below the page that holds it.
 static __weak UIView *sg_inline;
 
@@ -49,6 +50,56 @@ CGRect SGRNowPlayingArtworkFrameIn(UIView *host) {
     UIView *artwork = sg_cardArtwork;
     if (!artwork.window || !host) return CGRectNull;
     return [host convertRect:artwork.bounds fromView:artwork];
+}
+
+// Find the image view inside the round artwork container, or the bar's first square image.
+UIImageView *SGRNowPlayingArtworkView(void) {
+    __block UIImageView *found = nil;
+    void (^look)(UIView *) = ^(UIView *root) {
+        if (!root) return;
+        SGForEachView(root, ^(UIView *v) {
+            if (found || ![v isKindOfClass:UIImageView.class]) return;
+            CGSize size = v.bounds.size;
+            if (size.width >= 30 && size.width <= 64 && fabs(size.width - size.height) < 1) found = (UIImageView *)v;
+        });
+    };
+    UIView *artwork = sg_cardArtwork;
+    if ([artwork isKindOfClass:UIImageView.class]) return (UIImageView *)artwork;
+    look(artwork);
+    if (!found) look(sgr_nowPlayingRoot);
+    return found;
+}
+
+UIImage *SGRNowPlayingArtworkImage(void) {
+    return SGRNowPlayingArtworkView().image;
+}
+
+// Forward the tap through Spotify's own recognizers instead of inventing a separate player route.
+BOOL SGROpenPlayerFromBar(void) {
+    UIView *container = sg_barContainer;
+    if (!container) return NO;
+    NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:container];
+    while (queue.count) {
+        UIView *view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if (SGRFireTapRecognizers(view)) {
+            SGLog(@"mini player: tap passed to %@ on Spotify's bar", NSStringFromClass(view.class));
+            return YES;
+        }
+        [queue addObjectsFromArray:view.subviews];
+    }
+    for (UIView *view = container.superview; view && ![view isKindOfClass:UIWindow.class]; view = view.superview) {
+        if (SGRFireTapRecognizers(view)) {
+            SGLog(@"mini player: tap passed to %@ above Spotify's bar", NSStringFromClass(view.class));
+            return YES;
+        }
+    }
+    NSMutableString *out = [NSMutableString stringWithString:@"mini player: no tap recognizer on Spotify's bar"];
+    SGForEachView(container, ^(UIView *v) {
+        for (UIGestureRecognizer *r in v.gestureRecognizers) [out appendFormat:@"\n  %@ on %@", r, NSStringFromClass(v.class)];
+    });
+    SGLogLong(@"mini player", out);
+    return NO;
 }
 
 // The Jam strip. The height keeps out a view of the same module that can hold the track card too.
@@ -450,6 +501,7 @@ static void styleNowPlayingBar(UIViewController *container) {
     UIViewController *barVC = container.childViewControllers.firstObject;
     UIView *bar = barVC.viewIfLoaded ?: container.view;
     sg_container = container;
+    sg_barContainer = container.view;
     if (!sgr_nowPlayingPainted) sgr_nowPlayingPainted = [NSHashTable weakObjectsHashTable];
     sgr_nowPlayingRoot = bar;
 
