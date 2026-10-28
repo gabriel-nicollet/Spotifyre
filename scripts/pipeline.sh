@@ -10,7 +10,8 @@
 # it and the Watch app's ids to the signing App ID, and sign the Watch app with a profile of its own that covers
 # the Watch.
 #
-# Every icons/NAME.png becomes an alternate icon (icons/README.md).
+# Every icons/NAME.png becomes an alternate icon (icons/README.md), and every icons/NAME.icon a Liquid Glass one
+# (scripts/app-icons.sh, with Xcode 26 and its Icon Composer).
 #
 # --install hands the result to install.sh (sign with your certificate, push to the plugged-in iPhone).
 #
@@ -183,6 +184,11 @@ if [ ${#EXT_BINS[@]} -gt 0 ]; then
   (cd "$PATCH" && zip -q "$OUT_ABS" "${EXT_BINS[@]}")
 fi
 rm -rf "$PATCH"
+
+echo "==> adding the Liquid Glass app icons"
+# icons/*.icon, the glass stacks. A failure leaves the IPA as it was, without them; Appearance > App icon then lists
+# the flat ones (icons/*.png) below.
+"$ROOT/scripts/app-icons.sh" "$OUT" || echo "    the app icons failed: building without them"
 
 shopt -s nullglob
 ICONS=("$ROOT"/icons/*.png)

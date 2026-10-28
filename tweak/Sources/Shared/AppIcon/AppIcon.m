@@ -1,42 +1,192 @@
+// Appearance > App icon: the icon on the home screen, picked from the ones scripts/app-icons.sh put into the IPA
+// (icons/*.icon, listed under CFBundleAlternateIcons as SGAppIcon<Name>) and from the flat ones scripts/pipeline.sh
+// adds from icons/*.png (listed under their own names, below the others). iOS keeps the choice itself, so
+// UIKit is the source of truth for the current choice; a saved last selection is only a fallback if its
+// alternate-icon name is unknown. iOS confirms each change in its own alert. The icons are Liquid Glass
+// stacks only, which nothing before iOS 26 draws, so below 26 the row says so. The name under the icon is
+// the signature's to set, not the app's.
 #import "Core/SGCore.h"
-#import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "AppIcon.h"
 
-// The names Info.plist declares, sorted, so the list reads the same each time.
-static NSArray<NSString *> *iconNames(void) {
+static NSString *const SGAppIconSelectionKey = @"spotifyglass.appIcon.selection";
+
+// In the order the list shows them: the file in icons/, and the name the list gives it. Spotify is the
+// IPA's own icon, iOS's primary one.
+static NSArray<NSString *> *iconFiles(void) {
+    return @[@"Spotify", @"Glass", @"Green", @"White", @"Pink", @"Blue", @"Purple", @"Orange", @"Lime",
+             @"SpotifyreOriginalFlame", @"SpotifyreOriginalFlat",
+             @"SpotifyreAmberFlame", @"SpotifyreAmberFlat", @"SpotifyreBlueFlame", @"SpotifyreBlueFlat",
+             @"SpotifyrePinkFlame", @"SpotifyrePinkFlat", @"SpotifyrePurpleFlame", @"SpotifyrePurpleFlat"];
+}
+
+static NSArray<NSString *> *iconTitles(void) {
+    return @[@"Spotify", @"Liquid Glass", @"Green", @"White", @"Pink", @"Blue", @"Purple", @"Orange", @"Lime",
+             @"Spotifyre Original · Flame", @"Spotifyre Original · Flat",
+             @"Spotifyre Amber · Flame", @"Spotifyre Amber · Flat", @"Spotifyre Blue · Flame", @"Spotifyre Blue · Flat",
+             @"Spotifyre Pink · Flame", @"Spotifyre Pink · Flat", @"Spotifyre Purple · Flame", @"Spotifyre Purple · Flat"];
+}
+
+// Spotify is the primary icon; the stacks are SGAppIcon<Name>; a flat one is listed under its file's name.
+static NSString *alternateName(NSString *file) {
+    if ([file isEqualToString:@"Spotify"]) return nil;
+    return [iconFiles() containsObject:file] ? [@"SGAppIcon" stringByAppendingString:file] : file;
+}
+
+// The icons this build has: one built without Xcode 26 has none but Spotify's and the flat ones, and the glass
+// stacks are drawn from iOS 26 on only. The flat ones (icons/*.png) are every other alternate the IPA lists.
+static BOOL isStack(NSString *name) {
+    return [name hasPrefix:@"SGAppIcon"];
+}
+
+static NSArray<NSString *> *availableFiles(void) {
     NSDictionary *icons = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleIcons"];
     NSDictionary *alternates = [icons isKindOfClass:NSDictionary.class] ? icons[@"CFBundleAlternateIcons"] : nil;
-    if (![alternates isKindOfClass:NSDictionary.class]) return @[];
-    return [alternates.allKeys sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
+    if (![alternates isKindOfClass:NSDictionary.class]) alternates = @{};
+    BOOL glass = NO;
+    if (@available(iOS 26.0, *)) glass = YES;
+    NSMutableArray<NSString *> *files = [NSMutableArray array];
+    for (NSString *file in iconFiles())
+        if (!alternateName(file) || (glass && alternates[alternateName(file)])) [files addObject:file];
+    for (NSString *name in [alternates.allKeys sortedArrayUsingSelector:@selector(localizedStandardCompare:)])
+        if (!isStack(name)) [files addObject:name];
+    return files;
 }
 
-static NSString *label(NSString *name) {
-    return name ? [name stringByReplacingOccurrencesOfString:@"_" withString:@" "] : @"Default";
+static NSString *currentFile(void) {
+    NSArray<NSString *> *available = availableFiles();
+    NSString *name = UIApplication.sharedApplication.alternateIconName;
+    for (NSString *file in available)
+        if ((!name && !alternateName(file)) || [alternateName(file) isEqualToString:name]) return file;
+    NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:SGAppIconSelectionKey];
+    if ([available containsObject:saved]) return saved;
+    return @"Spotify";
 }
 
-static void setIcon(NSString *icon) {
-    [UIApplication.sharedApplication setAlternateIconName:icon completionHandler:^(NSError *error) {
-        if (!error) return;   // iOS says so itself when it worked
-        SGLog(@"app icon: %@ not set: %@", label(icon), error.localizedDescription);
-        // A re-signed install, or a call while the app is not frontmost, can be refused; without
-        // a word the row looks broken. The handler can run off the main thread.
+static NSString *titleOf(NSString *file) {
+    NSUInteger index = [iconFiles() indexOfObject:file];
+    return index == NSNotFound ? [file stringByReplacingOccurrencesOfString:@"_" withString:@" "] : iconTitles()[index];
+}
+
+// app-icons.sh draws each at 60 pt @3x with ictool.
+static UIImage *preview(NSString *file) {
+    NSString *path = [NSBundle.mainBundle pathForResource:file ofType:@"png" inDirectory:@"SGAppIconPreviews"];
+    UIImage *image = path ? [UIImage imageWithContentsOfFile:path] : nil;
+    if (image) return [UIImage imageWithCGImage:image.CGImage scale:3 orientation:UIImageOrientationUp];
+    // A flat icon's own file (CFBundleIconFiles), drawn rounded as the home screen would.
+    UIImage *flat = [UIImage imageNamed:file];
+    if (!flat) return nil;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(60, 60)];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 60, 60) cornerRadius:13.5] addClip];
+        [flat drawInRect:CGRectMake(0, 0, 60, 60)];
+    }];
+}
+
+// The list stays up after a pick, so one icon after another can be tried; the tick follows what iOS
+// reports once it has switched.
+@interface SGAppIconPage : SGPage
+@end
+
+@implementation SGAppIconPage {
+    NSArray<NSString *> *_files;
+    UIView *_footer;
+}
+
+- (instancetype)init {
+    if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
+    self.title = @"App icon";
+    _files = availableFiles();
+    _footer = SGNote(@"iOS confirms each change in an alert of its own. The name under the icon is set when the app is signed: rename it in Feather, Sideloadly or whatever signs it.");
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.tableView.tableFooterView = _footer;
+}
+
+- (void)viewWillLayoutSubviews {
+    [super viewWillLayoutSubviews];
+    SGFitNote(self.tableView, _footer, 16, 24);
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    SGInsetForBars(self.tableView);
+}
+
+- (NSInteger)tableView:(UITableView *)table numberOfRowsInSection:(NSInteger)section {
+    return (NSInteger)_files.count;
+}
+
+- (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section {
+    return CGFLOAT_MIN;
+}
+
+- (CGFloat)tableView:(UITableView *)table heightForFooterInSection:(NSInteger)section {
+    return CGFLOAT_MIN;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
+    UITableViewCell *cell = SGDequeueCell(table, @"appicon");
+    NSString *file = _files[(NSUInteger)path.row];
+    SGFillCell(cell, titleOf(file), nil, nil, nil);
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    UIListContentConfiguration *content = [(UIListContentConfiguration *)cell.contentConfiguration copy];
+    content.image = preview(file);
+    content.imageProperties.maximumSize = CGSizeMake(44, 44);
+    content.imageProperties.reservedLayoutSize = CGSizeMake(44, 44);
+    content.imageToTextPadding = 14;
+    cell.contentConfiguration = content;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    if ([file isEqualToString:currentFile()]) {
+        UIImageView *tick = SGSymbolView(@"checkmark", 13, UIImageSymbolWeightSemibold, 16);
+        tick.tintColor = SGGreen();
+        cell.accessoryView = tick;
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)path {
+    [table deselectRowAtIndexPath:path animated:YES];
+    NSString *file = _files[(NSUInteger)path.row];
+    // Compare the value iOS actually stores. A stale icon name can make currentFile() fall back
+    // to Spotify and used to block the tap needed to switch back to the primary icon.
+    NSString *wantedName = alternateName(file);
+    NSString *currentName = UIApplication.sharedApplication.alternateIconName;
+    if ((wantedName == nil && currentName == nil) || [wantedName isEqualToString:currentName]) return;
+    __weak UITableView *weakTable = table;
+    [UIApplication.sharedApplication setAlternateIconName:alternateName(file) completionHandler:^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            SGLog(@"app icon: %@ -> %@", file, error ?: @"set");
+            if (!error) [NSUserDefaults.standardUserDefaults setObject:file forKey:SGAppIconSelectionKey];
+            [weakTable reloadData];
+            if (!error) return;
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"The icon did not change"
-                                                                           message:error.localizedDescription
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                                                                          message:error.localizedDescription
+                                                                   preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
             [SGTopController() presentViewController:alert animated:YES completion:nil];
         });
     }];
 }
 
-// A menu of Default and the icons, as the page's other choices are.
+@end
+
 SGModRow *SGAppIconRow(void) {
-    NSArray<NSString *> *names = iconNames();
-    if (!names.count || !UIApplication.sharedApplication.supportsAlternateIcons) return nil;
-    NSMutableArray<NSString *> *choices = [NSMutableArray arrayWithObject:label(nil)];
-    for (NSString *name in names) [choices addObject:label(name)];
-    return SGWithSymbol(SGMenuRow(@"App icon", choices, ^NSString *{ return label(UIApplication.sharedApplication.alternateIconName); },
-                                  ^(NSInteger index) { setIcon(index > 0 ? names[(NSUInteger)index - 1] : nil); }), @"app.badge");
+    if (!UIApplication.sharedApplication.supportsAlternateIcons) return nil;
+    if (availableFiles().count < 2) {
+        if (@available(iOS 26.0, *)) return nil;
+        // Built with the glass icons, which nothing before iOS 26 draws.
+        NSDictionary *icons = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleIcons"];
+        NSDictionary *alternates = [icons isKindOfClass:NSDictionary.class] ? icons[@"CFBundleAlternateIcons"] : nil;
+        for (NSString *name in [alternates isKindOfClass:NSDictionary.class] ? alternates.allKeys : @[])
+            if (isStack(name)) return SGStatRow(@"App icon", ^NSString *{ return @"Needs iOS 26"; });
+        return nil;
+    }
+    SGModRow *row = SGPageRow(@"App icon", ^UIViewController *{ return [SGAppIconPage new]; });
+    row.value = ^NSString *{ return titleOf(currentFile()); };
+    return SGWithSymbol(row, @"app.badge");
 }
