@@ -4,6 +4,10 @@
 
 #define SGKeyBlockTelemetry @"spotifyglass.blockTelemetry"
 
+// Hide optional video and social-proof sections from search results. Off unless switched on.
+#define SGKeyHideSearchVideos @"spotifyglass.hideSearchVideos"
+#define SGKeyHideSocialProof @"spotifyglass.hideSocialProof"
+
 // Clean shared links (CleanLinks.m, CleanLinks.x): the tracking parameters taken off the open.spotify.com links
 // the app copies and shares. On unless switched off, read on each copy.
 #define SGKeyCleanLinks @"spotifyglass.cleanSharedLinks"
@@ -22,7 +26,7 @@ NSUInteger SGBlockedCount(NSString *label);
 void SGResetBlocked(void);
 
 @class SGModSection;
-// The telemetry and shared links switches and what the telemetry blocking has stopped, on the
-// Premium, ads & privacy page.
+// The telemetry, search cleanup and shared links switches and what telemetry blocking has stopped,
+// on the Premium, ads & privacy page.
 SGModSection *SGPrivacySection(void);
 SGModSection *SGPrivacyCountersSection(void);
