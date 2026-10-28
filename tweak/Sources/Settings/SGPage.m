@@ -14,13 +14,19 @@ static BOOL sg_pagesConform;
 
 @implementation SGPage
 
-// Inset grouped cards on Spotify's dark grey, a hairline between the rows of a card.
+// Inset grouped cards on black, the way Settings draws them, a hairline between the rows of a card.
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.tableView.backgroundColor = SGPageBackground();
     self.tableView.separatorColor = [UIColor colorWithWhite:1 alpha:0.1];
     self.tableView.sectionHeaderTopPadding = 0;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if (![previous.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory])
+        [self.tableView reloadData];
 }
 
 - (NSString *)spt_pageIdentifier {
@@ -42,5 +48,9 @@ void SGRegisterPages(void) {
 
 void SGShowPage(UIViewController *owner, UIViewController *page) {
     if (owner.navigationController && sg_pagesConform) [owner.navigationController pushViewController:page animated:YES];
-    else [owner presentViewController:[[UINavigationController alloc] initWithRootViewController:page] animated:YES completion:nil];
+    else {
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:page];
+        SGPresentDark(nav);
+        [owner presentViewController:nav animated:YES completion:nil];
+    }
 }

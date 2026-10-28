@@ -1,7 +1,7 @@
 #import "SGGlass.h"
 #import "SGRuntime.h"
 
-// +effectWithStyle: is the only initialiser UIGlassEffect has; a bare -init leaves the material
+// +effectWithStyle: is the only initializer UIGlassEffect has; a bare -init leaves the material
 // unresolved and the pane renders as a plain blur, while the capsule shape, which is the view's
 // own property, still comes out right. Spotify's own Reprise glass builds its effect the same way.
 UIVisualEffect *SGGlassEffect(void) {
@@ -50,13 +50,21 @@ void SGHideGlassFrom(UIView *host, NSUInteger count) {
 }
 
 void SGShapeGlass(UIView *glass, CGFloat radius, BOOL capsule) {
-    Class config = NSClassFromString(@"UICornerConfiguration");
-    Class cornerRadius = NSClassFromString(@"UICornerRadius");
+    // The classes and what they answer to are fixed once loaded; whether this pane takes a configuration is asked each time.
+    static Class config, cornerRadius;
+    static BOOL capsules, uniform;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        config = NSClassFromString(@"UICornerConfiguration");
+        cornerRadius = NSClassFromString(@"UICornerRadius");
+        capsules = [config respondsToSelector:@selector(capsuleConfiguration)];
+        uniform = [config respondsToSelector:@selector(configurationWithUniformRadius:)] && [cornerRadius respondsToSelector:@selector(fixedRadius:)];
+    });
     id shape = nil;
     if (config && [glass respondsToSelector:@selector(setCornerConfiguration:)]) {
-        if (capsule && [config respondsToSelector:@selector(capsuleConfiguration)]) {
+        if (capsule && capsules) {
             shape = [config capsuleConfiguration];
-        } else if ([config respondsToSelector:@selector(configurationWithUniformRadius:)] && [cornerRadius respondsToSelector:@selector(fixedRadius:)]) {
+        } else if (uniform) {
             shape = [config configurationWithUniformRadius:[cornerRadius fixedRadius:radius]];
         }
     }
@@ -68,4 +76,9 @@ void SGShapeGlass(UIView *glass, CGFloat radius, BOOL capsule) {
         glass.layer.cornerCurve = kCACornerCurveContinuous;
         glass.clipsToBounds = YES;
     }
+}
+
+void SGPresentDark(UIViewController *controller) {
+    controller.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    controller.presentationController.overrideTraitCollection = [UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleDark];
 }

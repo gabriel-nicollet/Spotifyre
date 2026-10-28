@@ -1,4 +1,4 @@
-// The effects' filter maths: biquads and their designs, the gain a design makes, ViPER DDC and GraphicEQ text
+// The effects' filter math: biquads and their designs, the gain a design makes, ViPER DDC and GraphicEQ text
 // read, and minimum phase responses made from a magnitude. SGBiquadTick and SGBiquadRun are the render
 // thread's; the rest allocates.
 #import <stdbool.h>
@@ -32,7 +32,7 @@ SGBiquad SGBiquadAllPass(double rate, double frequency, double q);
 double SGBiquadGainDB(const SGBiquad *sections, int count, double rate, double frequency);
 
 // Peaking bands at `frequencies`, their own gains solved so that the whole cascade meets each band's gain
-// at its centre. A band at or over 0.46 of the rate stays flat.
+// at its center. A band at or over 0.46 of the rate stays flat.
 void SGDSPDesignEqualizer(double rate, const double frequencies[15], const double gains[15], SGBiquad bands[15]);
 
 // `count` frequencies log spaced from 20 Hz to 20 kHz.

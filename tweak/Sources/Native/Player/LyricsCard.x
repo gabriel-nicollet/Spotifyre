@@ -15,7 +15,8 @@ static char kCardGlassKey;
 
 // The cell around the card, the view Spotify paints and rounds.
 static UIView *cellAround(UIView *view) {
-    Class cell = NSClassFromString(@"_TtC12Element_List18CollectionViewCell");
+    static Class cell;
+    if (!cell) cell = NSClassFromString(@"_TtC12Element_List18CollectionViewCell");
     for (UIView *v = view; v; v = v.superview) {
         if ([v isKindOfClass:cell]) return v;
     }
@@ -29,7 +30,7 @@ static UIView *cellAround(UIView *view) {
     UIView *cell = cellAround((UIView *)self);
     // A card PlayerDeclutter.x collapsed reports no height; leave it alone.
     if (!cell || cell.bounds.size.height < 40) return;
-    // Spotify repaints the card with the album colour when the track changes, which is no layout
+    // Spotify repaints the card with the album color when the track changes, which is no layout
     // pass of its own; Native/Appearance/Repaint.x keeps it clear in between.
     sg_lyricsCardRoot = cell;
     SGStripBackgrounds(cell);

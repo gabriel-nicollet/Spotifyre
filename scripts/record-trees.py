@@ -68,7 +68,7 @@ def pages_in(text):
 
 
 def describe(text):
-    return f"{text.count(chr(10))} lines, pages: {', '.join(pages_in(text)) or 'none recognised'}"
+    return f"{text.count(chr(10))} lines, pages: {', '.join(pages_in(text)) or 'none recognized'}"
 
 
 def write_tree(name, text, source, messages=None, folder=TREES):

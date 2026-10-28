@@ -2,8 +2,8 @@
 #import "Settings/SGModPage.h"
 #import "Headers/SPTPlayer.h"
 #import "Meanings.h"
+#import "Shared/LyricsSources/LyricsSources.h"
 
-static NSString *const kSearch = @"https://genius.com/api/search/song";
 static NSString *const kReferents = @"https://genius.com/api/referents";
 static const NSUInteger kMostPages = 5, kPerPage = 50;
 // Shorter than this, a fragment found inside a line is more likely a common phrase than the line.
@@ -27,47 +27,15 @@ SGModRow *SGLyricsMeaningsRow(void) {
 
 #pragma mark - text
 
-// Letters and digits only, lowercase, accents gone and apostrophes closed up, so "Don’t" and "dont"
-// read alike across sources.
-static NSString *folded(NSString *text) {
-    static NSCharacterSet *kept;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ kept = NSCharacterSet.alphanumericCharacterSet; });
-    NSString *plain = [text stringByFoldingWithOptions:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch
-                                                locale:nil];
-    NSMutableString *out = [NSMutableString stringWithCapacity:plain.length];
-    BOOL space = NO;
-    for (NSUInteger i = 0; i < plain.length; i++) {
-        unichar c = [plain characterAtIndex:i];
-        if (c == '\'' || c == 0x2019 || c == 0x2018 || c == '`') continue;
-        if ([kept characterIsMember:c]) {
-            if (space && out.length) [out appendString:@" "];
-            space = NO;
-            [out appendFormat:@"%C", c];
-        } else {
-            space = YES;
-        }
-    }
-    return out;
+static NSArray<NSString *> *wordsOf(NSString *text) {
+    return [text componentsSeparatedByString:@" "];
 }
 
-// "Song (feat. X) - Remastered 2011" as Genius titles it: "Song".
-static NSString *bareTitle(NSString *title) {
-    NSString *bare = title ?: @"";
-    NSRange dash = [bare rangeOfString:@" - "];
-    if (dash.location != NSNotFound) bare = [bare substringToIndex:dash.location];
-    static NSRegularExpression *brackets;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ brackets = [NSRegularExpression regularExpressionWithPattern:@"\\s*[\\(\\[][^\\)\\]]*[\\)\\]]" options:0 error:nil]; });
-    bare = [brackets stringByReplacingMatchesInString:bare options:0 range:NSMakeRange(0, bare.length) withTemplate:@""];
-    return [bare stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-}
-
-static BOOL sameLine(NSString *a, NSString *b) {
+// `wordsA` and `wordsB` are wordsOf(a) and wordsOf(b), split once by the caller rather than for every pair.
+static BOOL sameLine(NSString *a, NSArray<NSString *> *wordsA, NSString *b, NSArray<NSString *> *wordsB) {
     if (!a.length || !b.length) return NO;
     if ([a isEqualToString:b]) return YES;
     if (MIN(a.length, b.length) >= kLeastContained && ([a containsString:b] || [b containsString:a])) return YES;
-    NSArray<NSString *> *wordsA = [a componentsSeparatedByString:@" "], *wordsB = [b componentsSeparatedByString:@" "];
     if (MIN(wordsA.count, wordsB.count) < 4) return NO;
     NSCountedSet *left = [[NSCountedSet alloc] initWithArray:wordsA];
     NSUInteger shared = 0;
@@ -85,7 +53,7 @@ static NSArray<NSString *> *fragmentLines(NSString *fragment) {
     for (NSString *row in [fragment componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
         NSString *trimmed = [row stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         if ([trimmed hasPrefix:@"["] && [trimmed hasSuffix:@"]"]) continue;
-        NSString *text = folded(trimmed);
+        NSString *text = SGLyricsFoldedText(trimmed);
         if (text.length) [lines addObject:text];
     }
     return lines;
@@ -124,28 +92,6 @@ static void getJSON(NSString *base, NSDictionary<NSString *, NSString *> *query,
 
 static NSString *stringIn(id value) {
     return [value isKindOfClass:NSString.class] ? value : nil;
-}
-
-// The hit whose title and artist both agree with the track's; a song only near it would explain
-// lines it does not have.
-static NSNumber *songIn(NSDictionary *response, NSString *title, NSString *artist) {
-    NSString *wantTitle = folded(bareTitle(title));
-    NSString *wantArtist = folded([artist componentsSeparatedByString:@", "].firstObject);
-    id sections = response[@"sections"];
-    for (NSDictionary *section in [sections isKindOfClass:NSArray.class] ? sections : @[]) {
-        id hits = [section isKindOfClass:NSDictionary.class] ? section[@"hits"] : nil;
-        for (NSDictionary *hit in [hits isKindOfClass:NSArray.class] ? hits : @[]) {
-            NSDictionary *song = [hit isKindOfClass:NSDictionary.class] ? hit[@"result"] : nil;
-            if (![song isKindOfClass:NSDictionary.class] || ![song[@"id"] isKindOfClass:NSNumber.class]) continue;
-            NSString *hitTitle = folded(bareTitle(stringIn(song[@"title"])));
-            NSString *hitArtists = folded(stringIn(song[@"artist_names"]) ?: @"");
-            BOOL titled = [hitTitle isEqualToString:wantTitle];
-            BOOL byArtist = wantArtist.length && hitArtists.length
-                && ([hitArtists containsString:wantArtist] || [wantArtist containsString:hitArtists]);
-            if (titled && byArtist) return song[@"id"];
-        }
-    }
-    return nil;
 }
 
 // By the annotation, not the referent: a referent the artist spoke to is "verified" as a whole, the
@@ -227,9 +173,8 @@ static void meaningsOf(NSString *trackID, void (^done)(NSArray<SGLyricsMeaning *
         answer(trackID, @[], NO);
         return;
     }
-    NSString *q = [NSString stringWithFormat:@"%@ %@", bareTitle(title), artist];
-    getJSON(kSearch, @{@"q": q, @"per_page": @"10"}, ^(NSDictionary *response) {
-        NSNumber *song = songIn(response, title, artist);
+    getJSON(SGGeniusSearchURL, SGGeniusSearchQuery(title, artist), ^(NSDictionary *response) {
+        NSNumber *song = SGGeniusSongIn(response, title, artist);
         if (!song) {
             SGLog(@"meanings: no Genius song for %@ by %@", title, artist);
             answer(trackID, @[], response != nil);   // a failed search is asked again next time
@@ -249,16 +194,22 @@ static NSDictionary<NSNumber *, NSArray<SGLyricsMeaning *> *> *matched(NSArray<S
                                                                         NSArray<SGKaraokeLine *> *lines,
                                                                         SGLyricsMeaningsLevel level) {
     NSMutableArray<NSString *> *texts = [NSMutableArray arrayWithCapacity:lines.count];
-    for (SGKaraokeLine *line in lines) [texts addObject:folded(SGKaraokeLineText(line))];
+    NSMutableArray<NSArray<NSString *> *> *words = [NSMutableArray arrayWithCapacity:lines.count];
+    for (SGKaraokeLine *line in lines) {
+        NSString *text = SGLyricsFoldedText(SGKaraokeLineText(line));
+        [texts addObject:text];
+        [words addObject:wordsOf(text)];
+    }
     SGLyricsMeaningAuthor furthest = level == SGLyricsMeaningsArtist ? SGLyricsMeaningByArtist
                                    : level == SGLyricsMeaningsEditors ? SGLyricsMeaningByEditors : SGLyricsMeaningByCommunity;
     NSMutableDictionary<NSNumber *, NSMutableArray<SGLyricsMeaning *> *> *byLine = [NSMutableDictionary dictionary];
     for (SGLyricsMeaning *meaning in meanings) {
         if (meaning.author > furthest) continue;
         for (NSString *wanted in fragmentLines(meaning.fragment)) {
+            NSArray<NSString *> *wantedWords = wordsOf(wanted);
             BOOL found = NO;
             for (NSUInteger i = 0; i < texts.count; i++) {
-                if (!sameLine(wanted, texts[i])) continue;
+                if (!sameLine(wanted, wantedWords, texts[i], words[i])) continue;
                 found = YES;
                 NSMutableArray<SGLyricsMeaning *> *list = byLine[@(i)] ?: (byLine[@(i)] = [NSMutableArray array]);
                 // A chorus annotated at each of its places carries the same words at every one.

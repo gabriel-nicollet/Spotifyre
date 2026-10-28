@@ -1,6 +1,8 @@
 # Music Haptics harness
 
-Two halves: the analyzer on the Mac, and the hook in the simulator.
+Two halves: the analyzer on the Mac, and the hook in the simulator. Beside them, `track.m` checks In the Background's
+pure steps on the Mac (`./build.sh && build/track`): the ISRC check, hand-built TRACK_V4 replies and Apple's
+catalog songs matched or turned down.
 
 ## The analyzer on the Mac (`main.m`, `score.py`)
 
@@ -27,13 +29,13 @@ and the vocals.
 The rumble is over its start level 76% of the time in Everything and Bass, and never plays in Beat.
 
 A Vocals choice was tried and left out. Without a separation model the one cheap handle on a voice is that it is
-mixed in the middle: per FFT bin (2048 at 44.1 kHz, hops of 512) the centre was kept by L/R similarity, 250 Hz to
+mixed in the middle: per FFT bin (2048 at 44.1 kHz, hops of 512) the center was kept by L/R similarity, 250 Hz to
 4 kHz, broadband rises (a drum lifts every bin at once) held down, onsets picked from SuperFlux-style flux,
 causally. Against the onsets of demucs' vocal stem it scored, at its best, precision 0.53 and recall 0.59 on
 `song.mp3` (3.4 taps a second; at random 0.26 and 0.29), 0.35 / 0.55 on a sung line (`say -v Cellos` over a
 beat; at random 0.19) and 0.66 / 0.65 on a spoken one; the same picker on the vocal stem alone scores 0.72 / 0.74,
 so what fails is the separation, not the picking. Of the taps that hit no syllable, 47% fell where nobody sings,
-and no cheap cue told those stretches apart (the best, the share of the sound in the centre, AUC 0.6). It needs
+and no cheap cue told those stretches apart (the best, the share of the sound in the center, AUC 0.6). It needs
 a real separation model.
 
 ## The hook in the simulator (`sim/`)
@@ -43,7 +45,8 @@ generator), the analyzer and the Vibrations settings compiled into an app whose 
 so its `AudioOutputUnitStart` goes through the rebound import slot as Spotify's does. `sim/fakehaptics.m`
 stands in for Core Haptics and counts what it is asked to play. A beat of a kick and a snare a second plays
 through a 44.1 kHz client into the simulator's 48 kHz hardware while a script checks each Follows choice, the
-strength at 50% and 200%, the switch off and on, then a 16-bit interleaved client.
+strength at 50% and 200%, the switch off and on, standing down while iOS's own Music Haptics plays the song and
+back at the next, then a 16-bit interleaved client. The app has harness/scene.m's scene, which iOS 27 needs.
 
     THEOS=$HOME/theos ./build-sim.sh
     xcrun simctl install <udid> build/sim/HapticsHarness.app
@@ -52,6 +55,15 @@ strength at 50% and 200%, the switch off and on, then a 16-bit interleaved clien
 
 `./build-sim.sh before <dir>` builds the same against an older `MusicHaptics.x`, `Haptics.h` and analyzer put in
 `<dir>`, running only the format steps. Use a device of your own (`xcrun simctl create`), by UDID.
+
+2026-10-06, iPhone 17 Pro on iOS 27.0, the two switches: every step passes. Before the audio, the old choice moves
+for each thing that could be stored (choices 0, 1, 2 and 7 beside an old switch, the old switch alone, the redesign's
+old key alone, nothing), run twice each. Then Music Haptics off plays nothing and on plays again; In the Background
+on beside it changes nothing until `SGMusicHapticsSetSystemCovers(YES)` (what SystemMusicHaptics.x sends while it asks
+about the song and while iOS has a track), which stops every tap and the rumble, flipping Music Haptics off and on
+under it too; NO (iOS has none for the next song) brings them back; In the Background alone plays nothing.
+
+2026-10-05, iPhone 17 Pro on iOS 27.0: every step passes, the stand-down and its return too.
 
 2026-09-19: every step passes. Beat sends no rumble, Bass no snare, 50% halves the taps (0.44 from 0.88) and the
 rumble's loudest (0.162 from 0.322), 200% doubles the rumble (0.64). The hook now listens at the hardware's

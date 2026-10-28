@@ -112,7 +112,9 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
 
 - (NSString *)introText {
     SGUpdateRelease *newest = SGUpdateNewestRelease();
-    if (!newest) return [NSString stringWithFormat:@"This build is %s. Nothing has been asked of GitHub yet.", SG_VERSION];
+    if (!newest) return SGUpdateChecked()
+        ? [NSString stringWithFormat:@"This build is %s. GitHub has no newer release.", SG_VERSION]
+        : [NSString stringWithFormat:@"This build is %s. Nothing has been asked of GitHub yet.", SG_VERSION];
     NSString *date = longDate(newest.date);
     NSString *when = date.length ? [@" came out on " stringByAppendingString:date] : @" is out";
     if (SGUpdateVersion())
@@ -134,8 +136,9 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
     SGUpdateRelease *newest = SGUpdateNewestRelease();
     if (SGUpdateVersion() && newest.url.length)
         [top addObject:linkRow([@"Get " stringByAppendingString:newest.version],
-                               @"The release on GitHub, where its .deb is", @"arrow.down.circle", newest.url)];
-    [top addObject:linkRow(@"All releases", @"Every version, this one and the ones before it",
+                               newest.prerelease ? @"A beta, on GitHub with its .deb" : @"The release on GitHub, where its .deb is",
+                               @"arrow.down.circle", newest.url)];
+    if (SGRepoURL) [top addObject:linkRow(@"All releases", @"Every version, this one and the ones before it",
                            @"clock.arrow.circlepath", [SGRepoURL stringByAppendingString:@"/releases"])];
     [groups addObject:group(nil, top)];
 
@@ -252,7 +255,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section {
-    return _groups[(NSUInteger)section].title ? SGSectionHeaderHeight : SGSectionGap;
+    return _groups[(NSUInteger)section].title ? SGSectionHeaderHeight() : SGSectionGap;
 }
 
 - (UIView *)tableView:(UITableView *)table viewForFooterInSection:(NSInteger)section {
@@ -285,7 +288,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
         cell.accessoryView = toggle;
     } else if (row.value) {
         UILabel *label = [UILabel new];
-        label.font = SGTitleFont();
+        label.font = SGCappedFont(SGTitleFont(), 18);   // beside the title, which keeps its room
         label.textColor = SGGrey();
         label.text = row.value();
         [label sizeToFit];
@@ -312,7 +315,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
     [table deselectRowAtIndexPath:path animated:YES];
     SGUpdateRow *row = [self rowAt:path];
     if (row.action) row.action();
-    // Check now goes grey to "checking…" the moment it is tapped rather than on the next tick.
+    // Check now goes gray to "checking…" the moment it is tapped rather than on the next tick.
     if (row.value) [self readStatus];
 }
 
@@ -320,5 +323,6 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
 
 UIViewController *SGUpdatePage(void) {
     // Opening the page counts as asking, but the six hours still hold: Check now is the way past them.
+    SGCheckForUpdate(NO);
     return [SGUpdatePageController new];
 }

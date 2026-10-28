@@ -6,45 +6,50 @@
 // HARNESS_SCENARIO (simctl launch passes it as SIMCTL_CHILD_HARNESS_SCENARIO) picks what it does:
 //     lyrics   (default) the lyrics opened at 2 s, closed at 6, opened again at 10
 //     look     one track playing, a second one from another album at 8 s, nothing opened
-//     scroll   the list moved up and down in code; the log says whether it stayed at its top
+//     scroll   the list moved up and down in code; the log says whether it stayed at its top, then a scrub of
+//              the progress bar begun and ended in code; the log says whether it held the list's pan
+//     cover    the lyric preview given room under a smaller cover, as Spotify lays a track with lyrics out;
+//              the log says whether the cover took that room back, PASS or FAIL
+//     immersive the lyrics left alone: what fades, where the lines go, the tap that brings the controls
+//              back, a scroll and the thumbnail; the log says PASS or FAIL
 //     artwork  issue #58: tracks change while the covers on screen and the picture server lag behind,
-//              checked by colour at the end of each step; the log says PASS or FAIL
-//     fluid    Fluid artwork: another album at 7 s (the crossfade), paused 11-13 s, the player's transition
-//              at 15 s, the sliders pushed at 17 s and reset at 20 s; the log has the warp's cost
-//     animated Animated artwork over the local clips in HARNESS_CLIPS (canvas.mp4, apple.mp4, late.mp4,
-//              bright.mp4): a Canvas, Apple's cover fetched ahead, a track without a clip, one still
-//              downloading, a pause, the lyrics, Spotify's own video, a bright clip; the log says PASS or
-//              FAIL. HARNESS_STEPPED=1 waits for `notifyutil -p com.vojta.harness.next` before each step
-// HARNESS_BACKGROUND=0|1 stores Fluid artwork or Animated artwork (animated's default); unset leaves the
-// default. HARNESS_OLD_BACKGROUND=0|1|2 stores the choice before it (Still, Colour flow, Fluid) and
-// HARNESS_OLD_MOTION=0 the Moving background switch before that, off.
-// HARNESS_COVER=<path> starts on that picture (a local file, never one from the repo).
-//     taps     real touches on the progress bar (tap to seek, the thumb's own drag, the times beside it)
-//              and on the lyrics' thumbnail, alone and not; the log says PASS or FAIL
+//              checked by color at the end of each step; the log says PASS or FAIL
+//     landscape the landscape lyrics at 3 s, a line's meanings over them, a pause and a resume; each
+//              step logs whether the controls are up and what a touch on the lines lands on
+//     motion   Animated artwork: a clip (HARNESS_CANVAS_FILE, an mp4) that comes in before the player has
+//              laid out, then the field, the lyrics, a field built again, the menu's switch and the player
+//              closed, each step checked; the log ends with motion checks n of m right -- PASS or FAIL
+//     catalog  Apple Music's catalog behind a stub: the search term without the edition, the album of the same
+//              name first, and the pause after a 429; the log says PASS or FAIL
+//     settings the redesign's Player page (PlayerSettings.m) over the player with the clip of `motion`: the
+//              card over Animated, then Fluid, Colors, Still and Visualizer as the segmented control picks
+//              them, and Animated again, the note under it changing and the rows under the header holding
+//              still; each step checked, the log ends with settings checks n of m right -- PASS or FAIL
+//     preview  the Player page's card picking Animated while the player has no clip (the background Still at
+//              launch): the card looks the track's clip up itself, shows Fluid until it comes in 2 s late, then
+//              the clip; the clip is in the store for the player, and asked for only while the page shows;
+//              the log ends with preview checks n of m right -- PASS or FAIL
+//     visualiser the Visualizer background (PlayerVisualiser.m) fed a song of the harness's own (stubs.m):
+//              the hills moving, blurred behind the lyrics, settling and stopping on a pause, back on play,
+//              and the ⋯ menu's switch to Fluid and back; the log ends with visualizer checks n of m right
+//              -- PASS or FAIL
 // HARNESS_VOLUME=0 leaves out the volume row the phone has (trees/clean/player/01.txt has none).
-// HARNESS_FREE=1 builds the units under the class names Spotify Free's player (the Reinvent Free mode)
-// gives them, around the same elements.
+#import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
-#import <notify.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import "Shared/Lyrics/Lyrics.h"
 #import "Redesigned/Player/Player.h"
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Redesigned/Kit/SGRBridges.h"
 #import "Redesigned/Kit/SGRField.h"
-#import "Shared/Player/PlayerEvents.h"
-#import "Core/SGPrefs.h"
-
-extern CFTimeInterval sg_harnessTransitionEnds;
-#import "Redesigned/Kit/SGRGlyph.h"
-#import "touches.h"
+#import "Redesigned/Lyrics/MeaningSheet.h"
+#import "Redesigned/Lyrics/SGRKaraokeView.h"
 
 void SGRHarnessPlayFrom(NSInteger ms);
 void SGRHarnessSetTrack(NSString *uri, NSString *imageURI, BOOL paused);
-void SGRHarnessSetTrackWith(NSString *uri, NSString *imageURI, BOOL paused, NSDictionary *extra, NSArray<NSDictionary *> *future);
-extern NSMutableDictionary<NSString *, NSURL *> *SGRHarnessAppleClips;
-extern NSMutableDictionary<NSString *, NSNumber *> *SGRHarnessClipDelays;
-NSUInteger SGRHarnessLineSeeks(void);
-NSUInteger SGRHarnessSkipTaps(void);
+// ../tabbar/touch.m: a finger's touches, through UIKit's own recognizers.
+extern void SGHarnessHold(UIWindow *window, CGPoint point, NSTimeInterval seconds);
 
 static NSString *scenario(void) {
     const char *value = getenv("HARNESS_SCENARIO");
@@ -65,6 +70,13 @@ static NSString *scenario(void) {
 
 static NSMutableDictionary<NSString *, SGRHarnessPicture *> *sg_pictures;
 static NSUInteger sg_served;
+// How many times the clip itself was served.
+static NSUInteger sg_canvasServed;
+// The catalog scenario's Apple Music: the addresses asked, in order, what it answers, and the clips' playlists
+// asked for after it.
+static NSMutableArray<NSURL *> *sg_catalogAsked, *sg_canvasAsked;
+static NSInteger sg_catalogStatus = 200;
+static NSData *sg_catalogBody;
 
 static void serve(NSString *imageURI, UIImage *image, NSTimeInterval delay, BOOL fails) {
     if (!sg_pictures) sg_pictures = [NSMutableDictionary dictionary];
@@ -83,7 +95,8 @@ static void serve(NSString *imageURI, UIImage *image, NSTimeInterval delay, BOOL
 }
 
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
-    return [request.URL.host isEqualToString:@"i.scdn.co"];
+    if ([request.URL.host isEqualToString:@"amp-api.music.apple.com"]) return sg_catalogAsked != nil;
+    return [request.URL.host isEqualToString:@"i.scdn.co"] || [request.URL.host isEqualToString:@"canvas.harness"];
 }
 
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request {
@@ -91,6 +104,39 @@ static void serve(NSString *imageURI, UIImage *image, NSTimeInterval delay, BOOL
 }
 
 - (void)startLoading {
+    if ([self.request.URL.host isEqualToString:@"amp-api.music.apple.com"]) {
+        @synchronized (sg_catalogAsked) { [sg_catalogAsked addObject:self.request.URL]; }
+        NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:sg_catalogStatus HTTPVersion:@"HTTP/1.1"
+                                                                headerFields:@{@"Content-Type": @"application/json"}];
+        [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+        [self.client URLProtocol:self didLoadData:sg_catalogBody ?: [NSData data]];
+        [self.client URLProtocolDidFinishLoading:self];
+        return;
+    }
+    if (sg_canvasAsked && [self.request.URL.path hasSuffix:@".m3u8"]) {
+        @synchronized (sg_canvasAsked) { [sg_canvasAsked addObject:self.request.URL]; }
+        [self answer:nil];
+        return;
+    }
+    // The motion scenario's clip, at once, or HARNESS_CANVAS_DELAY seconds late.
+    if ([self.request.URL.host isEqualToString:@"canvas.harness"]) {
+        const char *file = getenv("HARNESS_CANVAS_FILE"), *delay = getenv("HARNESS_CANVAS_DELAY");
+        NSData *data = file ? [NSData dataWithContentsOfFile:@(file)] : nil;
+        // HARNESS_CANVAS_FAILS=n: the first n requests for it fail on the way, as a download iOS canceled.
+        static int failing = -1;
+        if (failing < 0) failing = getenv("HARNESS_CANVAS_FAILS") ? atoi(getenv("HARNESS_CANVAS_FAILS")) : 0;
+        if (failing > 0) {
+            failing--;
+            data = nil;
+            NSLog(@"[harness] canvas server: this request fails");
+        }
+        NSThread *thread = NSThread.currentThread;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((delay ? atof(delay) : 0) * NSEC_PER_SEC)), dispatch_get_global_queue(0, 0), ^{
+            sg_canvasServed++;
+            [self performSelector:@selector(answer:) onThread:thread withObject:data waitUntilDone:NO];
+        });
+        return;
+    }
     NSString *name = self.request.URL.lastPathComponent;
     SGRHarnessPicture *picture = name.length >= 24 ? sg_pictures[[name substringFromIndex:name.length - 24]] : nil;
     NSThread *thread = NSThread.currentThread;
@@ -141,7 +187,7 @@ static UIImage *solid(UIColor *color) {
     }];
 }
 
-// The colour a picture is, by the pixel in its middle, named the way the checks name them.
+// The color a picture is, by the pixel in its middle, named the way the checks name them.
 static NSString *colorName(UIImage *image) {
     if (!image.CGImage) return @"none";
     uint8_t px[4] = {0};
@@ -173,20 +219,11 @@ static NSString *colorName(UIImage *image) {
 @interface _TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit : UIViewController @end
 @implementation _TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit @end
 
+@interface _TtC20NowPlaying_ModesImpl18HeaderElementsUnit : UIViewController @end
+@implementation _TtC20NowPlaying_ModesImpl18HeaderElementsUnit @end
+
 @interface _TtC20NowPlaying_ModesImpl18FooterElementsUnit : UIViewController @end
 @implementation _TtC20NowPlaying_ModesImpl18FooterElementsUnit @end
-
-@interface _TtC32ReinventFree_ReinventFreeNpvImpl35ReinventFreeInformationElementsUnit : UIViewController @end
-@implementation _TtC32ReinventFree_ReinventFreeNpvImpl35ReinventFreeInformationElementsUnit @end
-
-@interface _TtC32ReinventFree_ReinventFreeNpvImpl20DurationElementsUnit : UIViewController @end
-@implementation _TtC32ReinventFree_ReinventFreeNpvImpl20DurationElementsUnit @end
-
-@interface _TtC32ReinventFree_ReinventFreeNpvImpl40ReinventFreePlaybackControlsElementsUnit : UIViewController @end
-@implementation _TtC32ReinventFree_ReinventFreeNpvImpl40ReinventFreePlaybackControlsElementsUnit @end
-
-@interface _TtC32ReinventFree_ReinventFreeNpvImpl30ReinventFreeFooterElementsUnit : UIViewController @end
-@implementation _TtC32ReinventFree_ReinventFreeNpvImpl30ReinventFreeFooterElementsUnit @end
 
 @interface _TtC21NowPlaying_ScrollImpl23NPVScrollViewController : UIViewController <UIScrollViewDelegate> @end
 @implementation _TtC21NowPlaying_ScrollImpl23NPVScrollViewController
@@ -202,22 +239,15 @@ static NSString *colorName(UIImage *image) {
 @interface _TtC21NowPlaying_ScrollImpl27NPVBackgroundViewController : UIViewController @end
 @implementation _TtC21NowPlaying_ScrollImpl27NPVBackgroundViewController @end
 
-@interface _TtC18NowPlaying_BarImpl27NowPlayingBarViewController : UIViewController @end
-@implementation _TtC18NowPlaying_BarImpl27NowPlayingBarViewController @end
-
-// Spotify's views a music video plays on (Switch to video): PlayerAnimated.x hears a video come and go.
-@interface _TtC22NowPlaying_ElementsKit14VideoElementUI : NSObject
-- (void)videoSurfaceDidAttachVideo:(id)surface;
-- (void)videoSurfaceDidDetachVideo:(id)surface;
-@end
+// One of the units Spotify shows its music video in (Switch to video); PlayerMotion.x hooks its video surface.
+@interface _TtC22NowPlaying_ElementsKit14VideoElementUI : NSObject @end
 @implementation _TtC22NowPlaying_ElementsKit14VideoElementUI
 - (void)videoSurfaceDidAttachVideo:(id)surface {}
 - (void)videoSurfaceDidDetachVideo:(id)surface {}
 @end
-@interface _TtC28NowPlaying_ContentLayersImpl24HorizontalVideoViewModel : _TtC22NowPlaying_ElementsKit14VideoElementUI @end
-@implementation _TtC28NowPlaying_ContentLayersImpl24HorizontalVideoViewModel @end
-@interface _TtC28NowPlaying_ContentLayersImpl31VerticalVideoCellImplementation : _TtC22NowPlaying_ElementsKit14VideoElementUI @end
-@implementation _TtC28NowPlaying_ContentLayersImpl31VerticalVideoCellImplementation @end
+
+@interface _TtC18NowPlaying_BarImpl27NowPlayingBarViewController : UIViewController @end
+@implementation _TtC18NowPlaying_BarImpl27NowPlayingBarViewController @end
 
 @interface _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView : UIView
 - (void)handleTap;
@@ -229,96 +259,22 @@ static NSString *colorName(UIImage *image) {
 @interface _TtC22Lyrics_NPVContainerKit19LyricsContainerView : UIView @end
 @implementation _TtC22Lyrics_NPVContainerKit19LyricsContainerView @end
 
-@interface MockEncoreButton : UIControl @end
-@implementation MockEncoreButton @end
-
-// Spotify's position slider: a UISlider that moves its thumb under the finger itself and whose
-// endTrackingWithTouch: sends touch cancel while it tracks, leaving the rest to UIControl's touch up.
+// The progress bar's slider (01.txt:224), tracking without a touch so the harness can scrub it in code.
 @interface _TtCO17NowPlaying_ECMKit11ProgressBar6Slider : UISlider @end
 @implementation _TtCO17NowPlaying_ECMKit11ProgressBar6Slider
-- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    if (!self.isTracking) return NO;
-    CGRect track = [self trackRectForBounds:self.bounds];
-    CGFloat from = CGRectGetMidX([self thumbRectForBounds:self.bounds trackRect:track value:self.minimumValue]);
-    CGFloat to = CGRectGetMidX([self thumbRectForBounds:self.bounds trackRect:track value:self.maximumValue]);
-    CGFloat share = MIN(MAX(([touch locationInView:self].x - from) / (to - from), 0), 1);
-    [self setValue:self.minimumValue + (float)share * (self.maximumValue - self.minimumValue) animated:NO];
-    if (self.isContinuous) [self sendActionsForControlEvents:UIControlEventValueChanged];
-    return YES;
-}
-- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    if (self.isTracking) [self sendActionsForControlEvents:UIControlEventTouchCancel];
-}
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event { return YES; }
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {}
+- (void)cancelTrackingWithEvent:(UIEvent *)event {}
 @end
 
-// NowPlaying_ECMKit.PassThroughStackView: the times' row, which takes no touch of its own.
-@interface MockPassThroughView : UIView @end
-@implementation MockPassThroughView
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *hit = [super hitTest:point withEvent:event];
-    return hit == self ? nil : hit;
-}
+// The play button's view, which PlayerControls.x hooks for its tap.
+@interface _TtC28EncoreConsumerMobile_BaseKit14PlayButtonView : UIView @end
+@implementation _TtC28EncoreConsumerMobile_BaseKit14PlayButtonView
+- (void)uiButtonTapped {}
 @end
 
-// The progress bar unit as the binary wires it: began on touch down, the time under the thumb on value
-// changed, a seek on touch up inside or outside and drag exit (each reading the value), the remaining
-// time flipping on a tap, and the player's position left off the slider while it tracks.
-static const NSInteger kSongMs = 60000;
-
-@interface SGRHarnessProgressUnit : NSObject
-@property (nonatomic, weak) UISlider *slider;
-@property (nonatomic, weak) UILabel *taken, *remaining;
-@property (nonatomic) NSUInteger began, ended, flipped;
-@property (nonatomic) float lastSeek;
-@end
-
-@implementation SGRHarnessProgressUnit
-
-- (void)attachTo:(UISlider *)slider {
-    self.slider = slider;
-    [slider addTarget:self action:@selector(scrubBegan) forControlEvents:UIControlEventTouchDown];
-    [slider addTarget:self action:@selector(scrubbed) forControlEvents:UIControlEventValueChanged];
-    [slider addTarget:self action:@selector(scrubEnded) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchDragExit];
-}
-
-- (void)scrubBegan { self.began++; }
-
-- (void)scrubbed {
-    [self showTimes:self.slider.value];
-    [self render];   // a pass the scrub itself sets off, which must leave a tracking slider alone
-}
-
-- (void)scrubEnded {
-    self.ended++;
-    self.lastSeek = self.slider.value;
-    NSLog(@"[harness] the unit seeks to %.3f", self.lastSeek);
-    SGRHarnessPlayFrom((NSInteger)(self.lastSeek * kSongMs));
-}
-
-- (void)flip { self.flipped++; }
-
-- (void)showTimes:(float)value {
-    NSInteger at = (NSInteger)(value * kSongMs / 1000), left = kSongMs / 1000 - at;
-    self.taken.text = [NSString stringWithFormat:@"%ld:%02ld", (long)at / 60, (long)at % 60];
-    self.remaining.text = [NSString stringWithFormat:@"-%ld:%02ld", (long)left / 60, (long)left % 60];
-}
-
-- (void)render {
-    UISlider *slider = self.slider;
-    if (!slider || slider.isTracking) return;
-    float value = MIN(MAX((float)SGKaraokePositionMs() / kSongMs, 0), 1);
-    slider.value = value;
-    [self showTimes:value];
-}
-
-@end
-
-static UIImage *thumbImage(void) {
-    return [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(12, 12)] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-        [UIColor.whiteColor setFill];
-        CGContextFillEllipseInRect(ctx.CGContext, CGRectMake(0, 0, 12, 12));
-    }];
-}
+@interface MockEncoreButton : UIControl @end
+@implementation MockEncoreButton @end
 
 #pragma mark - building the tree
 
@@ -420,6 +376,8 @@ static void loadLyrics(void) {
             w.text = word;
             w.start = cursor;
             cursor += 260 + word.length * 40;
+            // Each line's last word is held, as sung lines often end, so the held-word glow shows.
+            if (word == words.lastObject) cursor += 1600;
             w.end = cursor;
             [built addObject:w];
         }
@@ -435,19 +393,33 @@ static void loadLyrics(void) {
 
 #pragma mark - the harness
 
+// PlayerArtwork.x's hold on the cover, whose badge the badge scenario shows and hides by hand.
+@interface NSObject (SGRHarnessHold)
+- (void)showBadge:(BOOL)shown on:(UIView *)cover;
+@end
+
+// PlayerLyrics.x's tap that brings the controls back and the thumbnail's, fired by hand.
+@interface NSObject (SGRHarnessLyrics)
+- (void)sgr_woke;
+- (void)sgr_thumbTapped;
+@end
+
 @interface SGRHarnessDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
 
 @implementation SGRHarnessDelegate {
     NSArray<UIViewController *> *_units;
-    SGRHarnessProgressUnit *_progress;
-    UIView *_controlsView;
+    NSUInteger _headerDowns;
     UIImageView *_cover, *_barCover;
     UIViewController *_bar;
     UICollectionView *_covers;
     UIScrollView *_list;
+    UIView *_plane, *_host;
+    UIViewController *_background;
+    UIView *_tilt;
     NSUInteger _failures, _checks;
+    float _dimAlone;   // the motion scenario's dim before the lyrics
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
@@ -503,11 +475,13 @@ static void loadLyrics(void) {
     UIView *tilt = box(inner, _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView.class,
                        CGRectMake(0, round((inner.bounds.size.height - coverSide) / 2), coverSide, coverSide), nil);
     tilt.accessibilityLabel = @"Inspect cover art";
+    _tilt = tilt;
     // The Encore.ImageView holding the picture (01.txt:40), which PlayerField.x reads the cover from.
     UIView *coverElement = box(tilt, UIView.class, tilt.bounds, @"Encore.ImageView");
-    const char *coverPath = getenv("HARNESS_COVER");
-    UIImage *picture = (coverPath ? [UIImage imageWithContentsOfFile:@(coverPath)] : nil) ?: artwork();
+    coverElement.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    UIImage *picture = artwork();
     UIImageView *cover = [[UIImageView alloc] initWithFrame:coverElement.bounds];
+    cover.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     cover.image = picture;
     _cover = cover;
     cover.contentMode = UIViewContentModeScaleAspectFill;
@@ -547,31 +521,14 @@ static void loadLyrics(void) {
     glyphButton(infoInner, CGRectMake(infoInner.bounds.size.width - 48, 0, 48, 48), @"star", @"Components.UI.AddToButton");
 
     UIView *durationView = box(bottom, UIView.class, CGRectMake(0, 64, W, 40), nil);
-    UIView *progress = box(durationView, UIView.class, CGRectMake(24, 0, W - 48, 40), @"Components.UI.ProgressBarUnitNowPlaying");
-    UISlider *slider = (UISlider *)box(progress, _TtCO17NowPlaying_ECMKit11ProgressBar6Slider.class, CGRectMake(-2, 10, W - 44, 17), @"SPTNowPlayingSliderV2");
-    slider.minimumTrackTintColor = UIColor.whiteColor;
-    slider.maximumTrackTintColor = [UIColor colorWithWhite:1 alpha:0.3];
-    [slider setThumbImage:thumbImage() forState:UIControlStateNormal];
-    slider.value = 0.22;
-    UIView *times = box(progress, MockPassThroughView.class, CGRectMake(0, 26, W - 48, 14), nil);
-    UIView *takenBox = box(times, UIView.class, CGRectMake(0, 0, 21.67, 14), @"now-playing-time-take-label");
-    UIView *remainingBox = box(times, UIView.class, CGRectMake(W - 48 - 25.67, 0, 25.67, 14), @"now-playing-time-remaning-label");
-    UILabel *takenLabel = (UILabel *)box(takenBox, UILabel.class, takenBox.bounds, @"now-playing-time-take-label-internal");
-    UILabel *remainingLabel = (UILabel *)box(remainingBox, UILabel.class, remainingBox.bounds, @"now-playing-time-remaning-label-internal");
-    for (UILabel *label in @[takenLabel, remainingLabel]) {
-        label.font = [UIFont systemFontOfSize:10];
-        label.textColor = [UIColor colorWithWhite:1 alpha:0.7];
-        label.adjustsFontSizeToFitWidth = YES;
-    }
-    SGRHarnessProgressUnit *progressUnit = [SGRHarnessProgressUnit new];
-    progressUnit.taken = takenLabel;
-    progressUnit.remaining = remainingLabel;
-    [progressUnit attachTo:slider];
-    [remainingBox addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:progressUnit action:@selector(flip)]];
-    _progress = progressUnit;
+    UIView *track = box(durationView, UIView.class, CGRectMake(24, 8, W - 48, 6), nil);
+    track.backgroundColor = [UIColor colorWithWhite:1 alpha:0.3];
+    track.layer.cornerRadius = 3;
+    UIView *played = box(track, UIView.class, CGRectMake(0, 0, (W - 48) * 0.22, 6), nil);
+    played.backgroundColor = [UIColor colorWithWhite:1 alpha:0.85];
+    played.layer.cornerRadius = 3;
 
     UIView *controls = box(bottom, UIView.class, CGRectMake(0, 104, W, 88), nil);
-    _controlsView = controls;
     glyphButton(controls, CGRectMake(W / 2 - 130, 20, 48, 48), @"backward.fill", nil);
     glyphButton(controls, CGRectMake(W / 2 - 24, 14, 48, 60), @"pause.fill", nil);
     glyphButton(controls, CGRectMake(W / 2 + 82, 20, 48, 48), @"forward.fill", nil);
@@ -608,34 +565,35 @@ static void loadLyrics(void) {
 
     [self.window makeKeyAndVisible];
 
-    const char *freeEnv = getenv("HARNESS_FREE");
-    BOOL free = freeEnv && freeEnv[0] == '1';
-    UIViewController *info = free ? [_TtC32ReinventFree_ReinventFreeNpvImpl35ReinventFreeInformationElementsUnit new]
-                                  : [_TtC20NowPlaying_ModesImpl23InformationElementsUnit new];
+    UIViewController *info = [_TtC20NowPlaying_ModesImpl23InformationElementsUnit new];
     info.view = infoView;
-    UIViewController *duration = free ? [_TtC32ReinventFree_ReinventFreeNpvImpl20DurationElementsUnit new]
-                                      : [_TtC20NowPlaying_ModesImpl19DurationElementUnit new];
+    UIViewController *duration = [_TtC20NowPlaying_ModesImpl19DurationElementUnit new];
     duration.view = durationView;
     UIViewController *floating = [_TtC20NowPlaying_ModesImpl20FloatingElementsUnit new];
     floating.view = floatingView;
-    UIViewController *footer = free ? [_TtC32ReinventFree_ReinventFreeNpvImpl30ReinventFreeFooterElementsUnit new]
-                                    : [_TtC20NowPlaying_ModesImpl18FooterElementsUnit new];
+    UIViewController *footer = [_TtC20NowPlaying_ModesImpl18FooterElementsUnit new];
     footer.view = footerView;
-    UIViewController *playback = free ? [_TtC32ReinventFree_ReinventFreeNpvImpl40ReinventFreePlaybackControlsElementsUnit new]
-                                      : [_TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit new];
+    UIViewController *playback = [_TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit new];
     playback.view = controls;
-    NSLog(@"[harness] units: %@, %@, %@, %@", info.class, duration.class, playback.class, footer.class);
+    UIViewController *headerUnit = [_TtC20NowPlaying_ModesImpl18HeaderElementsUnit new];
+    headerUnit.view = header;
     UIViewController *player = [_TtC19NowPlaying_ViewImpl24NowPlayingViewController new];
     player.view = host;
-    _units = @[info, duration, floating, playback, footer, scrollUnit, background, player];
+    _units = @[headerUnit, info, duration, floating, playback, footer, scrollUnit, background, player];
     _covers = covers;
+    _plane = plane;
+    _host = host;
+    _background = background;
+    // The player has not been opened yet: its background plane is laid out only when it is.
+    if ([scenario() isEqualToString:@"motion"]) {
+        [plane removeFromSuperview];
+        _units = @[headerUnit, info, duration, floating, playback, footer, scrollUnit, player];
+    }
     [self start];
     [self layOut];
     // Spotify lays its units out again as a track's elements arrive, which is what the redesign's
     // transforms and narrowed labels have to survive.
     [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *t) { [self layOut]; }];
-    // The player's position reaching the bar, the way the unit's model updates do.
-    [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:YES block:^(NSTimer *t) { [self->_progress render]; }];
 
     NSLog(@"[harness] lyrics available: %d", SGRPlayerLyricsAvailable());
     // With the lines up, the row that rose into them must still be Spotify's to touch, and the lines
@@ -653,9 +611,17 @@ static void loadLyrics(void) {
     if ([scenario() isEqualToString:@"artwork"]) [self runArtworkChecks];
     else if ([scenario() isEqualToString:@"look"]) [self runLook];
     else if ([scenario() isEqualToString:@"scroll"]) [self runScrollChecks];
-    else if ([scenario() isEqualToString:@"fluid"]) [self runFluid];
-    else if ([scenario() isEqualToString:@"animated"]) [self runAnimated];
-    else if ([scenario() isEqualToString:@"taps"]) [self runTaps];
+    else if ([scenario() isEqualToString:@"landscape"]) [self runLandscape];
+    else if ([scenario() isEqualToString:@"motion"]) [self runMotionChecks];
+    else if ([scenario() isEqualToString:@"catalog"]) [self runCatalogChecks];
+    else if ([scenario() isEqualToString:@"badge"]) [self runBadgeChecks];
+    else if ([scenario() isEqualToString:@"cover"]) [self runCoverChecks];
+    else if ([scenario() isEqualToString:@"immersive"]) [self runImmersiveChecks];
+    else if ([scenario() isEqualToString:@"settings"]) [self runSettingsChecks];
+    else if ([scenario() isEqualToString:@"preview"]) [self runPreviewChecks];
+    else if ([scenario() isEqualToString:@"seek"]) [self runSeekChecks];
+    else if ([scenario() isEqualToString:@"visualiser"]) [self runVisualiserChecks];
+    else if ([scenario() isEqualToString:@"header"]) [self runHeaderChecks];
     // Opened, closed and opened again, so a screenshot can be taken of each state and of the move itself.
     else for (NSNumber *at in @[@2, @6, @10]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(at.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -683,6 +649,13 @@ static UIViewController *unitOf(UIView *view) {
     return [next isKindOfClass:UIViewController.class] ? (UIViewController *)next : nil;
 }
 
+static UIView *firstOfClass(UIView *root, NSString *name);
+
+// The alpha of a gradient's stop `index`.
+static CGFloat stopAlpha(CAGradientLayer *gradient, NSUInteger index) {
+    return CGColorGetAlpha((__bridge CGColorRef)gradient.colors[index]);
+}
+
 static void after(NSTimeInterval seconds, dispatch_block_t block) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
 }
@@ -707,9 +680,148 @@ static void after(NSTimeInterval seconds, dispatch_block_t block) {
     UIImage *first = checks ? solid(UIColor.redColor) : _cover.image;
     [self showOnScreen:first];
     serve(imageURI(@"aaaa"), first, 0.2, NO);
+    // card: nothing plays; the Player page's card shows the last track played, or none.
+    if ([scenario() isEqualToString:@"card"]) {
+        after(1, ^{
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:SGRPlayerSettingsPage(@[])];
+            nav.modalPresentationStyle = UIModalPresentationFullScreen;
+            [self.window.rootViewController presentViewController:nav animated:NO completion:nil];
+            after(2, ^{
+                UIView *card = firstOfClass(((UITableViewController *)nav.topViewController).tableView.tableHeaderView, @"SGRPlayerShowcase");
+                UIImageView *cover = [card valueForKey:@"_cover"];
+                NSLog(@"[harness] card: \"%@\", \"%@\", cover %.0fx%.0f", [[card valueForKey:@"_title"] text], [[card valueForKey:@"_artist"] text],
+                      cover.image.size.width, cover.image.size.height);
+            });
+        });
+        return;
+    }
     [self playTrack:@"spotify:track:harnessA" image:imageURI(@"aaaa")];
     // The bar lays out once as the app comes up.
     [_bar viewDidLayoutSubviews];
+}
+
+#pragma mark - landscape
+
+static UIViewController *landscapeScreen(void) {
+    for (UIWindow *window in UIApplication.sharedApplication.connectedScenes.anyObject ? ((UIWindowScene *)UIApplication.sharedApplication.connectedScenes.anyObject).windows : @[]) {
+        if (!window.hidden && [NSStringFromClass(window.rootViewController.class) isEqualToString:@"SGRLandscapeLyricsController"]) return window.rootViewController;
+    }
+    return nil;
+}
+
+// What a touch on the lines lands on, and whether the controls are up.
+static void logLandscape(NSString *step, NSString *want) {
+    UIViewController *screen = landscapeScreen();
+    UIView *view = screen.view, *shield = [screen valueForKey:@"shield"];
+    CGPoint onLine = CGPointMake(view.bounds.size.width * 0.7, view.bounds.size.height * 0.5);
+    UIView *hit = [view hitTest:onLine withEvent:nil];
+    CGFloat controls = [[screen valueForKey:@"controls"] alpha];
+    NSString *got = hit == shield ? @"shield" : @"lines";
+    NSLog(@"[harness] landscape %@: controls %.0f, a touch on the lines lands on %@ (%@) -- want %@: %@", step, controls,
+          got, NSStringFromClass(hit.class), want, [got isEqualToString:want] ? @"ok" : @"WRONG");
+}
+
+// The landscape lyrics as a turned phone shows them: a line's meanings over them as a card on the bottom
+// edge, the controls staying up behind the sheet and fading once it is gone, the shield taking the touch
+// that brings them back, and a pause and a resume from elsewhere starting the clock again.
+- (void)runLandscape {
+    after(3, ^{ SGRPlayerShowLandscape(YES); });
+    // The window comes up clear and fades in with the turn; it and what it presents are dark; the
+    // controls say what they do and are 44pt.
+    after(3.05, ^{
+        UIWindow *window = landscapeScreen().view.window;
+        NSLog(@"[harness] landscape window as it comes up: alpha %.2f -- want under 1: %@", window.alpha, window.alpha < 1 ? @"ok" : @"WRONG");
+    });
+    after(3.9, ^{
+        UIViewController *screen = landscapeScreen();
+        UIWindow *window = screen.view.window;
+        NSLog(@"[harness] landscape window: alpha %.2f, %@ -- want 1, dark: %@", window.alpha,
+              window.overrideUserInterfaceStyle == UIUserInterfaceStyleDark ? @"dark" : @"not dark",
+              window.alpha == 1 && window.overrideUserInterfaceStyle == UIUserInterfaceStyleDark ? @"ok" : @"WRONG");
+        NSMutableArray<UIButton *> *buttons = [[[screen valueForKey:@"controls"] arrangedSubviews] mutableCopy];
+        [buttons addObject:[screen valueForKey:@"_close"]];
+        for (UIButton *button in buttons) {
+            BOOL ok = button.accessibilityLabel.length && button.bounds.size.width >= 44 && button.bounds.size.height >= 44;
+            NSLog(@"[harness] landscape button \"%@\" %@ -- want a label, 44pt: %@", button.accessibilityLabel,
+                  NSStringFromCGSize(button.bounds.size), ok ? @"ok" : @"WRONG");
+        }
+        UILabel *title = [screen valueForKey:@"_title"], *artist = [screen valueForKey:@"_artist"];
+        NSLog(@"[harness] landscape text: title %.0fpt in %@, artist %.0fpt in %@, close %@", title.font.pointSize,
+              NSStringFromCGRect(title.frame), artist.font.pointSize, NSStringFromCGRect(artist.frame),
+              NSStringFromCGRect([[screen valueForKey:@"_close"] frame]));
+    });
+    after(4, ^{
+        SGLyricsMeaning *meaning = [SGLyricsMeaning new];
+        meaning.author = SGLyricsMeaningByArtist;
+        meaning.body = @"A line of the harness's song, explained at the length Genius explains one, so the card has a body to show and to wrap.";
+        meaning.url = @"https://genius.com";
+        SGRShowMeanings(@"Harness line", @[meaning]);
+    });
+    after(6, ^{
+        UIViewController *sheet = landscapeScreen().presentedViewController;
+        UIView *window = sheet.view.window;
+        NSLog(@"[harness] landscape meanings: %@ %@ in a window %@, height class %ld, edge attached %d",
+              NSStringFromClass(sheet.class), NSStringFromCGRect([sheet.view convertRect:sheet.view.bounds toView:window]),
+              NSStringFromCGSize(window.bounds.size), (long)sheet.traitCollection.verticalSizeClass,
+              sheet.sheetPresentationController.prefersEdgeAttachedInCompactHeight);
+    });
+    after(8.5, ^{ logLandscape(@"with the sheet up past the rest", @"lines"); });
+    after(9, ^{ [landscapeScreen() dismissViewControllerAnimated:YES completion:nil]; });
+    after(14, ^{ logLandscape(@"rested after the sheet went", @"shield"); });
+    after(14.5, ^{ SGRHarnessSetTrack(@"spotify:track:harnessA", imageURI(@"aaaa"), YES); });
+    after(15, ^{ logLandscape(@"paused", @"lines"); });
+    after(15.5, ^{ SGRHarnessSetTrack(@"spotify:track:harnessA", imageURI(@"aaaa"), NO); });
+    after(17, ^{ logLandscape(@"just resumed", @"lines"); });
+    after(21, ^{ logLandscape(@"rested after the resume", @"shield"); });
+    // VoiceOver's escape turns the screen back, and the player is key once it has faded.
+    after(22, ^{ NSLog(@"[harness] landscape escape answered %d", [landscapeScreen() accessibilityPerformEscape]); });
+    after(23, ^{
+        BOOL gone = !landscapeScreen(), key = self.window.isKeyWindow;
+        NSLog(@"[harness] landscape after the escape: gone %d, the player key %d -- %@", gone, key, gone && key ? @"ok" : @"WRONG");
+    });
+}
+
+#pragma mark - badge
+
+// The hold's 2x badge: the Kit's glass capsule first in it with its effect on, the label over it, the
+// glyph an attachment; a hold again while it fades out keeps it; let go, it goes.
+- (void)runBadgeChecks {
+    __block NSObject *hold = nil;
+    for (UIGestureRecognizer *recognizer in _tilt.gestureRecognizers) {
+        if ([NSStringFromClass(recognizer.class) isEqualToString:@"SGRCoverHold"]) hold = recognizer;
+    }
+    __block NSUInteger right = 0, checks = 0;
+    void (^check)(NSString *, BOOL) = ^(NSString *step, BOOL ok) {
+        checks++;
+        if (ok) right++;
+        NSLog(@"[harness] badge %@: %@", step, ok ? @"ok" : @"WRONG");
+    };
+    UIView *tilt = _tilt;
+    UIView *(^badge)(void) = ^UIView *{ return [hold valueForKey:@"badge"]; };
+    after(2, ^{ [hold showBadge:YES on:tilt]; });
+    after(2.8, ^{
+        UIView *shape = badge().subviews.firstObject;
+        UILabel *label = [hold valueForKey:@"badgeLabel"];
+        __block BOOL glyph = NO;
+        [label.attributedText enumerateAttribute:NSAttachmentAttributeName inRange:NSMakeRange(0, label.attributedText.length) options:0
+                                      usingBlock:^(id value, NSRange range, BOOL *stop) { if (value) glyph = YES; }];
+        check(@"up", badge().superview == tilt && [shape isKindOfClass:UIVisualEffectView.class]
+              && ((UIVisualEffectView *)shape).effect && label.superview == badge() && label.alpha == 1
+              && CGAffineTransformIsIdentity(badge().transform) && glyph);
+        NSLog(@"[harness] badge %@ with %@ (%@), label %@ fits %d", NSStringFromCGRect(badge().frame), NSStringFromClass(shape.class),
+              NSStringFromClass([(UIVisualEffectView *)shape effect].class), label.attributedText.string,
+              label.intrinsicContentSize.width <= badge().bounds.size.width);
+        [hold showBadge:NO on:tilt];
+    });
+    after(2.85, ^{ [hold showBadge:YES on:tilt]; });
+    after(3.5, ^{
+        check(@"held again while it faded", badge().superview == tilt && [(UIVisualEffectView *)badge().subviews.firstObject effect]);
+        [hold showBadge:NO on:tilt];
+    });
+    after(4, ^{
+        check(@"let go", !badge().superview);
+        NSLog(@"[harness] badge checks: %lu of %lu right -- %@", (unsigned long)right, (unsigned long)checks, right == checks ? @"PASS" : @"FAIL");
+    });
 }
 
 - (void)check:(NSString *)step want:(NSString *)want {
@@ -766,6 +878,541 @@ static void after(NSTimeInterval seconds, dispatch_block_t block) {
 }
 
 // Up must be taken back to the top, down (the dismissal's pull) left where it went.
+#pragma mark - Animated artwork
+
+BOOL SGPlayerMenuAnimatedArtwork(void);
+void SGPlayerMenuSetAnimatedArtwork(BOOL on);
+
+static UIView *motionView(void) {
+    for (UIView *view in SGRPlayerField().subviews) {
+        if ([NSStringFromClass(view.class) isEqualToString:@"SGRPlayerMotionView"]) return view;
+    }
+    return nil;
+}
+
+- (void)expect:(BOOL)ok step:(NSString *)step detail:(NSString *)detail {
+    _checks++;
+    if (!ok) _failures++;
+    NSLog(@"[harness] %@ check %@: %@ -- %@", scenario(), step, detail, ok ? @"ok" : @"WRONG");
+}
+
+// The field covered by the clip, and its Fluid copies hidden for it.
+static BOOL fieldCovered(void) {
+    SGRArtworkField *field = SGRPlayerField();
+    CALayer *fluid = [field valueForKey:@"_fluidLayer"];
+    return field.covered && fluid && fluid.hidden;
+}
+
+- (void)runMotionChecks {
+    // The clip comes in before the player has laid out, as for the track restored at launch.
+    after(3, ^{
+        [self expect:SGRPlayerMotionShowing() && !SGRPlayerField() step:@"before the player opened"
+              detail:[NSString stringWithFormat:@"clip %@, field %@", SGRPlayerMotionShowing() ? @"in" : @"missing", SGRPlayerField() ? @"made" : @"not made"]];
+    });
+    after(4, ^{
+        [self->_list insertSubview:self->_plane atIndex:0];
+        self->_units = [self->_units arrayByAddingObject:self->_background];
+        [self layOut];
+    });
+    after(5, ^{
+        UIView *motion = motionView();
+        CALayer *foot = [motion valueForKey:@"_foot"], *clip = [motion valueForKey:@"_clip"];
+        UIVisualEffectView *seam = [motion valueForKey:@"_seamBlur"];
+        // The lyrics' blur is a filter on the clip, there only while the lyrics are up.
+        BOOL lyricsBlurred = ((UIView *)[motion valueForKey:@"_picture"]).layer.filters.count > 0;
+        [self expect:motion != nil && self->_covers.layer.mask != nil step:@"the player opened"
+              detail:[NSString stringWithFormat:@"clip %@ the field, cover %@", motion ? @"on" : @"not on", self->_covers.layer.mask ? @"hidden" : @"shown"]];
+        CGFloat seamAt = round(clip.frame.size.height * 0.9);
+        BOOL footDown = foot && fabs(foot.frame.origin.y - seamAt) < 1 && CGRectGetMaxY(foot.frame) >= self.window.bounds.size.height
+            && foot.contents && foot.contentsRect.size.height < 0.05 && CGRectGetMaxY(foot.contentsRect) > 0.999;
+        [self expect:footDown step:@"the foot"
+              detail:[NSString stringWithFormat:@"clip %@, foot %@ from rows %@", NSStringFromCGRect(clip.frame), NSStringFromCGRect(foot.frame), NSStringFromCGRect(foot.contentsRect)]];
+        // The poster under the video, so the clip has a picture before its first frame is decoded; and the
+        // Fluid field under it held still and, the clip being opaque, hidden.
+        CALayer *still = clip.superlayer;
+        [self expect:still.contents && CGRectEqualToRect(still.bounds, clip.frame) && still.mask && SGRPlayerField().motionHeld
+                     && fieldCovered()
+                step:@"the poster and the held field"
+              detail:[NSString stringWithFormat:@"poster %@ at %@, video %@, fade %@, field %@, %@", still.contents ? @"in" : @"missing",
+                      NSStringFromCGRect(still.frame), NSStringFromCGRect(clip.frame), still.mask ? @"on the poster" : @"missing",
+                      SGRPlayerField().motionHeld ? @"held" : @"moving", fieldCovered() ? @"its Fluid copies hidden" : @"its Fluid copies drawn"]];
+        [self expect:seam.effect && !lyricsBlurred step:@"the blur from the seam"
+              detail:[NSString stringWithFormat:@"seam blur %@, from %@ of the height, lyrics blur %@", seam.effect ? @"on" : @"off",
+                      [[seam.maskView.layer.sublayers.firstObject valueForKey:@"locations"] componentsJoinedByString:@" to "], lyricsBlurred ? @"on" : @"off"]];
+        // Dimmed by its brightness: HARNESS_DIM is what the clip in HARNESS_CANVAS_FILE should get (0.54 for white,
+        // 0.10 for black); the rule itself is checked at its ends.
+        CAGradientLayer *dim = [motion valueForKey:@"_dim"];
+        // Only where text is: whole at the top and from the seam's blur down, clear between (issue #101).
+        BOOL banded = dim && stopAlpha(dim, 1) == 1 && stopAlpha(dim, 2) == 0 && stopAlpha(dim, 4) == 1;
+        const char *expected = getenv("HARNESS_DIM");
+        BOOL rule = fabs(SGRPlayerClipDim(1, NO, NO) - 0.54) < 0.01 && fabs(SGRPlayerClipDim(1, YES, NO) - 0.65) < 0.01
+                    && SGRPlayerClipDim(0, NO, NO) == 0.10 && fabs(SGRPlayerClipDim(0, NO, YES) - 0.25) < 1e-6
+                    && fabs(SGRPlayerClipDim(0.5, NO, NO) - 0.37) < 0.01;
+        self->_dimAlone = dim.opacity;
+        [self expect:rule && banded && dim && dim.superlayer == clip.superlayer.superlayer && (!expected || fabs(dim.opacity - atof(expected)) < 0.02)
+                step:@"the dim" detail:[NSString stringWithFormat:@"rule %@, dim %.2f %@%@", rule ? @"right" : @"wrong", dim.opacity,
+                                        banded ? [NSString stringWithFormat:@"whole to %@ and from %@", dim.locations[1], dim.locations[4]] : @"not banded",
+                                        expected ? [NSString stringWithFormat:@", %s expected", expected] : @""]];
+        NSLog(@"[harness] motion: screenshot the clip now");
+    });
+    after(7, ^{ SGRPlayerToggleLyrics(); });
+    after(8.5, ^{
+        BOOL lyricsBlurred = ((UIView *)[motionView() valueForKey:@"_picture"]).layer.filters.count > 0;
+        UIView *thumb = nil;
+        for (UIView *view in self->_host.subviews) {
+            if ([NSStringFromClass(view.class) isEqualToString:@"SGRPlayerLyricsOverlay"]) thumb = [view valueForKey:@"thumb"];
+        }
+        BOOL away = thumb && !CGAffineTransformIsIdentity(thumb.transform) && thumb.alpha > 0.99;
+        CAGradientLayer *shade = [motionView() valueForKey:@"_dim"];
+        float dim = shade.opacity;
+        // The lyrics run down the whole screen, so the dim covers all of it.
+        BOOL whole = shade && stopAlpha(shade, 2) == 1;
+        [self expect:whole && fabsf(dim - self->_dimAlone - 0.15f) < 0.01f step:@"the dim under the lyrics"
+              detail:[NSString stringWithFormat:@"%.2f, %.2f without them", dim, self->_dimAlone]];
+        [self expect:SGRPlayerLyricsOpen() && lyricsBlurred && away step:@"the lyrics"
+              detail:[NSString stringWithFormat:@"lyrics %@, clip blurred %@, thumbnail %@ at alpha %.2f", SGRPlayerLyricsOpen() ? @"up" : @"down",
+                      lyricsBlurred ? @"yes" : @"no", thumb && !CGAffineTransformIsIdentity(thumb.transform) ? @"in its corner" : @"at the cover", thumb.alpha]];
+        NSLog(@"[harness] motion: screenshot the lyrics now");
+    });
+    after(10, ^{ SGRPlayerToggleLyrics(); });
+    // Spotify builds the player's background again: the clip goes onto the new field.
+    after(11.5, ^{
+        UIView *old = SGRPlayerField();
+        UIView *plane = [[UIView alloc] initWithFrame:self->_plane.frame];
+        UIViewController *background = [_TtC21NowPlaying_ScrollImpl27NPVBackgroundViewController new];
+        background.view = plane;
+        [self->_plane removeFromSuperview];
+        [self->_list insertSubview:plane atIndex:0];
+        self->_plane = plane;
+        NSMutableArray *units = [self->_units mutableCopy];
+        [units replaceObjectAtIndex:[units indexOfObject:self->_background] withObject:background];
+        self->_units = units;
+        self->_background = background;
+        [self layOut];
+        [self expect:SGRPlayerField() != old && motionView() != nil && fieldCovered() step:@"a field built again"
+              detail:[NSString stringWithFormat:@"%@, its Fluid copies %@", motionView() ? @"the clip moved onto it" : @"the clip left behind",
+                      fieldCovered() ? @"hidden" : @"drawn"]];
+    });
+    // Switched off, the clip and the cover cross over: the clip's fade out and the cover's fade in start
+    // together, over the same time.
+    after(12.5, ^{
+        SGPlayerMenuSetAnimatedArtwork(NO);
+        UIView *fading = motionView();
+        CALayer *picture = ((UIView *)[fading valueForKey:@"_picture"]).layer, *mask = self->_covers.layer.mask;
+        CAAnimation *out = [picture animationForKey:@"opacity"], *in = [mask animationForKey:@"opacity"];
+        [self expect:!SGRPlayerMotionShowing() && fading && out && in && fabs(out.duration - in.duration) < 0.01 && picture.opacity == 0
+                     && mask.opacity == 1 && !SGRPlayerField().motionHeld && !fieldCovered()
+                step:@"switched off, crossing over"
+              detail:[NSString stringWithFormat:@"clip %@ to %.0f over %.2f s, cover to %.0f over %.2f s, field %@, its Fluid copies %@", fading ? @"fading" : @"gone",
+                      picture.opacity, out.duration, mask.opacity, in.duration, SGRPlayerField().motionHeld ? @"held" : @"moving",
+                      fieldCovered() ? @"hidden" : @"drawn"]];
+    });
+    after(13.2, ^{
+        [self expect:!SGRPlayerMotionShowing() && !motionView() && !self->_covers.layer.mask && !SGPlayerMenuAnimatedArtwork()
+                step:@"switched off from the menu" detail:[NSString stringWithFormat:@"clip %@, cover %@", motionView() ? @"still there" : @"gone",
+                                                                 self->_covers.layer.mask ? @"hidden" : @"back"]];
+        SGPlayerMenuSetAnimatedArtwork(YES);
+    });
+    after(14.7, ^{
+        // Faded in on screen this time, so the field is covered once the fade has finished.
+        [self expect:motionView() && self->_covers.layer.mask && fieldCovered() step:@"switched on again"
+              detail:[NSString stringWithFormat:@"clip %@, cover %@, its Fluid copies %@", motionView() ? @"back" : @"missing",
+                      self->_covers.layer.mask ? @"hidden" : @"shown", fieldCovered() ? @"hidden" : @"drawn"]];
+        // The player closed: the cover list cannot be found, and switching off must still bring its cover back.
+        [self->_host removeFromSuperview];
+        SGPlayerMenuSetAnimatedArtwork(NO);
+        [self expect:!self->_covers.layer.mask step:@"switched off with the player closed" detail:self->_covers.layer.mask ? @"cover still hidden" : @"cover back"];
+        [self->_list addSubview:self->_host];
+    });
+    after(15.7, ^{ SGPlayerMenuSetAnimatedArtwork(YES); });
+    // The song paused and played again: the clip holds its frame, then moves on.
+    after(17.2, ^{
+        AVPlayer *player = [motionView() valueForKey:@"_player"];
+        AVPlayerLayer *clip = [motionView() valueForKey:@"_clip"];
+        [self expect:player.rate > 0 && clip.readyForDisplay step:@"playing" detail:[NSString stringWithFormat:@"clip at rate %.1f, %@", player.rate,
+              clip.readyForDisplay ? @"drawn" : @"not drawn"]];
+        SGRHarnessSetTrack(@"spotify:track:harnessA", imageURI(@"aaaa"), YES);
+        AVPlayer *paused = [motionView() valueForKey:@"_player"];
+        [self expect:motionView() && paused.rate == 0 step:@"paused" detail:[NSString stringWithFormat:@"clip %@ at rate %.1f",
+              motionView() ? @"there" : @"gone", paused.rate]];
+        SGRHarnessSetTrack(@"spotify:track:harnessA", imageURI(@"aaaa"), NO);
+        [self expect:paused.rate > 0 step:@"played again" detail:[NSString stringWithFormat:@"rate %.1f", paused.rate]];
+    });
+    // Spotify's music video comes and goes: the clip goes for it, and comes back after.
+    __block id video = nil;
+    after(17.5, ^{
+        video = [NSClassFromString(@"_TtC22NowPlaying_ElementsKit14VideoElementUI") new];
+        [video videoSurfaceDidAttachVideo:nil];
+    });
+    after(18.5, ^{
+        [self expect:!SGRPlayerMotionShowing() step:@"Spotify's video showing" detail:SGRPlayerMotionShowing() ? @"the clip stayed" : @"the clip went"];
+        [video videoSurfaceDidDetachVideo:nil];
+    });
+    after(19.5, ^{
+        [self expect:SGRPlayerMotionShowing() && self->_covers.layer.mask step:@"Spotify's video gone"
+              detail:SGRPlayerMotionShowing() ? @"the clip back" : @"no clip"];
+        // A track whose first state names no Canvas, as on a skip before Spotify's extended metadata.
+        unsetenv("HARNESS_CANVAS");
+        SGRHarnessSetTrack(@"spotify:track:harnessB", imageURI(@"bbbb"), NO);
+    });
+    after(20.5, ^{
+        [self expect:!SGRPlayerMotionShowing() step:@"a track with no Canvas yet" detail:SGRPlayerMotionShowing() ? @"a clip left" : @"no clip"];
+        setenv("HARNESS_CANVAS", "https://canvas.harness/clip.mp4", 1);
+        SGRHarnessSetTrack(@"spotify:track:harnessB", imageURI(@"bbbb"), NO);
+    });
+    // A skip to a track whose clip is in the store: the clip stays for the next one to cross over it.
+    __block UIView *before = nil;
+    after(21.5, ^{
+        [self expect:SGRPlayerMotionShowing() step:@"its Canvas came late" detail:SGRPlayerMotionShowing() ? @"the clip in" : @"no clip"];
+        before = motionView();
+        SGRHarnessSetTrack(@"spotify:track:harnessC", imageURI(@"cccc"), NO);
+    });
+    after(21.6, ^{
+        [self expect:SGRPlayerMotionShowing() && self->_covers.layer.mask step:@"skipped, the clip kept a moment"
+              detail:SGRPlayerMotionShowing() ? @"a clip in" : @"the cover back"];
+    });
+    after(22.3, ^{
+        CALayer *mask = self->_covers.layer.mask;
+        [self expect:SGRPlayerMotionShowing() && motionView() != before && mask && mask.opacity == 0 step:@"the next clip over the last"
+              detail:[NSString stringWithFormat:@"%@, cover %@", motionView() != before ? @"a new clip" : @"the same clip", mask && mask.opacity == 0 ? @"still hidden" : @"back"]];
+    });
+    // Low Power Mode (Reduce Motion takes the same path): the clip goes for Fluid and the cover, and comes back
+    // once it is off. The simulator has no Low Power Mode, so the process says it is on.
+    __block BOOL lowPower = NO;
+    after(22.5, ^{
+        Class info = object_getClass(NSProcessInfo.processInfo);
+        for (NSString *name in @[@"isLowPowerModeEnabled", @"lowPowerModeEnabled"]) {
+            Method method = class_getInstanceMethod(info, NSSelectorFromString(name));
+            if (method) method_setImplementation(method, imp_implementationWithBlock(^BOOL(id process) { return lowPower; }));
+        }
+        lowPower = YES;
+        [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];    });
+    after(23.5, ^{
+        [self expect:!SGRPlayerMotionShowing() && !motionView() && !self->_covers.layer.mask step:@"Low Power Mode"
+              detail:[NSString stringWithFormat:@"clip %@, cover %@", motionView() ? @"still there" : @"gone", self->_covers.layer.mask ? @"hidden" : @"back"]];
+        lowPower = NO;
+        [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
+    });
+    // A track change with the app in the background: the last clip goes at once, with no fade to come back to.
+    __block UIApplicationState state = UIApplicationStateActive;
+    after(24.5, ^{
+        [self expect:SGRPlayerMotionShowing() && self->_covers.layer.mask step:@"Low Power Mode off"
+              detail:SGRPlayerMotionShowing() ? @"the clip back" : @"no clip"];
+        Method method = class_getInstanceMethod(UIApplication.class, @selector(applicationState));
+        method_setImplementation(method, imp_implementationWithBlock(^UIApplicationState(id app) { return state; }));
+        state = UIApplicationStateBackground;
+        unsetenv("HARNESS_CANVAS");
+        SGRHarnessSetTrack(@"spotify:track:harnessD", imageURI(@"dddd"), NO);
+    });
+    after(24.6, ^{
+        CALayer *mask = self->_covers.layer.mask;
+        [self expect:!SGRPlayerMotionShowing() && !motionView() && !mask step:@"a track change in the background"
+              detail:[NSString stringWithFormat:@"clip %@, cover %@", motionView() ? @"still there" : @"gone at once",
+                      mask ? [NSString stringWithFormat:@"hidden, at %.2f", mask.opacity] : @"back at once"]];
+        state = UIApplicationStateActive;
+    });
+    after(25, ^{
+        NSLog(@"[harness] motion checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
+              self->_failures ? @"FAIL" : @"PASS");
+    });
+}
+
+#pragma mark - Apple Music's catalog
+
+static NSData *catalogAlbums(NSArray<NSArray<NSString *> *> *albums) {
+    NSMutableArray *data = [NSMutableArray array];
+    for (NSArray<NSString *> *album in albums) {
+        [data addObject:@{@"attributes": @{@"name": album[0], @"artistName": album[1],
+                                           @"editorialVideo": @{@"motionTallVideo3x4": @{@"video": album[2]}}}}];
+    }
+    return [NSJSONSerialization dataWithJSONObject:@{@"results": @{@"albums": @{@"data": data}}} options:0 error:nil];
+}
+
+static NSString *termOf(NSURL *url) {
+    for (NSURLQueryItem *item in [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO].queryItems) {
+        if ([item.name isEqualToString:@"term"]) return item.value;
+    }
+    return nil;
+}
+
+// The album search's term without the edition, the album of the same name before another edition, and the pause
+// after a 429: nothing asked of the catalog for the next album, which finds nothing at once.
+- (void)runCatalogChecks {
+    sg_catalogAsked = [NSMutableArray array];
+    sg_canvasAsked = [NSMutableArray array];
+    // A web player token that has not run out, so no browse page is read.
+    NSString *(^part)(NSString *) = ^NSString *(NSString *json) {
+        NSString *base = [[json dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0];
+        return [[[base stringByReplacingOccurrencesOfString:@"+" withString:@"-"] stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
+                stringByReplacingOccurrencesOfString:@"=" withString:@""];
+    };
+    NSString *token = [NSString stringWithFormat:@"%@.%@.c2ln", part(@"{\"alg\":\"none\"}"), part(@"{\"iss\":\"AMPWebPlay\",\"exp\":4102444800}")];
+    [NSUserDefaults.standardUserDefaults setObject:token forKey:@"spotifyglass.motion.token"];
+
+    NSDictionary<NSString *, NSString *> *names = @{
+        @"Abbey Road (Remastered)": @"Abbey Road", @"Rumours - 2004 Remaster": @"Rumours", @"[Deluxe]": @"[Deluxe]",
+        @"Thriller 25 [Super Deluxe Edition] (Remastered)": @"Thriller 25", @"Midnights": @"Midnights",
+    };
+    __block BOOL namesRight = YES;
+    [names enumerateKeysAndObjectsUsingBlock:^(NSString *name, NSString *searched, BOOL *stop) {
+        if (![SGMotionSearchName(name) isEqualToString:searched]) {
+            namesRight = NO;
+            NSLog(@"[harness] catalog: %@ searched as \"%@\", not \"%@\"", name, SGMotionSearchName(name), searched);
+        }
+    }];
+    [self expect:namesRight step:@"search names" detail:namesRight ? @"editions taken off" : @"see above"];
+
+    sg_catalogBody = catalogAlbums(@[@[@"Midnights", @"Taylor Swift", @"https://canvas.harness/standard.m3u8"],
+                                     @[@"Midnights (3am Edition)", @"Taylor Swift", @"https://canvas.harness/3am.m3u8"]]);
+    after(1, ^{ SGMotionAlbumCover(@"Taylor Swift", @"Midnights (3am Edition)", SGMotionTall, 600, ^(NSURL *file) {}); });
+    after(2.5, ^{
+        NSString *term = termOf(sg_catalogAsked.firstObject), *master = sg_canvasAsked.firstObject.lastPathComponent;
+        [self expect:sg_catalogAsked.count == 1 && [term isEqualToString:@"Taylor Swift Midnights"] step:@"the term"
+              detail:[NSString stringWithFormat:@"%lu asked, \"%@\"", (unsigned long)sg_catalogAsked.count, term]];
+        [self expect:[master isEqualToString:@"3am.m3u8"] step:@"the album of the same name first" detail:master ?: @"none asked"];
+        sg_catalogStatus = 429;
+        SGMotionAlbumCover(@"Artist X", @"Album One", SGMotionTall, 600, ^(NSURL *file) {});
+    });
+    __block BOOL answered = NO;
+    after(4, ^{
+        [self expect:sg_catalogAsked.count == 2 step:@"a 429" detail:[NSString stringWithFormat:@"%lu asked", (unsigned long)sg_catalogAsked.count]];
+        sg_catalogStatus = 200;
+        SGMotionAlbumCover(@"Artist X", @"Album Two", SGMotionTall, 600, ^(NSURL *file) { answered = !file; });
+    });
+    after(5, ^{
+        [self expect:sg_catalogAsked.count == 2 && answered step:@"paused after it"
+              detail:[NSString stringWithFormat:@"%lu asked, the next album %@", (unsigned long)sg_catalogAsked.count, answered ? @"found nothing at once" : @"waits"]];
+        NSLog(@"[harness] catalog checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
+              self->_failures ? @"FAIL" : @"PASS");
+    });
+}
+
+static UIView *firstOfClass(UIView *root, NSString *name) {
+    if ([NSStringFromClass(root.class) isEqualToString:name]) return root;
+    for (UIView *sub in root.subviews) {
+        UIView *found = firstOfClass(sub, name);
+        if (found) return found;
+    }
+    return nil;
+}
+
+// The Player page over the player, its card checked for each background the segmented control picks.
+- (void)runSettingsChecks {
+    __block UINavigationController *nav;
+    __block CGFloat headerHeight = 0;
+    UITableView *(^table)(void) = ^{ return ((UITableViewController *)nav.topViewController).tableView; };
+    UIView *(^showcase)(void) = ^{ return firstOfClass(table().tableHeaderView, @"SGRPlayerShowcase"); };
+    UISegmentedControl *(^control)(void) = ^{ return (UISegmentedControl *)firstOfClass(table().tableHeaderView, @"UISegmentedControl"); };
+    // A segment picked as a tap on it does.
+    void (^pick)(NSUInteger) = ^(NSUInteger index) {
+        UISegmentedControl *segments = control();
+        segments.selectedSegmentIndex = (NSInteger)index;
+        [segments sendActionsForControlEvents:UIControlEventValueChanged];
+    };
+    void (^expectBackground)(NSString *, BOOL, BOOL, BOOL, BOOL) = ^(NSString *step, BOOL fluid, BOOL flows, BOOL clip, BOOL hills) {
+        UIView *view = showcase();
+        SGRArtworkField *field = (SGRArtworkField *)firstOfClass(view, @"SGRArtworkField");
+        UIView *motion = firstOfClass(view, @"SGRPlayerMotionView"), *visualiser = firstOfClass(view, @"SGRVisualiserView");
+        UIView *cover = [view valueForKey:@"_cover"];
+        UILabel *note = [nav.topViewController valueForKey:@"_note"];
+        NSInteger rows = [table() numberOfRowsInSection:0];
+        CGFloat height = table().tableHeaderView.bounds.size.height;
+        BOOL ok = field && field.fluid == fluid && field.flows == flows && (motion != nil) == clip && (visualiser != nil) == hills
+                  && field.motionHeld == (clip || hills) && !cover.hidden && rows == (clip ? 2 : 0)
+                  && note.text.length && (headerHeight == 0 || fabs(height - headerHeight) < 0.5);
+        headerHeight = height;
+        [self expect:ok step:step detail:[NSString stringWithFormat:@"field %@ fluid %d flows %d held %d, clip %@, hills %@, cover %@, %ld rows over the Mini player (%@), header %.0f, note \"%@\"",
+                                          field ? @"in" : @"missing", field.fluid, field.flows, field.motionHeld, motion ? @"on" : @"off", visualiser ? @"on" : @"off", cover.hidden ? @"hidden" : @"shown",
+                                          (long)rows, view.accessibilityValue, height, note.text]];
+    };
+    // The clip is in by 3 s (the motion scenario's first step), and the page opens over the player then.
+    after(3, ^{
+        nav = [[UINavigationController alloc] initWithRootViewController:SGRPlayerSettingsPage(@[])];
+        nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        [self.window.rootViewController presentViewController:nav animated:NO completion:nil];
+    });
+    after(4, ^{
+        UIView *view = showcase();
+        UISegmentedControl *segments = control();
+        CGRect card = view.frame, header = table().tableHeaderView.frame;
+        BOOL shaped = view.window && card.size.width > card.size.height && card.size.width > header.size.width - 48;
+        // Every segment's title whole: the widest, Visualizer's, is not cut short.
+        BOOL whole = YES;
+        for (UILabel *label in [self labelsIn:segments]) whole = whole && label.intrinsicContentSize.width <= label.bounds.size.width + 0.5;
+        [self expect:shaped && segments.numberOfSegments == 5 && whole && CGRectGetMinY(segments.frame) > CGRectGetMaxY(card)
+                step:@"the card leads the page, the five backgrounds under it, their names whole"
+              detail:[NSString stringWithFormat:@"card %@ in a header of %@, control %@ with %ld segments", NSStringFromCGRect(card),
+                      NSStringFromCGRect(header), NSStringFromCGRect(segments.frame), (long)segments.numberOfSegments]];
+        NSInteger sections = table().numberOfSections;
+        [self expect:sections == 2 && [table() numberOfRowsInSection:1] == 3 step:@"the Mini player section on the page"
+              detail:[NSString stringWithFormat:@"%ld sections, %ld rows in the second", (long)sections, (long)[table() numberOfRowsInSection:1]]];
+        expectBackground(@"Animated", YES, NO, YES, NO);
+        pick(2);
+    });
+    after(5, ^{ expectBackground(@"Fluid", YES, NO, NO, NO); pick(1); });
+    after(6, ^{ expectBackground(@"Colors", NO, YES, NO, NO); pick(0); });
+    after(7, ^{ expectBackground(@"Still", NO, NO, NO, NO); pick(4); });
+    after(8, ^{
+        expectBackground(@"Visualizer", YES, NO, NO, YES);
+        NSLog(@"[harness] settings: screenshot the Visualizer card now");
+    });
+    // Held a little longer, so the screenshot catches it.
+    after(10, ^{ pick(3); });
+    after(11, ^{
+        expectBackground(@"Animated again", YES, NO, YES, NO);
+        NSLog(@"[harness] settings checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
+              self->_failures ? @"FAIL" : @"PASS");
+    });
+}
+
+// The Player page opened with the player showing no clip, Animated picked on it: the card looks the clip up.
+- (void)runPreviewChecks {
+    __block UINavigationController *nav;
+    UIView *(^showcase)(void) = ^{
+        return firstOfClass(((UITableViewController *)nav.topViewController).tableView.tableHeaderView, @"SGRPlayerShowcase");
+    };
+    void (^pick)(NSUInteger) = ^(NSUInteger index) {
+        UISegmentedControl *segments = (UISegmentedControl *)firstOfClass(showcase().superview, @"UISegmentedControl");
+        segments.selectedSegmentIndex = (NSInteger)index;
+        [segments sendActionsForControlEvents:UIControlEventValueChanged];
+    };
+    NSString *(^card)(void) = ^{
+        UIView *view = showcase();
+        SGRArtworkField *field = (SGRArtworkField *)firstOfClass(view, @"SGRArtworkField");
+        UIView *motion = firstOfClass(view, @"SGRPlayerMotionView");
+        CALayer *still = [motion valueForKey:@"_still"];
+        return [NSString stringWithFormat:@"card: clip %@ (poster %@), field fluid %d held %d; the player's clip %@; the clip served %lu times",
+                motion ? @"in" : @"out", still.contents ? @"drawn" : @"none", field.fluid, field.motionHeld, SGRPlayerMotionShowing() ? @"in" : @"none",
+                (unsigned long)sg_canvasServed];
+    };
+    BOOL (^clipIn)(void) = ^{ return (BOOL)(firstOfClass(showcase(), @"SGRPlayerMotionView") != nil); };
+    after(1, ^{
+        [self expect:sg_canvasServed == 0 && !SGRPlayerMotionShowing() step:@"before the page, nothing asked for"
+              detail:[NSString stringWithFormat:@"the clip served %lu times, the player's clip %@", (unsigned long)sg_canvasServed, SGRPlayerMotionShowing() ? @"in" : @"none"]];
+        nav = [[UINavigationController alloc] initWithRootViewController:SGRPlayerSettingsPage(@[])];
+        nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        [self.window.rootViewController presentViewController:nav animated:NO completion:nil];
+    });
+    after(2, ^{
+        [self expect:!clipIn() && sg_canvasServed == 0 step:@"Still on the page, nothing asked for" detail:card()];
+        pick(3);
+    });
+    after(2.5, ^{
+        SGRArtworkField *field = (SGRArtworkField *)firstOfClass(showcase(), @"SGRArtworkField");
+        [self expect:!clipIn() && field.fluid step:@"Animated picked, Fluid while the clip comes" detail:card()];
+    });
+    after(6, ^{
+        SGRArtworkField *field = (SGRArtworkField *)firstOfClass(showcase(), @"SGRArtworkField");
+        CALayer *still = [firstOfClass(showcase(), @"SGRPlayerMotionView") valueForKey:@"_still"];
+        [self expect:clipIn() && still.contents && field.motionHeld && sg_canvasServed == 1 && !SGRPlayerMotionShowing()
+                step:@"the clip in the card, the player left alone" detail:card()];
+        NSLog(@"[harness] preview: screenshot the card now");
+        // The player's walk asks the store the same way: it finds the file without asking the server again.
+        SGMotionFile([NSURL URLWithString:@(getenv("HARNESS_CANVAS"))], ^(NSURL *file) {
+            [self expect:file && sg_canvasServed == 1 step:@"the clip in the store for the player"
+                  detail:[NSString stringWithFormat:@"%@, served %lu times", file.lastPathComponent ?: @"no file", (unsigned long)sg_canvasServed]];
+        });
+    });
+    after(8, ^{ pick(2); });
+    after(8.5, ^{
+        [self expect:!clipIn() step:@"Fluid picked, the clip out" detail:card()];
+        pick(3);
+        [self expect:clipIn() && sg_canvasServed == 1 step:@"Animated again, the clip at once" detail:card()];
+    });
+    after(9.5, ^{
+        NSLog(@"[harness] preview checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
+              self->_failures ? @"FAIL" : @"PASS");
+    });
+}
+
+- (NSArray<UILabel *> *)labelsIn:(UIView *)view {
+    NSMutableArray<UILabel *> *labels = [NSMutableArray array];
+    for (UIView *sub in view.subviews) {
+        if ([sub isKindOfClass:UILabel.class]) [labels addObject:(UILabel *)sub];
+        [labels addObjectsFromArray:[self labelsIn:sub]];
+    }
+    return labels;
+}
+
+#pragma mark - the Visualizer
+
+BOOL SGRHarnessReading(void);
+
+static UIView *visualiserView(void) {
+    for (UIView *view in SGRPlayerField().subviews) {
+        if ([NSStringFromClass(view.class) isEqualToString:@"SGRVisualiserView"]) return view;
+    }
+    return nil;
+}
+
+// The tallest a hill stands over the screen's foot, in points, from its path's bounding box.
+static CGFloat hillHeight(UIView *view, NSString *ivar) {
+    CAShapeLayer *shape = [view valueForKey:ivar];
+    if (!shape.path) return 0;
+    return view.bounds.size.height > 0 ? [[view valueForKey:@"baseline"] doubleValue] - CGPathGetPathBoundingBox(shape.path).origin.y : 0;
+}
+
+- (void)runVisualiserChecks {
+    after(3, ^{
+        UIView *hills = visualiserView();
+        CADisplayLink *link = [hills valueForKey:@"_link"];
+        CGFloat front = hillHeight(hills, @"_frontShape"), back = hillHeight(hills, @"_backShape");
+        [self expect:hills && SGRPlayerVisualiserShowing() && SGRPlayerField().fluid && SGRPlayerField().motionHeld && link && SGRHarnessReading() && front > 40
+                step:@"playing"
+              detail:[NSString stringWithFormat:@"hills %@, field fluid %d held %d, link %@ at up to %.0f fps, reader %@, front %.0f pt, back %.0f pt",
+                      hills ? @"on the field" : @"missing", SGRPlayerField().fluid, SGRPlayerField().motionHeld, link ? @"running" : @"stopped",
+                      link.preferredFrameRateRange.maximum, SGRHarnessReading() ? @"on" : @"off", front, back]];
+        NSLog(@"[harness] visualizer: screenshot the hills now");
+    });
+    after(4, ^{ SGRPlayerToggleLyrics(); });
+    after(5.5, ^{
+        UIView *hills = visualiserView();
+        UIVisualEffectView *blur = [hills valueForKey:@"_lyricsBlur"];
+        CADisplayLink *link = [hills valueForKey:@"_link"];
+        [self expect:SGRPlayerLyricsOpen() && blur.effect && link.preferredFrameRateRange.maximum == 30 step:@"behind the lyrics"
+              detail:[NSString stringWithFormat:@"lyrics %@, blur %@, link at up to %.0f fps", SGRPlayerLyricsOpen() ? @"up" : @"down",
+                      blur.effect ? @"on" : @"off", link.preferredFrameRateRange.maximum]];
+        NSLog(@"[harness] visualizer: screenshot the lyrics now");
+    });
+    after(6.5, ^{ SGRPlayerToggleLyrics(); });
+    after(7.5, ^{ SGRHarnessSetTrack(@"spotify:track:harnessA", imageURI(@"aaaa"), YES); });
+    after(8, ^{
+        CADisplayLink *link = [visualiserView() valueForKey:@"_link"];
+        [self expect:link && !SGRHarnessReading() step:@"paused, settling"
+              detail:[NSString stringWithFormat:@"link %@, reader %@", link ? @"still running" : @"stopped", SGRHarnessReading() ? @"on" : @"off"]];
+    });
+    after(12, ^{
+        UIView *hills = visualiserView();
+        CADisplayLink *link = [hills valueForKey:@"_link"];
+        CGFloat front = hillHeight(hills, @"_frontShape");
+        [self expect:!link && !SGRHarnessReading() && front < 15 step:@"paused, settled"
+              detail:[NSString stringWithFormat:@"link %@, reader %@, front %.0f pt", link ? @"running" : @"stopped", SGRHarnessReading() ? @"on" : @"off", front]];
+        NSLog(@"[harness] visualizer: screenshot the paused hills now");
+        SGRHarnessSetTrack(@"spotify:track:harnessA", imageURI(@"aaaa"), NO);
+    });
+    after(13.5, ^{
+        UIView *hills = visualiserView();
+        [self expect:[hills valueForKey:@"_link"] && SGRHarnessReading() && hillHeight(hills, @"_frontShape") > 40 step:@"playing again"
+              detail:[NSString stringWithFormat:@"front %.0f pt", hillHeight(hills, @"_frontShape")]];
+        SGRPlayerMenuSetBackground(SGRPlayerBackgroundFluid);
+    });
+    after(14.2, ^{
+        [self expect:!visualiserView() && !SGRPlayerVisualiserShowing() && !SGRPlayerField().motionHeld && !SGRHarnessReading()
+                step:@"switched to Fluid from the menu"
+              detail:[NSString stringWithFormat:@"hills %@, field %@, reader %@", visualiserView() ? @"still there" : @"gone",
+                      SGRPlayerField().motionHeld ? @"held" : @"moving", SGRHarnessReading() ? @"on" : @"off"]];
+        SGRPlayerMenuSetBackground(SGRPlayerBackgroundVisualiser);
+    });
+    after(15.5, ^{
+        UIView *hills = visualiserView();
+        [self expect:hills && SGRPlayerField().motionHeld && SGRHarnessReading() && hillHeight(hills, @"_frontShape") > 40 step:@"back from the menu"
+              detail:[NSString stringWithFormat:@"hills %@, field %@, front %.0f pt", hills ? @"on the field" : @"missing",
+                      SGRPlayerField().motionHeld ? @"held" : @"moving", hillHeight(hills, @"_frontShape")]];
+        NSLog(@"[harness] visualizer checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
+              self->_failures ? @"FAIL" : @"PASS");
+    });
+}
+
 - (void)runScrollChecks {
     after(2, ^{
         UIScrollView *list = self->_list;
@@ -780,214 +1427,356 @@ static void after(NSTimeInterval seconds, dispatch_block_t block) {
         NSLog(@"[harness] scroll checks: up %@, down %@, again %@ -- %@", up ? @"held" : @"moved", down ? @"kept" : @"lost",
               again ? @"held" : @"moved", up && down && again ? @"PASS" : @"FAIL");
     });
+    // Issue #172: the list's pan is off while the progress bar is scrubbed, back once the scrub ends however
+    // it ends, and a pan that was off already stays off.
+    after(3, ^{
+        UIView *duration = self->_units[1].view;
+        UISlider *slider = [[_TtCO17NowPlaying_ECMKit11ProgressBar6Slider alloc] initWithFrame:CGRectMake(24, 0, duration.bounds.size.width - 48, 20)];
+        slider.hidden = YES;
+        [duration addSubview:slider];
+        UIPanGestureRecognizer *pan = self->_list.panGestureRecognizer;
+        UITouch *none = nil;   // the mock tracks without one
+        NSMutableArray<NSString *> *wrong = [NSMutableArray array];
+        void (^expect)(NSString *, BOOL) = ^(NSString *step, BOOL ok) { if (!ok) [wrong addObject:step]; };
+        [slider beginTrackingWithTouch:none withEvent:nil];
+        expect(@"held while scrubbing", !pan.enabled);
+        [slider endTrackingWithTouch:none withEvent:nil];
+        expect(@"back at the end", pan.enabled);
+        [slider beginTrackingWithTouch:none withEvent:nil];
+        [slider cancelTrackingWithEvent:nil];
+        expect(@"back at a cancel", pan.enabled);
+        [slider beginTrackingWithTouch:none withEvent:nil];
+        [slider removeFromSuperview];
+        expect(@"back when the slider left the window", pan.enabled);
+        [duration addSubview:slider];
+        pan.enabled = NO;
+        [slider beginTrackingWithTouch:none withEvent:nil];
+        [slider endTrackingWithTouch:none withEvent:nil];
+        expect(@"off already, left off", !pan.enabled);
+        pan.enabled = YES;
+        [slider removeFromSuperview];
+        NSLog(@"[harness] scrub checks: %@ -- %@", wrong.count ? [wrong componentsJoinedByString:@", "] : @"all right",
+              wrong.count ? @"FAIL" : @"PASS");
+    });
 }
 
-- (void)runFluid {
-    NSLog(@"[harness] background style %ld, fluid look speed %.2f warp %.2f blur %.0f saturation %.2f brightness %.2f",
-          (long)SGRPlayerBackgroundStyle(), SGRPlayerFluidLook().speed, SGRPlayerFluidLook().warp, SGRPlayerFluidLook().blur,
-          SGRPlayerFluidLook().saturation, SGRPlayerFluidLook().brightness);
-    UIImage *second = secondArtwork();
+#pragma mark - the cover's room
+
+// Issue #77: Spotify keeps room for the lyric preview under the cover of a track with lyrics, so the cover
+// was smaller and higher with a blank band under it. Here the cover is untouched first (a track without
+// lyrics), then given Spotify's layout for one with lyrics, and must fill its room again.
+- (void)runCoverChecks {
+    __block NSUInteger right = 0, checks = 0;
+    void (^check)(NSString *, BOOL, NSString *) = ^(NSString *step, BOOL ok, NSString *detail) {
+        checks++;
+        if (ok) right++;
+        NSLog(@"[harness] cover %@: %@ -- %@", step, detail, ok ? @"ok" : @"WRONG");
+    };
+    UIView *tilt = _tilt, *room = tilt.superview;
+    UIView *preview = nil;
+    for (UIView *view in room.subviews) {
+        if ([view isKindOfClass:_TtC22Lyrics_NPVContainerKit19LyricsContainerView.class]) preview = view;
+    }
+    CGFloat side = MIN(room.bounds.size.width, room.bounds.size.height);
+    CGRect square = CGRectMake(round((room.bounds.size.width - side) / 2), round((room.bounds.size.height - side) / 2), side, side);
+    after(1.5, ^{
+        check(@"without lyrics", CGRectEqualToRect(tilt.frame, square), NSStringFromCGRect(tilt.frame));
+        NSLog(@"[harness] cover: screenshot without lyrics now");
+    });
+    after(2, ^{
+        // What Spotify does for a track with lyrics: the preview under the cover, the cover shrunk above it.
+        CGFloat small = side - 72;
+        tilt.frame = CGRectMake(round((room.bounds.size.width - small) / 2), 0, small, small);
+        preview.frame = CGRectMake(0, small + 8, room.bounds.size.width, 64);
+        [preview invalidateIntrinsicContentSize];
+        [self->_covers setNeedsLayout];
+        [self->_covers layoutIfNeeded];
+    });
+    after(2.5, ^{
+        check(@"the preview takes no room", CGSizeEqualToSize(preview.frame.size, CGSizeZero)
+              && CGSizeEqualToSize(preview.intrinsicContentSize, CGSizeZero) && CGSizeEqualToSize([preview sizeThatFits:room.bounds.size], CGSizeZero),
+              [NSString stringWithFormat:@"frame %@, intrinsic %@", NSStringFromCGRect(preview.frame), NSStringFromCGSize(preview.intrinsicContentSize)]);
+        check(@"with lyrics, the cover fills its room", CGRectEqualToRect(tilt.frame, square), NSStringFromCGRect(tilt.frame));
+        CGRect drawn = SGRPlayerCoverFrameIn(room);
+        check(@"the Kit sees it", CGRectEqualToRect(CGRectIntegral(drawn), square),
+              [NSString stringWithFormat:@"%@, the picture %@", NSStringFromCGRect(drawn), NSStringFromCGSize(self->_cover.bounds.size)]);
+        NSLog(@"[harness] cover: screenshot with lyrics now");
+    });
+    after(3, ^{
+        NSLog(@"[harness] cover checks: %lu of %lu right -- %@", (unsigned long)right, (unsigned long)checks, right == checks ? @"PASS" : @"FAIL");
+    });
+}
+
+#pragma mark - the lines on their own
+
+static UIView *lyricsOverlay(UIView *host) {
+    for (UIView *view in host.subviews) {
+        if ([NSStringFromClass(view.class) isEqualToString:@"SGRPlayerLyricsOverlay"]) return view;
+    }
+    return nil;
+}
+
+// Whether the lines' own tap, the one that seeks, is on.
+static BOOL linesSeek(SGRKaraokeView *lyrics) {
+    BOOL on = NO;
+    for (UIGestureRecognizer *recognizer in lyrics.gestureRecognizers) {
+        if ([recognizer isKindOfClass:UITapGestureRecognizer.class]) on = on || recognizer.enabled;
+    }
+    return on;
+}
+
+// The lyrics up and left alone past the rest: only the controls under them fade, the lines grow down into
+// their room and still scroll, a tap brings the controls back and is not a seek, a scroll hides them again
+// and the thumbnail closes the lyrics from there.
+- (void)runImmersiveChecks {
+    __block NSUInteger right = 0, checks = 0;
+    void (^check)(NSString *, BOOL, NSString *) = ^(NSString *step, BOOL ok, NSString *detail) {
+        checks++;
+        if (ok) right++;
+        NSLog(@"[harness] immersive %@: %@ -- %@", step, detail, ok ? @"ok" : @"WRONG");
+    };
+    UIView *host = _host;
+    UIView *info = _units[0].view, *duration = _units[1].view, *playback = _units[3].view, *footer = _units[4].view;
+    UIGestureRecognizer *wake = nil;
+    for (UIGestureRecognizer *recognizer in host.gestureRecognizers) {
+        if ([NSStringFromClass(recognizer.class) isEqualToString:@"SGRPlayerWake"]) wake = recognizer;
+    }
+    __block CGRect withControls = CGRectNull;
+    UIView *(^stage)(void) = ^UIView *{ return [lyricsOverlay(host) valueForKey:@"stage"]; };
+    SGRKaraokeView *(^lines)(void) = ^SGRKaraokeView *{ return [lyricsOverlay(host) valueForKey:@"lyrics"]; };
+    // Everything in the bottom stack but the title row and the chips: the volume row too, where there is one.
+    NSMutableArray<UIView *> *lower = [NSMutableArray array];
+    for (UIView *view in info.superview.subviews) {
+        if (view != info && view != self->_units[2].view) [lower addObject:view];
+    }
+    BOOL (^lowerHidden)(void) = ^BOOL { for (UIView *v in lower) if (v.alpha != 0) return NO; return lower.count >= 3; };
+    BOOL (^lowerShown)(void) = ^BOOL { for (UIView *v in lower) if (v.alpha != 1) return NO; return lower.count >= 3; };
+
+    after(1.5, ^{ SGRPlayerToggleLyrics(); });
+    after(3, ^{
+        withControls = [host convertRect:stage().bounds fromView:stage()];
+        check(@"open, with the controls", SGRPlayerLyricsOpen() && lowerShown() && !wake.enabled && linesSeek(lines()),
+              [NSString stringWithFormat:@"lines %@, wake %d, lines seek %d", NSStringFromCGRect(withControls), wake.enabled, linesSeek(lines())]);
+    });
+    // kRest is 4 s from the open.
     after(7, ^{
-        serve(imageURI(@"ffff"), second, 0.25, NO);
-        [self playTrack:@"spotify:track:harnessF" image:imageURI(@"ffff")];
+        UIView *thumb = [lyricsOverlay(host) valueForKey:@"thumb"];
+        check(@"only the controls under the lines fade", lowerHidden() && info.alpha == 1 && thumb.alpha == 1,
+              [NSString stringWithFormat:@"%lu views under the title row %@, progress %.0f, buttons %.0f, footer %.0f, title row %.0f, thumbnail %.0f",
+               (unsigned long)lower.count, lowerHidden() ? @"faded" : @"not all faded", duration.alpha, playback.alpha, footer.alpha, info.alpha, thumb.alpha]);
+        CGRect alone = [host convertRect:stage().bounds fromView:stage()];
+        CGRect safe = UIEdgeInsetsInsetRect(host.bounds, host.safeAreaInsets);
+        check(@"the lines grow down only", CGRectGetMinY(alone) == CGRectGetMinY(withControls) && CGRectGetMaxY(alone) > CGRectGetMaxY(withControls)
+              && CGRectGetMaxY(alone) <= CGRectGetMaxY(safe),
+              [NSString stringWithFormat:@"%@ from %@, safe area to %.0f", NSStringFromCGRect(alone), NSStringFromCGRect(withControls), CGRectGetMaxY(safe)]);
+        // Where the buttons were, the lines now take the touch: a drag scrolls them.
+        CGPoint onButtons = [host convertPoint:CGPointMake(CGRectGetMidX(playback.bounds), CGRectGetMidY(playback.bounds)) fromView:playback];
+        UIView *hit = [host hitTest:onButtons withEvent:nil];
+        check(@"a touch on the lines lands on them", [hit isDescendantOfView:lines()],
+              [NSString stringWithFormat:@"%@", NSStringFromClass(hit.class)]);
+        CGPoint onThumb = [host convertPoint:CGPointMake(CGRectGetMidX(thumb.bounds), CGRectGetMidY(thumb.bounds)) fromView:thumb];
+        UIView *thumbHit = [host hitTest:onThumb withEvent:nil];
+        check(@"the thumbnail takes its touch", [thumbHit isDescendantOfView:thumb], NSStringFromClass(thumbHit.class));
+        check(@"a tap wakes, the lines do not seek", wake.enabled && !linesSeek(lines()),
+              [NSString stringWithFormat:@"wake %d, lines seek %d", wake.enabled, linesSeek(lines())]);
+        NSLog(@"[harness] immersive: screenshot alone now");
     });
-    after(7.4, ^{ [self showOnScreen:second]; });
-    after(11, ^{
-        NSLog(@"[harness] paused");
-        SGRHarnessSetTrack(@"spotify:track:harnessF", imageURI(@"ffff"), YES);
+    after(8, ^{
+        [wake sgr_woke];
+        // Off still for the rest of this turn of the run loop, which the tap that woke is part of.
+        check(@"the waking tap does not seek", lowerShown() && !linesSeek(lines()),
+              [NSString stringWithFormat:@"controls %.0f, lines seek %d", duration.alpha, linesSeek(lines())]);
     });
-    after(13, ^{
-        NSLog(@"[harness] playing");
-        SGRHarnessSetTrack(@"spotify:track:harnessF", imageURI(@"ffff"), NO);
+    after(8.5, ^{
+        check(@"woken", lowerShown() && !wake.enabled && linesSeek(lines()),
+              [NSString stringWithFormat:@"controls %.0f, wake %d, lines seek %d", duration.alpha, wake.enabled, linesSeek(lines())]);
+        // A scroll through the lines leaves them alone at once.
+        lines().browsingBegan();
+        check(@"a scroll hides the controls", lowerHidden() && wake.enabled, [NSString stringWithFormat:@"controls %.0f", duration.alpha]);
     });
-    after(15, ^{
-        NSLog(@"[harness] the player's transition begins");
-        sg_harnessTransitionEnds = CACurrentMediaTime() + 0.5;
-        [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerTransitionNotification object:nil];
+    after(9.5, ^{
+        [lyricsOverlay(host) sgr_thumbTapped];
+        check(@"the thumbnail closes the lyrics while alone", !SGRPlayerLyricsOpen() && lowerShown() && !wake.enabled,
+              [NSString stringWithFormat:@"lyrics %@, controls %.0f", SGRPlayerLyricsOpen() ? @"up" : @"down", duration.alpha]);
     });
-    after(15.5, ^{
-        NSLog(@"[harness] the player's transition ends");
-        sg_harnessTransitionEnds = 0;
-        [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerTransitionEndedNotification object:nil];
+    // A sheet over the player keeps the controls up past the rest, and the clock runs again behind it, so
+    // they fade within a rest of the sheet going.
+    after(11.5, ^{ SGRPlayerToggleLyrics(); });
+    __block UIViewController *sheet = nil;
+    after(12, ^{
+        sheet = [UIViewController new];
+        sheet.view.backgroundColor = UIColor.darkGrayColor;
+        [self.window.rootViewController presentViewController:sheet animated:NO completion:nil];
     });
     after(17, ^{
-        NSLog(@"[harness] sliders pushed");
-        SGSetInt(SGRKeyFluidSpeed, 300);
-        SGSetInt(SGRKeyFluidSaturation, 250);
-        SGSetInt(SGRKeyFluidBlur, 3);
-        [NSNotificationCenter.defaultCenter postNotificationName:SGRPlayerFluidLookDidChangeNotification object:nil];
+        check(@"a sheet keeps the controls up", SGRPlayerLyricsOpen() && lowerShown(), [NSString stringWithFormat:@"controls %.0f", duration.alpha]);
+        [sheet dismissViewControllerAnimated:NO completion:nil];
     });
-    after(20, ^{
-        NSLog(@"[harness] sliders reset");
-        for (NSString *key in @[SGRKeyFluidSpeed, SGRKeyFluidSaturation, SGRKeyFluidBlur]) [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
-        [NSNotificationCenter.defaultCenter postNotificationName:SGRPlayerFluidLookDidChangeNotification object:nil];
+    after(22, ^{
+        check(@"they fade once the sheet has gone", lowerHidden(), [NSString stringWithFormat:@"controls %.0f", duration.alpha]);
+        // Sing's mic stays with the lines on their own, and takes its own touch.
+        UIView *mic = nil;
+        for (UIView *view in lines().subviews) {
+            if ([NSStringFromClass(view.class) isEqualToString:@"SGRSingButton"]) mic = view;
+        }
+        CGPoint onMic = [host convertPoint:CGPointMake(CGRectGetMidX(mic.bounds), CGRectGetMidY(mic.bounds)) fromView:mic];
+        UIView *hit = [host hitTest:onMic withEvent:nil];
+        CGRect drawn = [host convertRect:mic.bounds fromView:mic];
+        check(@"the mic stays and takes its touch", mic && ![[mic valueForKey:@"tucked"] boolValue] && mic.userInteractionEnabled && [hit isDescendantOfView:mic]
+              && CGRectGetMaxY(drawn) > CGRectGetMaxY(withControls),
+              [NSString stringWithFormat:@"mic %@ at %@, hit %@", mic ? @"there" : @"missing", NSStringFromCGRect(drawn), NSStringFromClass(hit.class)]);
+        NSLog(@"[harness] immersive: screenshot the mic alone now");
+    });
+    after(28, ^{ [wake sgr_woke]; });
+    // A finger held on the player (Sing's slider) holds the clock, and lifting it starts the clock over.
+    __block UIGestureRecognizer *watcher = nil;
+    after(28.5, ^{
+        for (UIGestureRecognizer *recognizer in host.gestureRecognizers) {
+            if ([NSStringFromClass(recognizer.class) isEqualToString:@"SGRPlayerTouchWatcher"]) watcher = recognizer;
+        }
+        [watcher touchesBegan:[NSSet set] withEvent:[UIEvent new]];
+    });
+    after(34, ^{
+        check(@"a finger held keeps the controls up", watcher && lowerShown(), [NSString stringWithFormat:@"controls %.0f", duration.alpha]);
+        [watcher reset];
+    });
+    after(39, ^{
+        check(@"lifted, the clock runs out", lowerHidden(), [NSString stringWithFormat:@"controls %.0f", duration.alpha]);
+    });
+    after(40, ^{
+        NSLog(@"[harness] immersive checks: %lu of %lu right -- %@", (unsigned long)right, (unsigned long)checks, right == checks ? @"PASS" : @"FAIL");
     });
 }
 
-#pragma mark - Animated artwork
+#pragma mark - tap to seek
 
-static UIView *viewOfClass(UIView *root, NSString *name);
-
-- (UIView *)animatedView {
-    return viewOfClass(self.window, @"SGRPlayerAnimatedView");
-}
-
-- (void)checkAnimated:(NSString *)step shows:(BOOL)shows {
-    UIView *view = [self animatedView];
-    CALayer *shown = view.layer.presentationLayer ?: view.layer;
-    BOOL covered = SGRPlayerField().covered;
-    [self expect:(shows ? shown.opacity > 0.99 : shown.opacity < 0.01) && covered == shows
-            that:[NSString stringWithFormat:@"%@: the clip %@ (opacity %.2f), Fluid artwork %@", step, shows ? @"shows" : @"is away",
-                  shown.opacity, covered ? @"stopped under it" : @"drawing"]];
-}
-
-// The dim over the clip, the sublayer after the clips'.
-- (float)animatedDim {
-    CALayer *dim = [self animatedView].layer.sublayers[1];
-    return ((CALayer *)dim.presentationLayer ?: dim).opacity;
-}
-
-// Each step a moment apart, or, with HARNESS_STEPPED set, as `notifyutil -p com.vojta.harness.next` asks
-// for it, so a script can screenshot each state once it has settled.
-- (void)playSteps:(NSArray<dispatch_block_t> *)steps {
-    __block NSUInteger at = 0;
-    void (^next)(void) = ^{
-        if (at >= steps.count) return;
-        NSLog(@"[harness] step %lu", (unsigned long)at);
-        steps[at++]();
+// The tap around the progress bar (PlayerControls.x): where it lands, what it maps to, and how it seeks. The
+// slider is the mock's, given Spotify's identifier, with the two times beside it. A tap is the recognizer's
+// action with its starting point set, since the harness cannot make a touch.
+- (void)runSeekChecks {
+    __block NSUInteger right = 0, checks = 0;
+    void (^check)(NSString *, BOOL, NSString *) = ^(NSString *step, BOOL ok, NSString *detail) {
+        checks++;
+        if (ok) right++;
+        NSLog(@"[harness] seek %@: %@ -- %@", step, detail, ok ? @"ok" : @"WRONG");
     };
-    if (getenv("HARNESS_STEPPED")) {
-        int token;
-        notify_register_dispatch("com.vojta.harness.next", &token, dispatch_get_main_queue(), ^(int t) { next(); });
-        NSLog(@"[harness] stepped: waiting for com.vojta.harness.next");
-        return;
-    }
-    for (NSUInteger i = 0; i < steps.count; i++) after(1.5 + 3.5 * i, next);
-}
+    UIViewController *durationUnit = _units[1];
+    UIView *unit = durationUnit.view;
+    CGFloat W = unit.bounds.size.width;
+    UISlider *slider = [[_TtCO17NowPlaying_ECMKit11ProgressBar6Slider alloc] initWithFrame:CGRectMake(24, 2, W - 48, 14)];
+    slider.accessibilityIdentifier = @"SPTNowPlayingSliderV2";
+    slider.value = 0.22;
+    [unit addSubview:slider];
+    UILabel *taken = [[UILabel alloc] initWithFrame:CGRectMake(24, 20, 44, 16)];
+    taken.accessibilityIdentifier = @"now-playing-time-take-label";
+    UILabel *remaining = [[UILabel alloc] initWithFrame:CGRectMake(W - 24 - 44, 20, 44, 16)];
+    remaining.accessibilityIdentifier = @"now-playing-time-remaning-label";
+    [unit addSubview:taken];
+    [unit addSubview:remaining];
+    [durationUnit viewDidLayoutSubviews];
+    [SGPlayerState() setValue:@200 forKey:@"duration"];
 
-- (float)clipRate {
-    id clip = [[self animatedView] valueForKey:@"clip"];
-    return [[[clip valueForKey:@"player"] valueForKey:@"rate"] floatValue];
-}
-
-- (void)runAnimated {
-    const char *folder = getenv("HARNESS_CLIPS");
-    if (!folder) {
-        NSLog(@"[harness] animated: HARNESS_CLIPS names no folder of clips");
-        return;
+    UIGestureRecognizer *tap = nil;
+    for (UIGestureRecognizer *recognizer in unit.gestureRecognizers) {
+        if ([NSStringFromClass(recognizer.class) isEqualToString:@"SGRSeekTap"]) tap = recognizer;
     }
-    NSURL *(^clip)(NSString *) = ^NSURL *(NSString *name) { return [NSURL fileURLWithPath:[@(folder) stringByAppendingPathComponent:name]]; };
-    NSDictionary *(^canvas)(NSString *) = ^NSDictionary *(NSString *name) {
-        return @{@"canvas.url": clip(name).absoluteString, @"canvas.type": @"VIDEO_LOOPING", @"canvas.id": name.stringByDeletingPathExtension};
+    CGRect bar = slider.frame;
+    CGRect thumb = [unit convertRect:[slider thumbRectForBounds:slider.bounds trackRect:[slider trackRectForBounds:slider.bounds] value:slider.value] fromView:slider];
+    check(@"on the duration unit", tap != nil, tap ? @"a recognizer there" : @"none");
+    check(@"under the bar", SGRSeekTapLands(unit, slider, CGPointMake(W / 2, CGRectGetMaxY(bar) + 12)), @"12pt below the bar");
+    check(@"past the ends", SGRSeekTapLands(unit, slider, CGPointMake(CGRectGetMinX(bar) - 10, 8)) && SGRSeekTapLands(unit, slider, CGPointMake(CGRectGetMaxX(bar) + 10, 8))
+          && !SGRSeekTapLands(unit, slider, CGPointMake(CGRectGetMinX(bar) - 20, 8)), @"10pt past either end, not 20");
+    check(@"not on the thumb", !SGRSeekTapLands(unit, slider, CGPointMake(CGRectGetMidX(thumb), CGRectGetMidY(thumb))), NSStringFromCGRect(thumb));
+    check(@"not on the times", !SGRSeekTapLands(unit, slider, taken.center) && !SGRSeekTapLands(unit, slider, remaining.center), @"either time");
+    CGFloat end = SGRSeekShareAt(slider, CGPointMake(slider.bounds.size.width - 1, 7)), start = SGRSeekShareAt(slider, CGPointMake(1, 7));
+    CGFloat middle = SGRSeekShareAt(slider, CGPointMake(slider.bounds.size.width / 2, 7));
+    check(@"the ends are the song's", end == 1 && start == 0 && fabs(middle - 0.5) < 0.001,
+          [NSString stringWithFormat:@"start %.3f, middle %.3f, end %.3f", start, middle, end]);
+
+    // A tap at three quarters of the thumb's travel, played to the slider as a drag.
+    NSMutableArray<NSNumber *> *events = [NSMutableArray array];
+    __block BOOL answers = NO;
+    for (NSNumber *event in @[@(UIControlEventTouchDown), @(UIControlEventValueChanged), @(UIControlEventTouchUpInside)]) {
+        [slider addAction:[UIAction actionWithHandler:^(UIAction *action) {
+            [events addObject:event];
+            if (answers && event.unsignedIntegerValue == UIControlEventTouchUpInside) SGKaraokeSeek((NSInteger)(slider.value * 200000));
+        }] forControlEvents:event.unsignedIntegerValue];
+    }
+    CGFloat from = CGRectGetMidX([slider thumbRectForBounds:slider.bounds trackRect:[slider trackRectForBounds:slider.bounds] value:0]);
+    CGFloat to = CGRectGetMidX([slider thumbRectForBounds:slider.bounds trackRect:[slider trackRectForBounds:slider.bounds] value:1]);
+    void (^tapAt)(CGFloat) = ^(CGFloat share) {
+        CGPoint point = [unit convertPoint:CGPointMake(from + share * (to - from), 7) fromView:slider];
+        [tap setValue:[NSValue valueWithCGPoint:point] forKey:@"start"];
+        ((void (*)(id, SEL))objc_msgSend)(tap, NSSelectorFromString(@"sgr_seek"));
     };
-    SGRHarnessAppleClips = [@{@"Low Tide": clip(@"apple.mp4")} mutableCopy];
-    SGRHarnessClipDelays = [@{@"apple.mp4": @1.0, @"late.mp4": @1.5} mutableCopy];
-    NSDictionary *lowTide = @{@"album_title": @"Low Tide", @"artist_name": @"The Harness"};
-    UIImage *first = _cover.image, *second = secondArtwork();
-    serve(imageURI(@"ffff"), second, 0.25, NO);
-    NSLog(@"[harness] animated: background style %ld", (long)SGRPlayerBackgroundStyle());
-    __block float dimBefore = 0;
-    _TtC28NowPlaying_ContentLayersImpl24HorizontalVideoViewModel *video = [_TtC28NowPlaying_ContentLayersImpl24HorizontalVideoViewModel new];
-
-    [self playSteps:@[
-        ^{ [self checkAnimated:@"1 no clip for the first track" shows:NO]; },
-        // A Canvas on disk, with Apple Music's cover of the next track fetched ahead.
-        ^{
-            NSLog(@"[harness] track: a Canvas");
-            SGRHarnessSetTrackWith(@"spotify:track:harnessCanvas", imageURI(@"aaaa"), NO, canvas(@"canvas.mp4"),
-                                   @[@{@"uri": @"spotify:track:harnessApple", @"metadata": lowTide}]);
-            after(2, ^{ [self checkAnimated:@"2 the Canvas faded in over Fluid artwork" shows:YES]; });
-        },
-        // The next track, fetched ahead: straight to its clip.
-        ^{
-            NSLog(@"[harness] track: Apple Music's cover, fetched ahead");
-            SGRHarnessSetTrackWith(@"spotify:track:harnessApple", imageURI(@"ffff"), NO, lowTide,
-                                   @[@{@"uri": @"spotify:track:harnessNone", @"metadata": @{}}]);
-            after(0.3, ^{ [self checkAnimated:@"3 crossing straight to the next clip, Fluid artwork still stopped" shows:YES]; });
-            after(0.4, ^{ [self showOnScreen:second]; });
-            after(2, ^{ [self checkAnimated:@"4 Apple Music's cover" shows:YES]; });
-        },
-        // Nothing anywhere: back to Fluid artwork.
-        ^{
-            NSLog(@"[harness] track: no clip anywhere");
-            SGRHarnessSetTrackWith(@"spotify:track:harnessNone", imageURI(@"aaaa"), NO, nil,
-                                   @[@{@"uri": @"spotify:track:harnessLate", @"metadata": @{}}]);
-            after(0.4, ^{ [self showOnScreen:first]; });
-            after(2, ^{ [self checkAnimated:@"5 a track without a clip" shows:NO]; });
-        },
-        // A Canvas the track names only once it plays, 1.5 s from landing.
-        ^{
-            NSLog(@"[harness] track: a Canvas still downloading");
-            SGRHarnessSetTrackWith(@"spotify:track:harnessLate", imageURI(@"ffff"), NO, canvas(@"late.mp4"), nil);
-            after(0.4, ^{ [self showOnScreen:second]; });
-            after(0.8, ^{ [self checkAnimated:@"6 Fluid artwork while it downloads" shows:NO]; });
-            after(3, ^{ [self checkAnimated:@"7 the downloaded Canvas faded in" shows:YES]; });
-        },
-        ^{
-            NSLog(@"[harness] paused");
-            SGRHarnessSetTrackWith(@"spotify:track:harnessLate", imageURI(@"ffff"), YES, canvas(@"late.mp4"), nil);
-            after(1, ^{ [self expect:[self clipRate] == 0 that:[NSString stringWithFormat:@"8 paused, the clip holds its frame (rate %.0f)", [self clipRate]]]; });
-        },
-        ^{
-            NSLog(@"[harness] playing");
-            SGRHarnessSetTrackWith(@"spotify:track:harnessLate", imageURI(@"ffff"), NO, canvas(@"late.mp4"), nil);
-            after(1, ^{ [self expect:[self clipRate] == 1 that:[NSString stringWithFormat:@"9 playing again (rate %.0f)", [self clipRate]]]; });
-        },
-        ^{
-            dimBefore = [self animatedDim];
-            NSLog(@"[harness] opening the lyrics");
-            SGRPlayerToggleLyrics();
-            after(1.5, ^{
-                float dim = [self animatedDim];
-                [self expect:SGRPlayerLyricsOpen() && dim > dimBefore + 0.1f
-                        that:[NSString stringWithFormat:@"10 the lyrics up dim the clip from %.2f to %.2f", dimBefore, dim]];
-            });
-        },
-        ^{
-            NSLog(@"[harness] closing the lyrics");
-            SGRPlayerToggleLyrics();
-        },
-        ^{
-            NSLog(@"[harness] Spotify's video comes on");
-            [video videoSurfaceDidAttachVideo:nil];
-            after(1.5, ^{ [self checkAnimated:@"11 Spotify's own video showing" shows:NO]; });
-        },
-        ^{
-            NSLog(@"[harness] Spotify's video goes");
-            [video videoSurfaceDidDetachVideo:nil];
-            after(2, ^{ [self checkAnimated:@"12 the clip back after the video" shows:YES]; });
-        },
-        ^{
-            NSLog(@"[harness] the player's transition begins");
-            sg_harnessTransitionEnds = CACurrentMediaTime() + 0.5;
-            [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerTransitionNotification object:nil];
-            after(0.2, ^{ [self expect:[self clipRate] == 0 that:@"13 held while the player opens or closes"]; });
-            after(0.5, ^{
-                NSLog(@"[harness] the player's transition ends");
-                sg_harnessTransitionEnds = 0;
-                [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerTransitionEndedNotification object:nil];
-            });
-            after(1, ^{ [self expect:[self clipRate] == 1 that:@"14 playing again once it is open"]; });
-        },
-        // The worst case for the text: a nearly white clip, with and without the lyrics.
-        ^{
-            NSLog(@"[harness] track: a bright Canvas");
-            SGRHarnessSetTrackWith(@"spotify:track:harnessBright", imageURI(@"aaaa"), NO, canvas(@"bright.mp4"), nil);
-            after(0.4, ^{ [self showOnScreen:first]; });
-            after(2, ^{ [self checkAnimated:@"15 the bright Canvas" shows:YES]; });
-        },
-        ^{ SGRPlayerToggleLyrics(); },
-        ^{
-            SGRPlayerToggleLyrics();
-            after(1, ^{
-                NSLog(@"[harness] animated checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures),
-                      (unsigned long)self->_checks, self->_failures ? @"FAIL" : @"PASS");
-            });
-        },
-    ]];
+    tapAt(0.75);
+    NSArray *drag = @[@(UIControlEventTouchDown), @(UIControlEventValueChanged), @(UIControlEventTouchUpInside)];
+    check(@"played as a drag", [events isEqualToArray:drag] && fabs(slider.value - 0.75) < 0.001 && slider.isTracking,
+          [NSString stringWithFormat:@"%lu events, value %.3f, tracking %d", (unsigned long)events.count, slider.value, slider.isTracking]);
+    // Nothing seeked for it: after a second the tap seeks directly, and the slider lets go.
+    after(1.3, ^{
+        NSInteger at = SGKaraokePositionMs();
+        check(@"a drag that did not seek is seeked", labs(at - 150000) < 1000 && !slider.isTracking,
+              [NSString stringWithFormat:@"at %ld ms, tracking %d", (long)at, slider.isTracking]);
+        // Spotify seeking for the drag: the slider lets go as the position arrives.
+        answers = YES;
+        tapAt(0.3);
+        NSInteger now = SGKaraokePositionMs();
+        check(@"the slider lets go once the position is there", labs(now - 60000) < 1000 && !slider.isTracking,
+              [NSString stringWithFormat:@"at %ld ms, tracking %d", (long)now, slider.isTracking]);
+    });
+    after(2.6, ^{
+        NSLog(@"[harness] seek checks: %lu of %lu right -- %@", (unsigned long)right, (unsigned long)checks, right == checks ? @"PASS" : @"FAIL");
+    });
 }
 
 // One track, then another album's at 8 s, its picture on the screens 0.4 s later.
+// The header's glass circles press in under a finger (PlayerHeader.x): held on the down arrow and then on the
+// ⋯, each circle is smaller while the finger is down and whole again once it lifts.
+- (void)headerDown:(UIControl *)control {
+    _headerDowns++;
+}
+
+- (void)runHeaderChecks {
+    __block NSUInteger right = 0, checks = 0;
+    void (^check)(NSString *, BOOL, NSString *) = ^(NSString *step, BOOL ok, NSString *detail) {
+        checks++;
+        if (ok) right++;
+        NSLog(@"[harness] header %@: %@ -- %@", step, detail, ok ? @"ok" : @"WRONG");
+    };
+    UIView *header = _units.firstObject.view;
+    NSMutableArray<UIView *> *buttons = [NSMutableArray array];
+    for (UIView *view in header.subviews) if ([view isKindOfClass:MockEncoreButton.class]) [buttons addObject:view];
+    check(@"buttons", buttons.count == 2, [NSString stringWithFormat:@"%lu Encore buttons in the header", (unsigned long)buttons.count]);
+    __block NSUInteger i = 0;
+    __block void (^next)(void);
+    next = ^{
+        if (i == buttons.count) {
+            NSLog(@"[harness] header checks: %lu of %lu right -- %@", (unsigned long)right, (unsigned long)checks, right == checks ? @"PASS" : @"FAIL");
+            next = nil;
+            return;
+        }
+        UIView *button = buttons[i++];
+        NSString *name = button.accessibilityIdentifier;
+        UIView *circle = button.subviews.firstObject;
+        check(name, [circle isKindOfClass:UIVisualEffectView.class] && circle.bounds.size.width == 44, [NSString stringWithFormat:@"a 44pt glass circle first in it (%@)", NSStringFromClass(circle.class)]);
+        CGPoint middle = [button convertPoint:CGPointMake(CGRectGetMidX(button.bounds), CGRectGetMidY(button.bounds)) toView:nil];
+        check(name, [self.window hitTest:middle withEvent:nil] == button, @"a touch at its middle lands on the button");
+        [(UIControl *)button addTarget:self action:@selector(headerDown:) forControlEvents:UIControlEventTouchDown];
+        SGHarnessHold(self.window, middle, 0.5);
+        after(0.4, ^{
+            CGFloat scale = circle.transform.a;
+            check(name, scale < 0.95, [NSString stringWithFormat:@"its circle pressed in while the finger is down (scale %.2f, touch down events %lu, tracking %d)", scale, (unsigned long)self->_headerDowns, ((UIControl *)button).tracking]);
+        });
+        after(1.2, ^{
+            CGFloat scale = [[circle.layer.presentationLayer valueForKeyPath:@"transform.scale.x"] doubleValue];
+            check(name, fabs(scale - 1) < 0.01 && CGAffineTransformIsIdentity(circle.transform), [NSString stringWithFormat:@"and whole again once it lifts (scale %.2f)", scale]);
+            next();
+        });
+    };
+    after(2, next);
+}
+
 - (void)runLook {
     UIImage *second = secondArtwork();
     // Issue #54: the footer row moved down past the bottom stack's bounds must still take its touches,
@@ -1022,220 +1811,43 @@ static UIView *viewOfClass(UIView *root, NSString *name);
     after(8.4, ^{ [self showOnScreen:second]; });
 }
 
-#pragma mark - taps
-
-static UIView *findView(UIView *root, BOOL (^match)(UIView *view)) {
-    NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:root];
-    while (queue.count) {
-        UIView *view = queue.firstObject;
-        [queue removeObjectAtIndex:0];
-        if (match(view)) return view;
-        [queue addObjectsFromArray:view.subviews];
-    }
-    return nil;
-}
-
-static UIView *viewOfClass(UIView *root, NSString *name) {
-    return findView(root, ^BOOL(UIView *view) { return [NSStringFromClass(view.class) isEqualToString:name]; });
-}
-
-static UIView *viewWithIdentifier(UIView *root, NSString *identifier) {
-    return findView(root, ^BOOL(UIView *view) { return [view.accessibilityIdentifier isEqualToString:identifier]; });
-}
-
-- (void)expect:(BOOL)ok that:(NSString *)what {
-    _checks++;
-    if (!ok) _failures++;
-    NSLog(@"[harness] check: %@ -- %@", what, ok ? @"ok" : @"WRONG");
-}
-
-- (UISlider *)slider {
-    return (UISlider *)viewWithIdentifier(self.window, @"SPTNowPlayingSliderV2");
-}
-
-// Where the thumb's middle is at `value`, on the bar's line or `dy` from it, in the window.
-- (CGPoint)onBarAt:(float)value dy:(CGFloat)dy {
-    UISlider *slider = [self slider];
-    CGRect track = [slider trackRectForBounds:slider.bounds];
-    CGRect thumb = [slider thumbRectForBounds:slider.bounds trackRect:track value:value];
-    return [slider convertPoint:CGPointMake(CGRectGetMidX(thumb), CGRectGetMidY(track) + dy) toView:self.window];
-}
-
-// Once the slider has let go of its own touch, or after two seconds.
-- (void)whenSettled:(dispatch_block_t)block {
-    __block NSInteger polls = 0;
-    __block void (^poll)(void);
-    __weak __block void (^weakPoll)(void);
-    poll = ^{
-        if ([self slider].isTracking && polls++ < 40) {
-            after(0.05, weakPoll);
-            return;
-        }
-        after(0.1, block);
-    };
-    weakPoll = poll;
-    poll();
-}
-
-- (CGPoint)middleOf:(UIView *)view {
-    return [view convertPoint:CGPointMake(CGRectGetMidX(view.bounds), CGRectGetMidY(view.bounds)) toView:self.window];
-}
-
-- (NSString *)lyricsGlyph {
-    SGRGlyphButton *glyph = (SGRGlyphButton *)viewOfClass(self.window, @"SGRGlyphButton");
-    return glyph.glyph.symbol;
-}
-
-// A tap on the bar at `value`, `dy` from its line: the unit hears one drag, the thumb is there at once and
-// stays there while the song plays on from it.
-- (void)tapBarAt:(float)value dy:(CGFloat)dy named:(NSString *)name {
-    SGRHarnessProgressUnit *unit = _progress;
-    NSUInteger began = unit.began, ended = unit.ended, lines = SGRHarnessLineSeeks();
-    UIView *hit = SGRHarnessTap(self.window, [self onBarAt:value dy:dy], ^{
-        float now = [self slider].value;
-        [self expect:unit.began == began + 1 && unit.ended == ended + 1 && fabsf(unit.lastSeek - value) < 0.01
-                that:[NSString stringWithFormat:@"%@: the unit heard one drag to %.3f (began +%lu, ended +%lu, seek %.3f)", name, value,
-                      (unsigned long)(unit.began - began), (unsigned long)(unit.ended - ended), unit.lastSeek]];
-        [self expect:fabsf(now - value) < 0.01 that:[NSString stringWithFormat:@"%@: the thumb is at %.3f at once", name, now]];
-        [self expect:SGRHarnessLineSeeks() == lines that:[NSString stringWithFormat:@"%@: no line seeked", name]];
-        after(0.6, ^{
-            float later = [self slider].value;
-            [self expect:later > value - 0.002 && later < value + 0.03
-                    that:[NSString stringWithFormat:@"%@: no jump back, %.3f 0.6 s later", name, later]];
-        });
-    });
-    NSLog(@"[harness] %@ landed on %@", name, NSStringFromClass(hit.class));
-}
-
-// A tap that must not seek.
-- (void)tapAt:(CGPoint)point named:(NSString *)name {
-    SGRHarnessProgressUnit *unit = _progress;
-    NSUInteger ended = unit.ended, skips = SGRHarnessSkipTaps();
-    __block UIView *hit = nil;
-    hit = SGRHarnessTap(self.window, point, ^{
-        after(0.2, ^{
-            [self expect:unit.ended == ended && SGRHarnessSkipTaps() == skips
-                    that:[NSString stringWithFormat:@"%@ (on %@): no seek", name, NSStringFromClass(hit.class)]];
-        });
-    });
-}
-
-- (void)runTaps {
-    UIWindow *window = self.window;
-    SGRHarnessProgressUnit *unit = _progress;
-    after(1.5, ^{ [self tapBarAt:0.7 dy:0 named:@"1 tap on the bar"]; });
-    after(2.5, ^{ [self tapBarAt:0.3 dy:-15 named:@"2 tap 15pt above the bar"]; });
-    after(3.3, ^{
-        NSUInteger flipped = unit.flipped;
-        [self tapAt:[self middleOf:unit.remaining] named:@"3 tap on the remaining time"];
-        after(0.3, ^{ [self expect:unit.flipped == flipped + 1 that:@"3 the remaining time took its own tap"]; });
-    });
-    after(3.9, ^{
-        CGRect controls = [self->_controlsView convertRect:self->_controlsView.bounds toView:window];
-        [self tapAt:CGPointMake(CGRectGetMidX(controls) - 70, CGRectGetMinY(controls) + 6) named:@"4 tap on the controls row"];
-    });
-    after(4.4, ^{
-        UIView *title = viewWithIdentifier(window, @"now-playing-title-label");
-        [self tapAt:[self middleOf:title] named:@"5 tap on the title"];
-    });
-    // The thumb's own drag, as before: the seeks are the slider's, none a tap's. The iOS 26 slider lets
-    // go only once its thumb has settled, so the checks wait for that.
-    after(5.0, ^{
-        NSUInteger ended = unit.ended, skips = SGRHarnessSkipTaps();
-        float from = [self slider].value;
-        SGRHarnessDrag(window, [self onBarAt:from dy:0], [self onBarAt:0.6 dy:0], 0.5, ^{
-            [self whenSettled:^{
-                [self expect:unit.ended > ended && fabsf(unit.lastSeek - [self slider].value) < 0.02f && SGRHarnessSkipTaps() == skips
-                        that:[NSString stringWithFormat:@"6 the thumb dragged from %.3f: its own seek to %.3f (+%lu), no tap", from,
-                              unit.lastSeek, (unsigned long)(unit.ended - ended)]];
-            }];
-        });
-    });
-    // A tap on the thumb itself is the slider's, as it always was: no tap to seek.
-    after(7.4, ^{
-        NSUInteger skips = SGRHarnessSkipTaps();
-        float at = [self slider].value + 0.005;
-        SGRHarnessTap(window, [self onBarAt:at dy:0], ^{
-            after(0.2, ^{
-                [self expect:SGRHarnessSkipTaps() == skips that:[NSString stringWithFormat:@"7 tap on the thumb at %.3f: left to the slider", at]];
-            });
-        });
-    });
-
-    after(8.8, ^{ SGRPlayerToggleLyrics(); });
-    after(10.0, ^{
-        [self expect:SGRPlayerLyricsOpen() && [[self lyricsGlyph] isEqualToString:@"quote.bubble.fill"]
-                that:[NSString stringWithFormat:@"8 lyrics up, the footer glyph %@", [self lyricsGlyph]]];
-        [self tapBarAt:0.5 dy:0 named:@"9 tap on the bar with the lyrics up"];
-    });
-    after(10.9, ^{
-        UIView *star = viewWithIdentifier(window, @"Components.UI.AddToButton");
-        UIView *hit = [window hitTest:[self middleOf:star] withEvent:nil];
-        [self expect:[hit isDescendantOfView:star] that:@"10 the add button beside the thumbnail still takes its touch"];
-        UIView *lines = viewOfClass(window, @"SGRKaraokeView");
-        CGRect band = [lines convertRect:UIEdgeInsetsInsetRect(lines.bounds, [[lines valueForKey:@"lineInsets"] UIEdgeInsetsValue]) toView:window];
-        NSUInteger seeks = SGRHarnessLineSeeks();
-        SGRHarnessTap(window, CGPointMake(CGRectGetMidX(band), CGRectGetMinY(band) + band.size.height * 0.35), ^{
-            [self expect:SGRHarnessLineSeeks() == seeks + 1 that:@"11 a tap on a line seeks"];
-        });
-    });
-    // The thumbnail held, then let go: the cover comes back and the glyph follows.
-    after(11.8, ^{
-        UIView *thumb = viewOfClass(window, @"SGRPlayerLyricsThumb");
-        NSUInteger ended = unit.ended, lines = SGRHarnessLineSeeks();
-        UIView *hit = SGRHarnessPress(window, [self middleOf:thumb], 0.5, ^{
-            after(0.6, ^{
-                [self expect:!SGRPlayerLyricsOpen() && [[self lyricsGlyph] isEqualToString:@"quote.bubble"]
-                        && unit.ended == ended && SGRHarnessLineSeeks() == lines
-                        that:[NSString stringWithFormat:@"12 the thumbnail tapped: lyrics %@, the footer glyph %@", SGRPlayerLyricsOpen() ? @"UP" : @"away", [self lyricsGlyph]]];
-            });
-        });
-        NSLog(@"[harness] 12 the press landed on %@, the thumbnail says %@ (%@)", NSStringFromClass(hit.class), thumb.accessibilityLabel,
-              thumb.accessibilityTraits & UIAccessibilityTraitButton ? @"a button" : @"NOT A BUTTON");
-    });
-    // Alone, the thumbnail's spot only brings the controls back.
-    after(14.4, ^{ SGRPlayerToggleLyrics(); });
-    after(20.2, ^{
-        UIView *stack = viewWithIdentifier(window, @"npv.bottomStackView");
-        UIView *thumb = viewOfClass(window, @"SGRPlayerLyricsThumb");
-        [self expect:SGRPlayerLyricsOpen() && stack.alpha < 0.01 && thumb.alpha < 0.01
-                that:[NSString stringWithFormat:@"13 the lines alone (stack %.2f, thumbnail %.2f)", stack.alpha, thumb.alpha]];
-        NSUInteger lines = SGRHarnessLineSeeks(), ended = unit.ended;
-        UIView *hit = SGRHarnessTap(window, [self middleOf:thumb], ^{
-            after(0.5, ^{
-                [self expect:SGRPlayerLyricsOpen() && stack.alpha > 0.99 && SGRHarnessLineSeeks() == lines && unit.ended == ended
-                        that:[NSString stringWithFormat:@"14 a tap on the faded thumbnail: lyrics %@, controls %.2f, no seek", SGRPlayerLyricsOpen() ? @"still up" : @"CLOSED", stack.alpha]];
-            });
-        });
-        NSLog(@"[harness] 14 the tap landed on %@", NSStringFromClass(hit.class));
-    });
-    after(21.6, ^{
-        UIView *thumb = viewOfClass(window, @"SGRPlayerLyricsThumb");
-        SGRHarnessTap(window, [self middleOf:thumb], ^{
-            after(0.6, ^{ [self expect:!SGRPlayerLyricsOpen() that:@"15 the thumbnail, back with the controls, puts the cover back"]; });
-        });
-    });
-    after(23, ^{
-        NSLog(@"[harness] tap checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
-              self->_failures ? @"FAIL" : @"PASS");
-    });
-}
-
 @end
 
 // Before every %ctor, so the redesign's gate reads on, and every session gets the picture server.
 __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
-    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
-    [store setBool:YES forKey:@"spotifyglass.redesign"];
-    for (NSString *key in store.dictionaryRepresentation.allKeys) {
-        if ([key hasPrefix:@"spotifyglass.redesign.player."]) [store removeObjectForKey:key];
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"spotifyglass.redesign"];
+    // Animated artwork, its clip served by the picture server to the shared session too.
+    if ([scenario() isEqualToString:@"visualiser"]) [NSUserDefaults.standardUserDefaults setInteger:4 forKey:@"spotifyglass.redesign.player.background"];
+    // Still at launch, so the player looks up no clip; an address of this run's own, so the store has none of it yet.
+    if ([scenario() isEqualToString:@"preview"]) {
+        [NSUserDefaults.standardUserDefaults setInteger:0 forKey:@"spotifyglass.redesign.player.background"];
+        setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/preview-%d.mp4", getpid()].UTF8String, 1);
+        setenv("HARNESS_CANVAS_DELAY", "2", 1);
+        [NSURLProtocol registerClass:SGRHarnessPictureServer.class];
     }
-    const char *background = getenv("HARNESS_BACKGROUND"), *oldBackground = getenv("HARNESS_OLD_BACKGROUND"),
-               *oldMotion = getenv("HARNESS_OLD_MOTION");
-    if (!background && [scenario() isEqualToString:@"animated"]) background = "1";
-    if (background) [store setInteger:atoi(background) forKey:SGRKeyPlayerBackground];
-    if (oldBackground) [store setInteger:atoi(oldBackground) forKey:SGRKeyPlayerBackgroundWas];
-    if (oldMotion) [store setBool:atoi(oldMotion) != 0 forKey:SGRKeyPlayerMotionWas];
+    // card: HARNESS_BACKGROUND (an index, Fluid if unset), and with HARNESS_LAST=1 a last track played whose cover is
+    // the picture server's first picture; without it, no track ever played.
+    if ([scenario() isEqualToString:@"card"]) {
+        NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+        const char *background = getenv("HARNESS_BACKGROUND");
+        [store setInteger:background ? atoi(background) : 2 forKey:@"spotifyglass.redesign.player.background"];
+        if (getenv("HARNESS_LAST")) {
+            [store setObject:@{@"uri": @"spotify:track:last", @"title": @"Holocene, the Long Version Recorded Live at the Old Church",
+                               @"artist": @"Bon Iver", @"artwork": [@"https://i.scdn.co/image/" stringByAppendingString:[imageURI(@"aaaa") substringFromIndex:14]],
+                               @"canvas": [NSString stringWithFormat:@"https://canvas.harness/last-%d.mp4", getpid()]}
+                      forKey:@"spotifyglass.lastTrack"];
+        } else {
+            [store removeObjectForKey:@"spotifyglass.lastTrack"];
+        }
+        [NSURLProtocol registerClass:SGRHarnessPictureServer.class];
+    }
+    // The shared session the catalog asks with.
+    if ([scenario() isEqualToString:@"catalog"]) [NSURLProtocol registerClass:SGRHarnessPictureServer.class];
+    if ([scenario() isEqualToString:@"motion"] || [scenario() isEqualToString:@"settings"]) {
+        [NSUserDefaults.standardUserDefaults setInteger:3 forKey:@"spotifyglass.redesign.player.background"];
+        setenv("HARNESS_CANVAS", "https://canvas.harness/clip.mp4", 1);
+        [NSURLProtocol registerClass:SGRHarnessPictureServer.class];
+    }
     Method original = class_getClassMethod(NSURLSessionConfiguration.class, @selector(defaultSessionConfiguration));
     Method harness = class_getClassMethod(NSURLSessionConfiguration.class, @selector(sgr_harnessDefault));
     method_exchangeImplementations(original, harness);

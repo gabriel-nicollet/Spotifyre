@@ -1,4 +1,4 @@
-// Full screen player: glass where Liquid Glass belongs and nowhere else, and the album colour
+// Full screen player: glass where Liquid Glass belongs and nowhere else, and the album color
 // behind it traded for the cover art.
 //
 // Glass is the navigation layer floating over content, so only the header's two round buttons get
@@ -11,10 +11,10 @@
 // Tree (trees/now-playing.txt): NowPlaying_ModesImpl units, each a child controller whose view
 // holds one UIStackView row; the header row is chevron 48x48, playlist name 110x48, more 48x48.
 //
-// The background is one plane the size of the screen painted the album colour, Spotify's gradients
+// The background is one plane the size of the screen painted the album color, Spotify's gradients
 // on top of it, and it is NPVBackgroundViewController's own view. Glass over a flat fill samples
 // that same flat fill back, which is why the header panes cannot be made out on it; white text and
-// Spotify's green both sit badly on saturated colour as well. SGKeyPlayerBackdrop strips the plane
+// Spotify's green both sit badly on saturated color as well. SGKeyPlayerBackdrop strips the plane
 // and puts the cover behind the player instead, shrunk until none of the picture is left in it,
 // blurred, under a scrim ending near black so the cards scrolled up from below meet it. The switch
 // covers what that field changes around it too: the artwork takes corners and a shadow so it sits
@@ -160,7 +160,14 @@ static UIView *backdropIn(UIView *plane) {
     tilt.layer.shadowOpacity = 0.45;
     tilt.layer.shadowRadius = 32;
     tilt.layer.shadowOffset = CGSizeMake(0, 12);
-    tilt.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:tilt.bounds cornerRadius:kArtRadius].CGPath;
+    // A path made once per size, kept while the layer still holds that very path: one Spotify sets is replaced.
+    static char kShadowPathKey;
+    CGPathRef path = tilt.layer.shadowPath;
+    if (!path || path != (__bridge CGPathRef)objc_getAssociatedObject(tilt, &kShadowPathKey)
+        || !CGRectEqualToRect(CGPathGetBoundingBox(path), tilt.bounds)) {
+        tilt.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:tilt.bounds cornerRadius:kArtRadius].CGPath;
+        objc_setAssociatedObject(tilt, &kShadowPathKey, (__bridge id)tilt.layer.shadowPath, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
 }
 %end
 

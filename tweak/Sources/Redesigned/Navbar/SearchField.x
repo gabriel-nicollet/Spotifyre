@@ -5,7 +5,7 @@
 // shared app-wide, so the identifier names the one instance the page owns, with a wide light button
 // as the fallback for a build that stops setting it.
 //
-// Two things about the colours. The glyph is an SPTEncoreIconView, which bakes its colour into what
+// Two things about the colors. The glyph is an SPTEncoreIconView, which bakes its color into what
 // it draws, so tintColor never reaches it and setForegroundColor: is the way in. And coming back
 // from the full screen search (trees/search opened.txt, a page of its own that this leaves alone)
 // Spotify configures the field for a white background again, black glyph and black text, after the

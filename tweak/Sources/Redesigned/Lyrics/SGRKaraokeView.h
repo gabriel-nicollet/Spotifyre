@@ -9,16 +9,25 @@
 #import "Shared/Lyrics/Lyrics.h"
 
 @interface SGRKaraokeView : UIView
+// The Lyrics page's preview: `lines` played on a clock of its own, round and round every `length` ms, in
+// the look the page sets. It takes no touches and asks nothing of the player, the sources, Genius or Sing.
+- (instancetype)initWithSampleLines:(NSArray<SGKaraokeLine *> *)lines length:(NSInteger)length;
 // Hides Spotify's own lyrics next to this view while it has lyrics to show, and brings them back when not.
 - (void)syncSiblings;
-// The part of the view the lines are shown in, as insets from its edges (only top and bottom are
-// read): the sung line rests in it, the lines fade out at its ends, the credit sits at its foot, and a
-// touch outside it goes through the view. Zero, the whole view, unless set. The player lays the view
-// over all of itself and moves these as its controls come and go (Redesigned/Player/PlayerLyrics.x).
-@property (nonatomic, readonly) UIEdgeInsets lineInsets;
-// duration 0 moves everything at once.
-- (void)setLineInsets:(UIEdgeInsets)insets duration:(NSTimeInterval)duration;
-// Asked as a tap lands on the lines, before it seeks or opens what a line means; NO leaves the tap to
-// whoever else watches the touch. Nil takes every tap.
-@property (nonatomic, copy) BOOL (^takesTap)(void);
+// Called as a finger starts to scroll the lines, for a host that hides its controls then. `onward` is a finger
+// moving up, toward the lines still to come.
+@property (nonatomic, copy) void (^browsingBegan)(BOOL onward);
+// The pronunciation and translation button goes with the host's controls when they are hidden, and Sing's
+// mic with it unless keepsSing is set.
+@property (nonatomic) BOOL extrasHidden;
+// The mic stays when the extras go, for a host that lets it take its own touches while its controls are
+// hidden (the player's lines on their own, Redesigned/Player/PlayerLyrics.x), so Sing is always in reach.
+@property (nonatomic) BOOL keepsSing;
+// How far down a tap on the lines seeks, from the view's top; 0 is all the way. Below it, and above
+// seeksBelow, the tap is the host's (the player's lines on their own, over the controls that faded).
+@property (nonatomic) CGFloat seeksAbove;
+@property (nonatomic) CGFloat seeksBelow;
+// Whether a tap at point, in the view, seeks: on a timed line, inside the seeking band, and not on the credit
+// or a line's explain bubble.
+- (BOOL)tapSeeksAt:(CGPoint)point;
 @end

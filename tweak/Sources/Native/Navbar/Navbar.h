@@ -8,10 +8,14 @@
 extern NSString *const SGNavbarID;      // NSString, the entry's identity
 extern NSString *const SGNavbarTitle;   // NSString, the name in the settings list and under the icon
 extern NSString *const SGNavbarURI;     // NSString, the mod's own tabs only: what a tap opens
-extern NSString *const SGNavbarIcon;    // NSString, an SPTEncoreIcon method or `sf:<symbol>`
+extern NSString *const SGNavbarIcon;    // NSString, an SPTEncoreIcon class method such as "podcasts", or an SF Symbol
+extern NSString *const SGNavbarIconSet; // NSString, SGTabIconSetSymbols when the icon is an SF Symbol; none is Encore
 extern NSString *const SGNavbarHidden;  // NSNumber
 NSArray<NSDictionary *> *SGNavbarLayout(void);
 void SGSetNavbarLayout(NSArray<NSDictionary *> *layout);
+// The tabs set apart at the trailing end of the bar (Split tabs), by their entries' identities.
+NSArray<NSString *> *SGNavbarSplit(void);
+void SGSetNavbarSplit(NSArray<NSString *> *split);
 // Spotify's own tabs in Spotify's order, as Navbar.x last saw them on the bar.
 NSArray<NSString *> *SGNavbarStock(void);
 void SGSetNavbarStock(NSArray<NSString *> *stock);

@@ -23,7 +23,8 @@ static const CFTimeInterval kLongFrame = 0.1;
 static const NSUInteger kLongFramesDescribed = 5;
 
 // Section sizing includes Spotify's own measuring of the cell, which the hook calls through.
-static const char *const kProbeNames[SGRHomeProbeCount] = {"section sizing", "header", "headings", "cards", "tiles"};
+static const char *const kProbeNames[SGRHomeProbeCount] = {"section sizing", "header", "headings", "cards", "tiles",
+    "labels", "labels matched", "indicator shown", "list attrs", "shelf layout", "large card", "tint asks", "feed model"};
 static NSUInteger sg_calls[SGRHomeProbeCount];
 static CFTimeInterval sg_time[SGRHomeProbeCount];
 static __weak UIScrollView *sg_list;
@@ -33,6 +34,57 @@ static BOOL probing(void) {
     static int state = -1;
     if (state < 0) state = SGIsDebugBuild() ? 1 : 0;
     return state == 1;
+}
+
+// Home at rest: once a second, the calls and time of each hook since the last line, the list's layouts and the
+// frames the display link saw late, logged only for a second in which any of them happened. A Home that is
+// still and quiet logs nothing, which is the proof that nothing fires at rest (`make log | grep "home perf/s"`).
+// Off unless asked for: its display link holds the screen at up to 120 Hz while Spotify is open
+// (scripts/phone.py pref --key spotifyglass.redesign.debug.homeRestMeter --value 1, then relaunch).
+static NSUInteger sg_restFrames, sg_restHitches, sg_listLayouts;
+static CFTimeInterval sg_restLast;
+@interface SGRHomeRestMeter : NSObject
+@end
+@implementation SGRHomeRestMeter
+- (void)tick:(CADisplayLink *)link {
+    CFTimeInterval expected = link.targetTimestamp - link.timestamp;
+    if (sg_restLast > 0 && expected > 0) {
+        sg_restFrames++;
+        if (link.timestamp - sg_restLast > expected * 1.5) sg_restHitches++;
+    }
+    sg_restLast = link.timestamp;
+}
+@end
+static void startRestMeter(void) {
+    static dispatch_source_t timer;
+    static NSUInteger calls[SGRHomeProbeCount];
+    static CFTimeInterval time[SGRHomeProbeCount];
+    static SGRHomeRestMeter *meter;
+    if (timer || !SGFlag(@"spotifyglass.redesign.debug.homeRestMeter", NO)) return;
+    meter = [SGRHomeRestMeter new];
+    CADisplayLink *link = [CADisplayLink displayLinkWithTarget:meter selector:@selector(tick:)];
+    if (@available(iOS 15.0, *)) link.preferredFrameRateRange = CAFrameRateRangeMake(80, 120, 120);
+    [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 20);
+    dispatch_source_set_event_handler(timer, ^{
+        NSMutableString *line = [NSMutableString string];
+        CFTimeInterval total = 0;
+        for (NSUInteger i = 0; i < SGRHomeProbeCount; i++) {
+            NSUInteger n = sg_calls[i] - calls[i];
+            CFTimeInterval t = sg_time[i] - time[i];
+            calls[i] = sg_calls[i];
+            time[i] = sg_time[i];
+            total += t;
+            if (n) [line appendFormat:@" %s %lu/%.2fms", kProbeNames[i], (unsigned long)n, t * 1000];
+        }
+        if (line.length || sg_restHitches || sg_listLayouts) {
+            SGLog(@"home perf/s: frames %lu hitches %lu list layouts %lu hooks %.2f ms%@", (unsigned long)sg_restFrames,
+                  (unsigned long)sg_restHitches, (unsigned long)sg_listLayouts, total * 1000, line.length ? line : @" (none)");
+        }
+        sg_restFrames = sg_restHitches = sg_listLayouts = 0;
+    });
+    dispatch_resume(timer);
 }
 
 CFTimeInterval SGRHomeProbeBegin(void) {
@@ -166,6 +218,7 @@ static BOOL isHomeTab(UIViewController *page) {
     }
     if (!sg_list) return;
     SGLog(@"home perf: measuring the scrolls of %@", NSStringFromClass(sg_list.class));
+    startRestMeter();
     // The lag reported came in the first half minute after launch, scrolling or not.
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGHangSamplerStart(@"after launch", 90); });
@@ -177,6 +230,7 @@ static BOOL isHomeTab(UIViewController *page) {
 - (void)layoutSubviews {
     %orig;
     if ((UIView *)self != sg_list) return;
+    sg_listLayouts++;
     if (!sg_meter) sg_meter = [SGRHomeScrollMeter new];
     [sg_meter watch:(UIScrollView *)self];
 }

@@ -1,0 +1,25 @@
+{"os":"27.0","scope":"simulator native decoding only; no Spotify playback","test":"environment"}
+{"bits":0,"channels":2,"file":"cd.flac","formatID":1718378851,"framesPerPacket":1024,"inputBytes":350832,"packetBytes":342072,"packets":516,"rate":44100,"ready":true,"status":0,"test":"incremental-parser"}
+{"cookieStatus":0,"file":"cd.flac","frames":528384,"maxError":1.5255911489695016e-05,"status":0,"test":"parsed-packet-decode"}
+{"clientRate":44100,"decodeSeconds":0.0094369649887084961,"energy":2645.9880860298872,"file":"cd.flac","frames":529200,"seekFrames":1024,"seekMaxError":1.5246675121477912e-05,"seekStatus":0,"sourceBits":0,"sourceRate":44100,"status":0,"test":"local-decode-seek"}
+{"clientRate":44100,"decodeSeconds":0.009144902229309082,"energy":2645.9880860298872,"file":"cd.flac","frames":529200,"seekFrames":1024,"seekMaxError":1.5246675121477912e-05,"seekStatus":0,"sourceBits":0,"sourceRate":44100,"status":0,"test":"local-decode-seek"}
+{"error":"","errorCode":0,"errorDomain":"","file":"cd.flac","firstPTS":3.1249886621315195,"frames":44101,"loadStatus":2,"rate":44100,"readerStatus":2,"remote":0,"started":true,"test":"asset-reader"}
+{"error":"Operation Stopped","errorCode":-11838,"errorDomain":"AVFoundationErrorDomain","file":"cd.flac","firstPTS":-1,"frames":0,"loadStatus":2,"rate":0,"readerStatus":0,"remote":1,"started":false,"test":"asset-reader"}
+{"bits":0,"channels":2,"file":"hires.flac","formatID":1718378851,"framesPerPacket":1024,"inputBytes":2016400,"packetBytes":2006388,"packets":1124,"rate":96000,"ready":true,"status":0,"test":"incremental-parser"}
+{"cookieStatus":0,"file":"hires.flac","frames":1150976,"maxError":1.1897570397146673e-07,"status":0,"test":"parsed-packet-decode"}
+{"clientRate":96000,"decodeSeconds":0.02408301830291748,"energy":5759.9999065709244,"file":"hires.flac","frames":1152000,"seekFrames":1024,"seekMaxError":1.1895324905609224e-07,"seekStatus":0,"sourceBits":0,"sourceRate":96000,"status":0,"test":"local-decode-seek"}
+{"clientRate":44100,"decodeSeconds":0.024996042251586914,"energy":2645.8942000093202,"file":"hires.flac","frames":529200,"seekFrames":1024,"seekMaxError":null,"seekStatus":0,"sourceBits":0,"sourceRate":96000,"status":0,"test":"local-decode-seek"}
+{"error":"","errorCode":0,"errorDomain":"","file":"hires.flac","firstPTS":3.125,"frames":96000,"loadStatus":2,"rate":96000,"readerStatus":2,"remote":0,"started":true,"test":"asset-reader"}
+{"error":"Operation Stopped","errorCode":-11838,"errorDomain":"AVFoundationErrorDomain","file":"hires.flac","firstPTS":-1,"frames":0,"loadStatus":2,"rate":0,"readerStatus":0,"remote":1,"started":false,"test":"asset-reader"}
+{"bits":0,"channels":0,"file":"alac.m4a","formatID":0,"framesPerPacket":0,"inputBytes":257,"packetBytes":0,"packets":0,"rate":0,"ready":false,"status":1869640813,"test":"incremental-parser"}
+{"clientRate":48000,"decodeSeconds":0.018272042274475098,"energy":2879.9999679101998,"file":"alac.m4a","frames":576000,"seekFrames":1024,"seekMaxError":1.189455438024583e-07,"seekStatus":0,"sourceBits":0,"sourceRate":48000,"status":0,"test":"local-decode-seek"}
+{"clientRate":44100,"decodeSeconds":0.016273975372314453,"energy":2646.0126319793831,"file":"alac.m4a","frames":529200,"seekFrames":1024,"seekMaxError":null,"seekStatus":0,"sourceBits":0,"sourceRate":48000,"status":0,"test":"local-decode-seek"}
+{"error":"","errorCode":0,"errorDomain":"","file":"alac.m4a","firstPTS":3.125,"frames":48000,"loadStatus":2,"rate":48000,"readerStatus":2,"remote":0,"started":true,"test":"asset-reader"}
+{"error":"Operation Stopped","errorCode":-11838,"errorDomain":"AVFoundationErrorDomain","file":"alac.m4a","firstPTS":-1,"frames":0,"loadStatus":2,"rate":0,"readerStatus":0,"remote":1,"started":false,"test":"asset-reader"}
+{"bits":0,"channels":2,"file":"alac-fast.m4a","formatID":1634492771,"framesPerPacket":4096,"inputBytes":1591403,"packetBytes":1590089,"packets":141,"rate":48000,"ready":true,"status":0,"test":"incremental-parser"}
+{"cookieStatus":0,"file":"alac-fast.m4a","frames":576000,"maxError":1.1897183664903324e-07,"status":0,"test":"parsed-packet-decode"}
+{"clientRate":48000,"decodeSeconds":0.014691948890686035,"energy":2879.9999679101998,"file":"alac-fast.m4a","frames":576000,"seekFrames":1024,"seekMaxError":1.189455438024583e-07,"seekStatus":0,"sourceBits":0,"sourceRate":48000,"status":0,"test":"local-decode-seek"}
+{"clientRate":44100,"decodeSeconds":0.016265988349914551,"energy":2646.0126319793831,"file":"alac-fast.m4a","frames":529200,"seekFrames":1024,"seekMaxError":null,"seekStatus":0,"sourceBits":0,"sourceRate":48000,"status":0,"test":"local-decode-seek"}
+{"error":"","errorCode":0,"errorDomain":"","file":"alac-fast.m4a","firstPTS":3.125,"frames":48000,"loadStatus":2,"rate":48000,"readerStatus":2,"remote":0,"started":true,"test":"asset-reader"}
+{"error":"Operation Stopped","errorCode":-11838,"errorDomain":"AVFoundationErrorDomain","file":"alac-fast.m4a","firstPTS":-1,"frames":0,"loadStatus":2,"rate":0,"readerStatus":0,"remote":1,"started":false,"test":"asset-reader"}
+{"test":"complete"}

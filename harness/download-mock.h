@@ -8,7 +8,7 @@
 // properties the runtime lists by name. The mock has the same names and the same layout.
 //
 // Shuffle marks "on" with a 4pt round view under its glyph that it hides while off (trees/continuous/1.txt),
-// and draws its glyph grey while off, green while on.
+// and draws its glyph gray while off, green while on.
 //
 // `download` on the launch line runs downloadScript(): none, waiting, downloading 0 to 100%, downloaded,
 // shuffle on, removed and shuffle off, error -- each held a few seconds and logged, for screenshots.

@@ -94,7 +94,7 @@ static const CGFloat kMinTouch = 44, kPressAlpha = 0.5, kPressScale = 0.9, kDisa
     _glyph.center = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
 }
 
-// However small the frame it is given, a touch 44pt around its centre counts.
+// However small the frame it is given, a touch 44pt around its center counts.
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     CGRect bounds = self.bounds;
     CGFloat dx = MAX(0, (kMinTouch - bounds.size.width) / 2), dy = MAX(0, (kMinTouch - bounds.size.height) / 2);

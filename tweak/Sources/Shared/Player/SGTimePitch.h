@@ -12,11 +12,6 @@
 // Measured on the Mac (harness/pitch): the pitch exact to 0.01% at any rate, the rate exact in frames
 // consumed, about 0.2% of a core, and the sound 4096 frames (93 ms at 44.1 kHz) later than it went in.
 //
-// Made as a varispeed instead (SGTimePitchCreateVarispeed), it is Apple's varispeed unit (AUVarispeed),
-// which plays its input faster or slower the way a record does, the pitch going with the speed: it
-// resamples rather than stretches, so none of the time and pitch unit's smearing is heard. Pull mode
-// only, and its semitones are the rate's (SGTimePitchSetSemitones does nothing to it).
-//
 // Plain C over audio units: SGTimePitchRender and SGTimePitchProcess run on Core Audio's render
 // thread, so they never allocate, lock, log or send a message. The rest is for any other thread.
 // Compiles on the Mac as is.
@@ -34,17 +29,27 @@ typedef OSStatus (*SGTimePitchSource)(void *context, UInt32 frames, AudioBufferL
 // frames. With a source it pulls from it, without one it works in place. NULL when the unit could not be
 // made. Not on the render thread.
 SGTimePitch *SGTimePitchCreate(double sampleRate, UInt32 channels, SGTimePitchSource source, void *context);
-// The varispeed: the same, but pull mode only, so NULL without a source.
-SGTimePitch *SGTimePitchCreateVarispeed(double sampleRate, UInt32 channels, SGTimePitchSource source, void *context);
-bool SGTimePitchIsVarispeed(const SGTimePitch *unit);
 double SGTimePitchSampleRate(const SGTimePitch *unit);
 UInt32 SGTimePitchChannels(const SGTimePitch *unit);
 
-// Any thread, taking effect with the next buffer. Rate 1 is normal speed (0.25...4); semitones up or down.
+// Any thread, taking effect with the next buffer (a change of unit waits for SGTimePitchReset, below). Rate
+// 1 is normal speed (0.25...4); semitones up or down.
 void SGTimePitchSetRate(SGTimePitch *unit, float rate);
 void SGTimePitchSetSemitones(SGTimePitch *unit, float semitones);
 
-// Forgets the sound held, so the next buffer starts over from silence. Only while nothing renders.
+// Pull mode only: the speed done by resampling (Apple's Varispeed) instead of the time stretch, so a rate
+// over 1 also plays higher, like a record, without the stretch's smearing. Any thread. While following,
+// Varispeed renders at rate 1 too (passing the sound through), so a return to normal speed changes nothing;
+// the time and pitch unit renders only pitch alone at rate 1, the semitones being ignored at any other rate.
+void SGTimePitchSetFollows(SGTimePitch *unit, bool follows);
+
+// Which of the two units renders changes only at SGTimePitchReset, so the render thread never hands over
+// to a unit still holding sound from the last time it ran. True when the rate, the semitones or following
+// set since then call for the other unit: the caller stops rendering, resets and starts again.
+bool SGTimePitchSwitchPending(const SGTimePitch *unit);
+
+// Forgets the sound held, so the next buffer starts over from silence, and picks the unit to render. Only
+// while nothing renders.
 void SGTimePitchReset(SGTimePitch *unit);
 
 // Pull mode: `frames` frames of output into `data`, float non-interleaved buffers of the unit's channels.

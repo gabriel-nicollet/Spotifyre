@@ -61,7 +61,7 @@ double SGBiquadGainDB(const SGBiquad *sections, int count, double rate, double f
 
 #pragma mark - the equalizer
 
-// About two thirds of an octave wide, the bands' spacing, so neighbours overlap enough to leave no dips.
+// About two thirds of an octave wide, the bands' spacing, so neighbors overlap enough to leave no dips.
 static const double kBandQ = 2.1;
 
 static void designBands(double rate, const double frequencies[15], const double gains[15], const bool usable[15], SGBiquad bands[15]) {
@@ -77,7 +77,7 @@ void SGDSPDesignEqualizer(double rate, const double frequencies[15], const doubl
         usable[i] = frequencies[i] < 0.46 * rate;
         own[i] = usable[i] ? gains[i] : 0;
     }
-    // Each band's gain corrected by what the cascade misses at its centre, until it misses by nothing audible.
+    // Each band's gain corrected by what the cascade misses at its center, until it misses by nothing audible.
     for (int iteration = 0; iteration < 60; iteration++) {
         designBands(rate, frequencies, own, usable, bands);
         double worst = 0, missed[15] = {0};

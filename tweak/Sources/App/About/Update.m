@@ -1,15 +1,16 @@
 // The repo's GitHub Releases, so a build that is already on someone's phone can tell them a newer one
 // exists and show what changed in it. Release Please cuts every release from the commits, so the
 // release body is the changelog itself: a "### Features" or "### Fixes" heading over a line per
-// commit, each ending in a link to it. One request brings the last twenty releases rather than only
-// the newest, which is what lets the Updates page show every version between this build and the
-// newest one. Asked a few seconds after Spotify comes up (UpdateNotice.m) and when Mod Settings
-// opens, at most once every six hours either way, and on demand from the page. remote checks are disabled in Spotifyre; this file remains only for legacy cached release data.
+// commit, each ending in a link to it. One request brings the last hundred releases and the newest
+// twenty that count are kept, which is what lets the Updates page show every version between this
+// build and the newest one even after a run of betas a release build skips. Betas count only while
+// Include betas is on: on by default for a beta build, off for a release. Asked a few seconds after
+// Spotify comes up (UpdateNotice.m) and when Mod Settings opens, at most once every six hours either way, and on demand from the page. Off while
+// SGUpdateURL is nil.
 #import "Core/SGCore.h"
 #import "About.h"
 
-NSString *const SGUpdateURL = @"";
-static NSString *const kGitHubURL = @"";
+NSString *const SGUpdateURL = @"https://api.github.com/repos/My-Name-Is-Jeff/vitrine/releases?per_page=100";
 NSString *const SGUpdateCheckedNotification = @"spotifyglass.update.checked.notification";
 
 static NSString *const kChecked = @"spotifyglass.update.checked";
@@ -26,29 +27,57 @@ static BOOL sg_running;
 @implementation SGUpdateRelease
 @end
 
-// "0.14.1" against "0.15": the numbers position by position, a missing one counting zero. A beta
-// ("0.23.0-beta.2") is newer than the release before it and older than its own.
-static BOOL isNewer(NSString *candidate, NSString *current) {
-    NSArray<NSString *> *candidateParts = [candidate componentsSeparatedByString:@"-"];
-    NSArray<NSString *> *currentParts = [current componentsSeparatedByString:@"-"];
-    NSArray<NSString *> *left = [candidateParts.firstObject componentsSeparatedByString:@"."];
-    NSArray<NSString *> *right = [currentParts.firstObject componentsSeparatedByString:@"."];
+// Semantic versions: the numbers position by position, a missing one counting zero, then a release
+// above its own pre-releases ("1.0.0" over "1.0.0-beta.9"), then the pre-release's parts in turn, a
+// number by its value and a word by its letters ("beta.10" over "beta.9", "rc.1" over "beta.9").
+BOOL SGVersionIsNewer(NSString *candidate, NSString *current) {
+    NSRange dashA = [candidate rangeOfString:@"-"], dashB = [current rangeOfString:@"-"];
+    NSString *coreA = dashA.location == NSNotFound ? candidate : [candidate substringToIndex:dashA.location];
+    NSString *coreB = dashB.location == NSNotFound ? current : [current substringToIndex:dashB.location];
+    NSArray<NSString *> *left = [coreA componentsSeparatedByString:@"."], *right = [coreB componentsSeparatedByString:@"."];
     for (NSUInteger i = 0; i < MAX(left.count, right.count); i++) {
         NSInteger a = i < left.count ? left[i].integerValue : 0;
         NSInteger b = i < right.count ? right[i].integerValue : 0;
         if (a != b) return a > b;
     }
-    if (candidateParts.count == 1 || currentParts.count == 1) return candidateParts.count < currentParts.count;
-    return [candidateParts[1] compare:currentParts[1] options:NSNumericSearch] == NSOrderedDescending;
+    BOOL preA = dashA.location != NSNotFound, preB = dashB.location != NSNotFound;
+    if (preA != preB) return !preA;
+    if (!preA) return NO;
+    NSArray<NSString *> *partsA = [[candidate substringFromIndex:dashA.location + 1] componentsSeparatedByString:@"."];
+    NSArray<NSString *> *partsB = [[current substringFromIndex:dashB.location + 1] componentsSeparatedByString:@"."];
+    NSCharacterSet *digits = NSCharacterSet.decimalDigitCharacterSet.invertedSet;
+    for (NSUInteger i = 0; i < MIN(partsA.count, partsB.count); i++) {
+        NSString *a = partsA[i], *b = partsB[i];
+        BOOL numberA = a.length && [a rangeOfCharacterFromSet:digits].location == NSNotFound;
+        BOOL numberB = b.length && [b rangeOfCharacterFromSet:digits].location == NSNotFound;
+        if (numberA && numberB) {
+            if (a.integerValue != b.integerValue) return a.integerValue > b.integerValue;
+        } else if (numberA != numberB) {
+            return numberB;   // a word ranks above a number
+        } else if (![a isEqualToString:b]) {
+            return [a compare:b] == NSOrderedDescending;
+        }
+    }
+    return partsA.count > partsB.count;
 }
 
-// A beta build is told about betas as well as releases; a release build only ever about releases.
-static BOOL isBetaBuild(void) {
-    return strchr(SG_VERSION, '-') != NULL;
+static BOOL isNewer(NSString *candidate, NSString *current) {
+    return SGVersionIsNewer(candidate, current);
 }
 
 static NSString *stringOr(id value, NSString *fallback) {
     return [value isKindOfClass:NSString.class] ? value : fallback;
+}
+
+BOOL SGBuildIsBeta(void) {
+    return strchr(SG_VERSION, '-') != NULL;
+}
+
+// A build told of betas is offered the newest newer release, beta or not (1.0.0-beta.1, then
+// 1.0.0-beta.2, then 1.0.0); one that is not, only releases. Never a lower version than its own.
+// The stock marker of a reset turns it off on a beta build too, as it does every switch.
+BOOL SGUpdateIncludesBetas(void) {
+    return SGFlag(SGKeyUpdateBetas, SGBuildIsBeta());
 }
 
 #pragma mark - the changelog out of the release's markdown
@@ -85,7 +114,7 @@ static NSString *takeCommitURL(NSString **line) {
 // A release body into its lines: "### Features" names what follows, "* …" is a line of it, and a
 // line that wraps onto the next one is joined back together. Anything else -- the "## [0.19.0](…)"
 // heading release-please leads with, blank lines -- is dropped, the version being known already.
-static NSArray<SGUpdateChange *> *changesIn(NSString *body) {
+NSArray<SGUpdateChange *> *SGUpdateChangesIn(NSString *body) {
     NSMutableArray<SGUpdateChange *> *changes = [NSMutableArray array];
     NSString *kind = @"Changes";
     SGUpdateChange *open = nil;
@@ -119,20 +148,26 @@ static NSArray<SGUpdateChange *> *changesIn(NSString *body) {
 
 #pragma mark - what the last check left
 
+// The defaults outlive an IPA installed over the same bundle id, so a release build can find what a
+// beta stored before it, and Include betas can go off after a check. Pre-releases are dropped here as
+// well as at the check, by GitHub's mark or, for a list stored before the mark was, by the "-" in the
+// version.
 NSArray<SGUpdateRelease *> *SGUpdateReleases(void) {
     NSArray *stored = [NSUserDefaults.standardUserDefaults arrayForKey:kReleases];
     NSMutableArray<SGUpdateRelease *> *releases = [NSMutableArray array];
+    BOOL betas = SGUpdateIncludesBetas();
     for (id entry in stored) {
         if (![entry isKindOfClass:NSDictionary.class]) continue;
         NSString *version = stringOr(entry[@"version"], nil);
         if (!version.length) continue;
-        // A list a beta build left behind, read by the release installed over it.
-        if ([entry[@"prerelease"] boolValue] && !isBetaBuild()) continue;
+        BOOL prerelease = [entry[@"prerelease"] boolValue] || [version containsString:@"-"];
+        if (prerelease && !betas) continue;
         SGUpdateRelease *release = [SGUpdateRelease new];
         release.version = version;
+        release.prerelease = prerelease;
         release.date = stringOr(entry[@"date"], @"");
         release.url = stringOr(entry[@"url"], nil);
-        release.changes = changesIn(stringOr(entry[@"notes"], @""));
+        release.changes = SGUpdateChangesIn(stringOr(entry[@"notes"], @""));
         [releases addObject:release];
     }
     return releases;
@@ -146,6 +181,10 @@ BOOL SGUpdateIsNewer(NSString *version) {
     return version.length && isNewer(version, @(SG_VERSION));
 }
 
+BOOL SGUpdateChecked(void) {
+    return [NSUserDefaults.standardUserDefaults doubleForKey:kChecked] > 0;
+}
+
 NSString *SGUpdateVersion(void) {
     NSString *newest = SGUpdateNewestRelease().version;
     return SGUpdateIsNewer(newest) ? newest : nil;
@@ -154,30 +193,34 @@ NSString *SGUpdateVersion(void) {
 // What the Updates row shows on the right; the page's own ticker reads it while the page is open,
 // so the async check lands in the cell without anything having to be told about it.
 NSString *SGUpdateStatus(void) {
+    if (!SGUpdateURL) return @"off";
     if (sg_running) return @"checking…";
     if (sg_failure) return sg_failure;
     NSString *latest = SGUpdateVersion();
     if (latest) return [latest stringByAppendingString:@" is out"];
-    if ([NSUserDefaults.standardUserDefaults doubleForKey:kChecked] > 0) return @"up to date";
+    if (SGUpdateChecked()) return @"up to date";
     return @"not checked";
 }
 
 #pragma mark - the check
 
-// Drafts are not builds anyone is meant to be sent to, and pre-releases (the betas) only beta builds
-// are, so otherwise they count for neither the newest version nor the changelog. GitHub answers newest
-// first; the sort keeps that true whatever order a hand-made release lands in.
-static NSArray<NSDictionary *> *releasesFrom(NSData *data) {
+// Drafts never count, and pre-releases only while Include betas is on. GitHub answers newest first;
+// the sort keeps that true whatever order a hand-made release lands in. A reply with nothing that counts
+// -- betas left out while every release is a beta -- is an empty list, which reads as up to date; only a
+// reply that is not a list of releases is nil.
+NSArray<NSDictionary *> *SGUpdateReleasesFrom(NSData *data) {
     id json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
     if (![json isKindOfClass:NSArray.class]) return nil;
     NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    BOOL betas = SGUpdateIncludesBetas();
     for (id item in (NSArray *)json) {
         if (![item isKindOfClass:NSDictionary.class]) continue;
         NSDictionary *release = item;
-        BOOL prerelease = [release[@"prerelease"] boolValue];
-        if ([release[@"draft"] boolValue] || (prerelease && !isBetaBuild())) continue;
         NSString *tag = stringOr(release[@"tag_name"], nil);
-        if (!tag.length) continue;
+        if (!tag.length || [release[@"draft"] boolValue]) continue;
+        // A beta tag published without GitHub's mark is still a beta.
+        BOOL prerelease = [release[@"prerelease"] boolValue] || [tag containsString:@"-"];
+        if (prerelease && !betas) continue;
         [entries addObject:@{
             @"version": [tag hasPrefix:@"v"] ? [tag substringFromIndex:1] : tag,
             @"notes": stringOr(release[@"body"], @""),
@@ -189,8 +232,7 @@ static NSArray<NSDictionary *> *releasesFrom(NSData *data) {
     [entries sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return isNewer(a[@"version"], b[@"version"]) ? NSOrderedAscending : NSOrderedDescending;
     }];
-    if (entries.count > kKept) [entries removeObjectsInRange:NSMakeRange(kKept, entries.count - kKept)];
-    return entries.count ? entries : nil;
+    return entries.count > kKept ? [entries subarrayWithRange:NSMakeRange(0, kKept)] : entries;
 }
 
 static void ask(NSString *url, NSData *body, void (^done)(NSArray<NSDictionary *> *releases, NSInteger status, NSError *error)) {
@@ -209,20 +251,16 @@ static void ask(NSString *url, NSData *body, void (^done)(NSArray<NSDictionary *
         dataTaskWithRequest:request
           completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
-        done(status == 200 ? releasesFrom(data) : nil, status, error);
+        done(status == 200 ? SGUpdateReleasesFrom(data) : nil, status, error);
     }];
     [task resume];
 }
 
 void SGCheckForUpdate(BOOL force) {
-    // Remote release checks and update telemetry are disabled in Spotifyre.
-    if (SGUpdateURL.length == 0) return;
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     NSTimeInterval last = [store doubleForKey:kChecked];
-    if (sg_running) return;
-    // The day's count goes out with the first check of the day, whatever the six hours say.
-    BOOL owed = SGUsageOwed();
-    if (!force && !owed && last > 0 && NSDate.date.timeIntervalSince1970 - last < kInterval) return;
+    if (!SGUpdateURL || sg_running) return;
+    if (!force && last > 0 && NSDate.date.timeIntervalSince1970 - last < kInterval) return;
 
     sg_running = YES;
     sg_failure = nil;
@@ -238,17 +276,10 @@ void SGCheckForUpdate(BOOL force) {
             } else {
                 [store setObject:releases forKey:kReleases];
                 [store setDouble:NSDate.date.timeIntervalSince1970 forKey:kChecked];
-                SGLog(@"update check: the newest is %@, this build is %s", releases.firstObject[@"version"], SG_VERSION);
+                SGLog(@"update check: the newest is %@, this build is %s", releases.firstObject[@"version"] ?: @"none for this build", SG_VERSION);
             }
             [NSNotificationCenter.defaultCenter postNotificationName:SGUpdateCheckedNotification object:nil];
         });
     };
-    NSData *body = SGUsageBody();
-    if (body) SGUsageNoteAsked();
-    SGLog(@"update check: disabled in this Spotifyre build");
-    ask(SGUpdateURL, body, ^(NSArray<NSDictionary *> *releases, NSInteger status, NSError *error) {
-        if (releases) return finish(releases, status, error);
-        SGLog(@"update check: primary endpoint unavailable, trying configured fallback");
-        ask(kGitHubURL, nil, finish);
-    });
+    ask(SGUpdateURL, nil, finish);
 }

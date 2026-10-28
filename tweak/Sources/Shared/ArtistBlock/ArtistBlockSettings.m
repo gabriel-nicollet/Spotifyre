@@ -55,7 +55,7 @@ typedef NS_ENUM(NSInteger, SGArtistSection) {
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section {
-    return section == SGArtistSectionMode || section == SGArtistSectionList ? SGSectionHeaderHeight : SGSectionGap;
+    return section == SGArtistSectionMode || section == SGArtistSectionList ? SGSectionHeaderHeight() : SGSectionGap;
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForFooterInSection:(NSInteger)section {

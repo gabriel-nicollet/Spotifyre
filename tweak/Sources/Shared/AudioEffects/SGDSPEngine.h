@@ -35,7 +35,7 @@ void SGDSPEngineSetCompander(SGDSPEngine *engine, bool on, double timeConstant, 
 void SGDSPEngineSetBassBoost(SGDSPEngine *engine, bool on, double maxGainDB);
 void SGDSPEngineSetEqualizer(SGDSPEngine *engine, bool on, const double frequencies[15], const double gains[15]);
 // preset: an index of SGDSPReverbPresetCount.
-void SGDSPEngineSetReverb(SGDSPEngine *engine, bool on, int preset);
+void SGDSPEngineSetReverb(SGDSPEngine *engine, bool on, int preset, float amount);
 void SGDSPEngineSetStereoWide(SGDSPEngine *engine, bool on, double levelPercent);
 // preset: an index of SGDSPCrossfeedPresetCount, lightest first.
 void SGDSPEngineSetCrossfeed(SGDSPEngine *engine, bool on, int preset);

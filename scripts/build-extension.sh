@@ -15,7 +15,9 @@ OUT="${2:?usage: $0 <host Info.plist> <out dir>}"
 NAME=SpotifyGlassLiveActivity
 APPEX="$OUT/$NAME.appex"
 SHARED="$ROOT/tweak/Sources/Shared/LiveActivity/LiveActivityShared.swift"
-WIDGET="$ROOT/extension/LiveActivity/LiveActivityWidget.swift"
+WIDGET=("$ROOT/extension/LiveActivity/LiveActivityWidget.swift" "$ROOT/extension/LiveActivity/Controls.swift")
+# Spotify's App Shortcuts, which only the app's metadata may carry.
+SHORTCUTS="$ROOT/tweak/Sources/Shared/LiveActivity/AppShortcuts.swift"
 
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 TOOLCHAIN="$(dirname "$(dirname "$(dirname "$(xcrun --find swiftc)")")")"
@@ -46,8 +48,8 @@ metadata() {
 
 echo "==> building $NAME.appex"
 xcrun --sdk iphoneos swiftc -O -wmo -parse-as-library -target arm64-apple-ios17.0 -module-name "$NAME" \
-  -Xlinker -e -Xlinker _NSExtensionMain -o "$APPEX/$NAME" "$SHARED" "$WIDGET"
-metadata "$NAME" 17.0 "$APPEX" "$SHARED" "$WIDGET"
+  -Xlinker -e -Xlinker _NSExtensionMain -o "$APPEX/$NAME" "$SHARED" "${WIDGET[@]}"
+metadata "$NAME" 17.0 "$APPEX" "$SHARED" "${WIDGET[@]}"
 
 sed -e "s/HOST_BUNDLE_ID/$(plutil -extract CFBundleIdentifier raw -o - "$HOST_PLIST")/" \
     -e "s/HOST_SHORT_VERSION/$(plutil -extract CFBundleShortVersionString raw -o - "$HOST_PLIST")/" \
@@ -55,9 +57,9 @@ sed -e "s/HOST_BUNDLE_ID/$(plutil -extract CFBundleIdentifier raw -o - "$HOST_PL
     "$ROOT/extension/LiveActivity/Info.plist" > "$APPEX/Info.plist"
 plutil -convert binary1 "$APPEX/Info.plist"
 
-# The taps' intents run inside Spotify, so Spotify's metadata has to name them too, under the
-# module the tweak compiles them in (Theos names it after the tweak instance).
-metadata spotifyglass 16.0 "$OUT/app" "$SHARED"
+# The taps', the shortcuts' and the controls' intents run inside Spotify, so Spotify's metadata has to
+# name them too, under the module the tweak compiles them in (Theos names it after the tweak instance).
+metadata spotifyglass 16.0 "$OUT/app" "$SHARED" "$SHORTCUTS"
 
 codesign -f -s - "$APPEX" >/dev/null 2>&1
 rm -rf "$WORK"

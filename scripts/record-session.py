@@ -108,7 +108,7 @@ CHECKLIST = """Before recording, the phone needs:
   1. the FLEX build of the mod on it: make install FLEX=1 (only that build serves the tree)
   2. stock Spotify: Mod Settings → Mod → Export settings (keep the file), then Reset all settings.
      Spotify restarts with every switch off; close the welcome tour if it comes up.
-     Afterwards, Mod Settings → Mod → Import settings brings your settings back.
+     Afterward, Mod Settings → Mod → Import settings brings your settings back.
   3. Spotify open in the foreground, the phone unlocked and on USB."""
 
 HELP = """  Enter         save a snapshot of what the phone shows

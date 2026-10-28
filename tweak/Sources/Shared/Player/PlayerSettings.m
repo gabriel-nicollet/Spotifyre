@@ -2,28 +2,18 @@
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "PlayerSettings.h"
-#import "SpeedPitch.h"
-#import "Shared/LockScreenArtwork/LockScreenArtwork.h"
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
+#import "Shared/Lyrics/Lyrics.h"
 
+// Widget first: the line in place of the artist (on the Lyrics page too, the same switch) and Like and dislike,
+// the one lock screen control a song gets, which the Artwork section's star takes the place of
+// (Shared/AnimatedArtwork/LockScreenStar.x locks the flag off). Spotify's flags for podcasts, audiobooks and its
+// own lock screen artwork stay on the All flags page: the Artwork section is the mod's.
 UIViewController *SGLockScreenWidgetPage(void) {
-    return [[SGModPage alloc] initWithTitle:@"Lock screen widget" intro:SGRestartNote sections:@[
-        SGSection(@"Controls", @[
-            SGFlagRow(@"Like and dislike buttons", @"ios-feature-lockscreen.like_dislike_enabled"),
-            SGFlagRow(@"Skip button on podcasts", @"ios-feature-lockscreen.skip_button_on_podcasts"),
-            SGFlagRow(@"Chapter skip controls", @"ios-feature-lockscreen.enable_chapter_skip_controls"),
-            SGFlagRow(@"Burst skip", @"ios-feature-lockscreen.burst_skip_enabled"),
-        ]),
-        SGSection(@"Artwork", [SGAnimatedArtworkRows() arrayByAddingObject:
-            SGFlagRow(@"Companion content", @"ios-feature-lockscreen.companion_content_enabled")]),
+    SGModRow *likes = SGFlagRow(@"Like and dislike buttons", @"ios-feature-lockscreen.like_dislike_enabled");
+    likes.subtitle = @"Off and locked while Switch with the star is on: the star takes their place";
+    return [[SGModPage alloc] initWithTitle:@"Lock screen" intro:SGRestartNote sections:@[
+        SGSection(@"Widget", @[SGLockScreenLyricsRow(), SGLockScreenTranslationRow(), likes]),
+        SGSection(@"Artwork", SGLockScreenMotionRows()),
     ] footer:nil];
-}
-
-SGModSection *SGSpeedPitchSection(void) {
-    SGModRow *follows = SGSwitchRow(@"Pitch follows speed", @"Faster and higher together, like a record", SGKeyPitchFollowsSpeed);
-    // The switch stores itself; the sound changes now, and turning it on puts the pitch back to normal.
-    follows.changed = ^(BOOL on) { SGSetPlayerPitchFollowsSpeed(on); };
-    return SGNotedSection(@"Speed and pitch", @[follows],
-                          @"The speed and pitch sliders are in the player's more menu. With this on, the pitch slider goes and a "
-                          "faster song is played by resampling, the way a record is, with none of the time stretch's smearing. "
-                          "It applies where speed does.");
 }

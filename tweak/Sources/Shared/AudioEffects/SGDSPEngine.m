@@ -17,7 +17,7 @@ _Static_assert(kSGDSPEngineBlock == kSGDSPConvolverBlock && kSGDSPEngineBlock ==
 // and the one just made, with room to spare.
 enum { kRing = 4 * kSGDSPEngineBlock };
 
-// The order a block goes through the effects: tone, then dynamics and colour, the script, the stereo image,
+// The order a block goes through the effects: tone, then dynamics and color, the script, the stereo image,
 // and the rooms last.
 typedef enum {
     SlotBass, SlotEqualizer, SlotGraphicEq, SlotDDC, SlotCompander, SlotTube, SlotLiveprog, SlotWide, SlotCrossfeed,
@@ -411,18 +411,18 @@ void SGDSPEngineSetEqualizer(SGDSPEngine *engine, bool on, const double frequenc
     install(engine, SlotEqualizer, SGDSPEqualizerCreate(bands));
 }
 
-void SGDSPEngineSetReverb(SGDSPEngine *engine, bool on, int preset) {
+void SGDSPEngineSetReverb(SGDSPEngine *engine, bool on, int preset, float amount) {
     if (!on) {
         install(engine, SlotReverb, NULL);
         return;
     }
     SGDSPReverb *reverb = running(engine, SlotReverb);
     if (reverb) {
-        SGDSPReverbSet(reverb, preset);
+        SGDSPReverbSet(reverb, preset, amount);
         done(engine);
         return;
     }
-    install(engine, SlotReverb, SGDSPReverbCreate(engine->rate, preset));
+    install(engine, SlotReverb, SGDSPReverbCreate(engine->rate, preset, amount));
 }
 
 void SGDSPEngineSetStereoWide(SGDSPEngine *engine, bool on, double levelPercent) {

@@ -13,5 +13,10 @@ The Music list is a real self-sizing collection view holding the sections in the
 the two video sections included, so `ArtistSections.x` drops them the way it does on the phone: the shelf
 first, then its heading and spacer once the list lays out again. At 2 s the log lists every cell's height.
 
+`logo` on the launch line, with `-spotifyglass.redesign.artist.logo NO` after it so Apple Music's own logo does
+not arrive as well, hands the header a logo at 2.5 s and takes it away at 4.5 s, with the page on screen. The log
+says, before, as each arrives or leaves and a second later, where the logo and the name are and whether they are
+fading and moving: the two cross over, the logo grows out of the name's place, and gone, the logo is hidden.
+
 What it does not cover: the repaint hook (so the mock's cells are left unpainted), the real z-order of the
 pinned header bar against the list, and the element framework's own sizing.

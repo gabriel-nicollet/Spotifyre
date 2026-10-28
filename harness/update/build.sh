@@ -11,7 +11,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/UpdateHarness.app"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -isysroot "$SDK" -Wno-deprecated-declarations -DSG_VERSION="\"$VERSION\"" \
-    "$(dirname "$0")/main.m" \
+    "$(dirname "$0")/main.m" "$(dirname "$0")/../scene.m" \
     "$SRC"/App/About/Update.m "$SRC"/App/About/UpdatePage.m "$SRC"/App/About/UpdateNotice.m \
     "$SRC"/Settings/SGPage.m "$SRC"/Settings/SGPageStyle.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGGlass.m \
@@ -32,6 +32,12 @@ cat > "$OUT/UpdateHarness.app/Info.plist" <<'PLIST'
 <key>UILaunchScreen</key><dict/>
 <key>UIApplicationSceneManifest</key><dict>
   <key>UIApplicationSupportsMultipleScenes</key><false/>
+  <key>UISceneConfigurations</key><dict>
+    <key>UIWindowSceneSessionRoleApplication</key><array><dict>
+      <key>UISceneConfigurationName</key><string>Default</string>
+      <key>UISceneDelegateClassName</key><string>SGRHarnessScene</string>
+    </dict></array>
+  </dict>
 </dict>
 </dict></plist>
 PLIST

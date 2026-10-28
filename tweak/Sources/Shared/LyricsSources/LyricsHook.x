@@ -3,7 +3,7 @@
 // list gets a lyrics section, without which the player never asks for lyrics at all.
 #import "Core/SGCore.h"
 #import "LyricsSources.h"
-#import "Shared/Lyrics/Protobuf.h"
+#import "Shared/AdBlock/Protobuf.h"
 #import "Headers/SPTPlayer.h"
 #import <os/lock.h>
 
@@ -14,7 +14,7 @@ static NSString *const kCardListPath = @"/scrollsita/";
 static NSString *const kTrackPrefix = @"spotify:track:";
 // On a request sent to the donor, the track it really asks for.
 static NSString *const kDonorForKey = @"spotifyglass.lyricsDonorFor";
-static NSString *const kUnnamedProvider = @"Spotifyre";
+static NSString *const kUnnamedProvider = @"Vitrine";
 
 typedef void (^SGDisposition)(NSURLSessionResponseDisposition disposition);
 typedef void (^SGForwardResponse)(NSURLResponse *response, SGDisposition handler);
@@ -131,18 +131,26 @@ static NSData *pageBody(SGLyricsResult *chain, NSData *colours) {
     NSMutableArray<SGPBField *> *lyrics = [NSMutableArray array];
     if (chain.synced) [lyrics addObject:SGPBVarint(1, 1)];
     NSArray<NSNumber *> *starts = chain.starts;
-    // Spotify's page traps on a line starting before the one above it, and a duet's TTML lists its
-    // voices in reading order, not singing order: such a line starts with the one above.
-    __block NSInteger latest = 0;
-    [chain.texts enumerateObjectsUsingBlock:^(NSString *text, NSUInteger i, BOOL *stop) {
-        NSInteger start = MAX(i < starts.count ? [starts[i] integerValue] : 0, latest);
-        latest = start;
-        NSData *line = SGPBSerialize(@[SGPBVarint(1, (uint64_t)start),
+    NSInteger (^startOf)(NSUInteger) = ^NSInteger(NSUInteger i) { return i < starts.count ? MAX([starts[i] integerValue], 0) : 0; };
+    // Spotify's page takes its lines in time order, and a source can list one out of it (a chorus written
+    // once with its repeats after it): they go in by their starts, lines starting together as they came.
+    NSMutableArray<NSNumber *> *order = [NSMutableArray arrayWithCapacity:chain.texts.count];
+    for (NSUInteger i = 0; i < chain.texts.count; i++) [order addObject:@(i)];
+    if (chain.synced) {
+        [order sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) {
+            NSInteger x = startOf(a.unsignedIntegerValue), y = startOf(b.unsignedIntegerValue);
+            return x < y ? NSOrderedAscending : x > y ? NSOrderedDescending : NSOrderedSame;
+        }];
+    }
+    for (NSNumber *index in order) {
+        NSString *text = chain.texts[index.unsignedIntegerValue];
+        NSData *line = SGPBSerialize(@[SGPBVarint(1, (uint64_t)startOf(index.unsignedIntegerValue)),
                                        SGPBString(2, [text isKindOfClass:NSString.class] ? text : @"")]);
         [lyrics addObject:SGPBBytes(2, line)];
-    }];
-    NSString *credit = chain.pageCredit.text.length ? chain.pageCredit.text : chain.provider;
-    [lyrics addObject:SGPBString(5, credit.length ? credit : kUnnamedProvider)];
+    }
+    // The footer names whoever's text this is, which the terms of some sources ask for (SpicyLyrics.m).
+    NSString *provider = chain.pageProvider ?: chain.provider;
+    [lyrics addObject:SGPBString(5, provider.length ? provider : kUnnamedProvider)];
     return SGPBSerialize(@[SGPBBytes(1, SGPBSerialize(lyrics)), SGPBBytes(2, colours ?: defaultColours())]);
 }
 
@@ -160,20 +168,22 @@ static NSData *decide(NSString *track, SGLyricsResult *chain, NSData *spotifyBod
     NSArray<SGKaraokeLine *> *spotifyLines = spotifyBody ? SGKaraokeLinesFromBody(spotifyBody) : nil;
     if (!spotifyLines.count) spotifyLines = nil;
     SGKaraokeTiming spotifyTiming = SGKaraokeLinesTiming(spotifyLines);
-    BOOL replace = chain.texts.count && (chain.synced || spotifyTiming == SGKaraokeTimingNone);
+    // A source picked for the track from the player's ⋯ stands over Spotify's own, however either is timed. Read
+    // off the answer, not the pick: a walk run while the pick's request failed answers with another source's.
+    BOOL picked = chain.picked;
+    BOOL replace = chain.texts.count && (picked || chain.synced || spotifyTiming == SGKaraokeTimingNone);
     NSData *page = replace ? pageBody(chain, colours) : nil;
 
     NSArray<SGKaraokeLine *> *viewLines = nil;
-    SGLyricsCredit *credit = chain.credit;
-    if (chain.karaokeLines.count && (!spotifyLines || SGKaraokeLinesTiming(chain.karaokeLines) <= spotifyTiming)) {
+    NSString *credit = chain.provider;
+    if (chain.karaokeLines.count && (picked || !spotifyLines || SGKaraokeLinesTiming(chain.karaokeLines) <= spotifyTiming)) {
         viewLines = chain.karaokeLines;
     } else if (spotifyLines) {
         viewLines = spotifyLines;
-        credit = SGLyricsCreditNamed(@"Spotify");
+        credit = @"Spotify";
     }
     if (viewLines) SGKaraokeKeepLines(track, viewLines);
     SGLyricsSetCredit(track, credit);
-    SGLyricsSetPageCredit(track, page ? chain.pageCredit : nil);
     // Spotify's JSON may have the song timed where its page does not.
     if (!donor && spotifyBody.length && SGKaraokeLinesTiming(viewLines) == SGKaraokeTimingNone) SGKaraokeAskSpotifyForTiming(track);
 
@@ -401,7 +411,7 @@ static void answerHeld(id delegate, NSURLSession *session, NSURLSessionDataTask 
     }
     if (ended || cancelled) {
         SGLog(@"lyrics: the request for %@ ended before the sources answered, nothing delivered", state.track);
-        // URLSession holds the end of a cancelled task back until it has a disposition.
+        // URLSession holds the end of a canceled task back until it has a disposition.
         if (cancelled) handler(NSURLSessionResponseCancel);
         return;
     }
@@ -469,7 +479,7 @@ static void finishDonor(id delegate, NSURLSession *session, NSURLSessionDataTask
         forward(error);
         return;
     }
-    // The donor's colours are the track's own only when they were worked out from its artwork.
+    // The donor's colors are the track's own only when they were worked out from its artwork.
     NSData *page = decide(state.track, chain, nil, YES, state.artwork ? coloursIn(body) : nil);
     if (!page) {
         SGLog(@"lyrics: no source has lyrics for %@ any more, its request fails", state.track);
@@ -568,13 +578,20 @@ static void completed(id delegate, NSURLSession *session, NSURLSessionTask *task
     if (!track) return metadata;
     BOOL has = [@"true" isEqual:metadata[@"has_lyrics"]];
     SGLyricsNoteSpotifyHas(track, has);
-    SGKaraokeRememberTrack(self);
+    SGKaraokeRememberTrack(self, track);
     if (has || !SGLyricsMayHave(track)) return metadata;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"lyrics: has_lyrics forced on, first for spotify:track:%@", track); });
+    // The track keeps its metadata, so its forced copy is made once and kept beside the dictionary it copies.
+    static char kForcedKey;
+    NSArray *kept = metadata ? objc_getAssociatedObject(self, &kForcedKey) : nil;
+    if (kept && kept.firstObject == metadata) return kept.lastObject;
     NSMutableDictionary *forced = metadata ? [metadata mutableCopy] : [NSMutableDictionary dictionary];
     forced[@"has_lyrics"] = @"true";
-    return forced;
+    if (!metadata) return forced;
+    NSDictionary *shared = [forced copy];   // handed out again, so as unchangeable as the one Spotify hands out
+    objc_setAssociatedObject(self, &kForcedKey, @[metadata, shared], OBJC_ASSOCIATION_RETAIN);
+    return shared;
 }
 %end
 
@@ -598,9 +615,9 @@ static void completed(id delegate, NSURLSession *session, NSURLSessionTask *task
 
 %ctor {
     SGLyricsMigrateLegacyKeys();
-    if (!SGLyricsActive()) return;
+    if (!SGLyricsEnabled()) return;
     %init(SGLyricsReplies);
-    BOOL everyTrack = SGFlag(SGKeyLyricsAllTracks, NO);
+    BOOL everyTrack = SGEnabled(SGKeyLyricsAllTracks);
     if (everyTrack) {
         // The generator gives a class that only inherits the method an override of its own, which would
         // put a second hook in front of NSURLSession's.

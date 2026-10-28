@@ -2,6 +2,7 @@
 // links are Shared's (Shared/Player/PlayerState.h, Shared/Player/PlayerEvents.h,
 // Shared/Navigation/Links.h). SGRBridges.h names the hook and why it is the one.
 #import "Core/SGCore.h"
+#import "Shared/LocalFiles/LocalFiles.h"
 #import "Shared/Player/PlayerEvents.h"
 #import "SGRBridges.h"
 #import "SGRedesign.h"
@@ -46,11 +47,18 @@ static NSString *imageIDIn(id value) {
     return nil;
 }
 
-// The picture a track names, largest first, and where it can be fetched from.
+// The picture a track names, largest first, and where it can be fetched from. A local file's cover the
+// user picked (Shared/LocalFiles) is a file of its own, named afresh for every new one, so its name is
+// the picture.
 static NSString *pictureOf(SPTPlayerTrack *track, NSURL **url) {
     NSDictionary *metadata = [track respondsToSelector:@selector(metadata)] ? track.metadata : nil;
     if (![metadata isKindOfClass:NSDictionary.class]) return nil;
     for (NSString *field in @[@"image_xlarge_url", @"image_large_url", @"image_url", @"image_small_url"]) {
+        NSString *stored = SGLocalFileCoverInURL(metadata[field]);
+        if (stored) {
+            if (url) *url = [NSURL fileURLWithPath:stored];
+            return [@"local:" stringByAppendingString:stored.lastPathComponent];
+        }
         NSString *value = metadata[field], *identifier = imageIDIn(value);
         if (!identifier) continue;
         if (url) *url = [value hasPrefix:@"https://"] ? [NSURL URLWithString:value]
@@ -91,7 +99,23 @@ static NSURLSession *artworkSession(void) {
     return session;
 }
 
+// A stored cover is read and decoded off the main thread; there is nothing to try again.
+static void loadStoredPicture(NSString *key, NSURL *url) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        UIImage *image = [UIImage imageWithContentsOfFile:url.path];
+        image = image.imageByPreparingForDisplay ?: image;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!image) artworkLog(@"%@ not read, the screens stand in", key);
+            else if ([key isEqualToString:sg_wantedKey]) publish(image, key, SGRArtworkQualityExact);
+        });
+    });
+}
+
 static void fetchPicture(NSString *key, NSURL *url, NSUInteger attempt) {
+    if (url.isFileURL) {
+        loadStoredPicture(key, url);
+        return;
+    }
     CFTimeInterval started = CACurrentMediaTime();
     sg_fetch = [artworkSession() dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
@@ -122,6 +146,18 @@ static void fetchPicture(NSString *key, NSURL *url, NSUInteger attempt) {
     [sg_fetch resume];
 }
 
+// A local file whose metadata names no picture: its own cover, found where Spotify shows it elsewhere
+// (Shared/LocalFiles/LocalCover.m), as the picture the track names, so a screen's placeholder never
+// replaces it. A cover picked in Edit info is named by the metadata and never gets here. NO when there
+// is none to publish.
+static BOOL publishLocalCover(void) {
+    if (![sg_wantedKey hasPrefix:@"track:"]) return NO;
+    UIImage *cover = SGLocalFileFallbackCover(SGPlayerState().track);
+    if (!cover) return NO;
+    if (cover != sg_artwork) publish(cover, sg_wantedKey, SGRArtworkQualityExact);
+    return YES;
+}
+
 // Brings the playing track's picture up to date with the player's state, and fetches a picture newly
 // wanted. Called on every state report and before any view read is believed, whichever comes first.
 static void followPlayer(void) {
@@ -140,6 +176,7 @@ static void followPlayer(void) {
     sg_fetch = nil;
     if ([key isEqualToString:sg_artworkKey] && sg_artworkQuality == SGRArtworkQualityExact) return;
     if (url) fetchPicture(key, url, 0);
+    else publishLocalCover();
 }
 
 void SGRSetNowPlayingArtwork(UIImage *image, NSString *trackURI, SGRArtworkQuality quality) {
@@ -186,6 +223,8 @@ static char kBarCardKey, kBarImageKey;
 static __weak UIView *sg_barView;
 
 static void publishBarArtwork(void) {
+    followPlayer();
+    if (publishLocalCover()) return;
     UIView *card = SGRFindByIdentifier(sg_barView, @"SPTNowPlayingBar", &kBarCardKey);
     UIView *holder = SGRFindByIdentifier(card, @"Encore.ImageView", &kBarImageKey);
     UIImageView *cover = nil;
@@ -285,6 +324,14 @@ void SGRObservePlayerTransition(id owner, void (^began)(id owner), void (^ended)
     SGAddPlayerStateObserver(sg_follower);
     sg_barWatcher = [SGRBarArtworkWatcher new];
     SGAddPlayerStateObserver(sg_barWatcher);
+    // A cover picked or removed for the local file playing changes the picture with no new track, so the
+    // track is looked at again. Posted on the main thread.
+    [NSNotificationCenter.defaultCenter addObserverForName:SGLocalFileEditsDidChangeNotification object:nil queue:nil
+                                                usingBlock:^(NSNotification *note) {
+        if (![note.object isEqual:sg_wantedURI]) return;
+        sg_wantedURI = nil;
+        followPlayer();
+    }];
     %init(SGRBarArtworkHooks);
     SGRequireClasses(@[@"_TtC18NowPlaying_BarImpl27NowPlayingBarViewController"]);
 }

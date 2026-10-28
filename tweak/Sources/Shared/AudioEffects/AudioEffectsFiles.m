@@ -1,4 +1,4 @@
-// The audio effects' file libraries: Documents/spoti.pw/Audio effects/<Convolver|DDC|Liveprog>, where the
+// The audio effects' file libraries: Documents/Vitrine/Audio effects/<Convolver|DDC|Liveprog>, where the
 // file effects find their files by name. Documents, which the app's backups keep. Every file in them is
 // one the user imported.
 //
@@ -58,14 +58,16 @@ static void adoptEarlierLibrary(SGDSPFileKind kind, NSString *documents, NSStrin
         ]];
     });
     NSFileManager *files = NSFileManager.defaultManager;
-    NSString *earlier = [[documents stringByAppendingPathComponent:@"spoti.pw/JamesDSP"] stringByAppendingPathComponent:libraryName(kind)];
     NSUInteger moved = 0;
-    for (NSString *name in [files contentsOfDirectoryAtPath:earlier error:nil]) {
-        if ([name hasPrefix:@"."] || [installedByEngine containsObject:name]) continue;
-        NSString *from = [earlier stringByAppendingPathComponent:name];
-        BOOL isDirectory = NO;
-        if (![files fileExistsAtPath:from isDirectory:&isDirectory] || isDirectory) continue;
-        if ([files moveItemAtPath:from toPath:[directory stringByAppendingPathComponent:name] error:nil]) moved++;
+    for (NSString *home in @[@"spoti.pw/JamesDSP", @"spoti.pw/Audio effects"]) {
+        NSString *earlier = [[documents stringByAppendingPathComponent:home] stringByAppendingPathComponent:libraryName(kind)];
+        for (NSString *name in [files contentsOfDirectoryAtPath:earlier error:nil]) {
+            if ([name hasPrefix:@"."] || [installedByEngine containsObject:name]) continue;
+            NSString *from = [earlier stringByAppendingPathComponent:name];
+            BOOL isDirectory = NO;
+            if (![files fileExistsAtPath:from isDirectory:&isDirectory] || isDirectory) continue;
+            if ([files moveItemAtPath:from toPath:[directory stringByAppendingPathComponent:name] error:nil]) moved++;
+        }
     }
     if (moved) SGLog(@"dsp: %lu files moved into the %@ library", (unsigned long)moved, libraryName(kind));
 }
@@ -73,7 +75,7 @@ static void adoptEarlierLibrary(SGDSPFileKind kind, NSString *documents, NSStrin
 NSString *SGDSPLibraryDirectory(SGDSPFileKind kind) {
     static os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
     NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *directory = [[documents stringByAppendingPathComponent:@"spoti.pw/Audio effects"] stringByAppendingPathComponent:libraryName(kind)];
+    NSString *directory = [[documents stringByAppendingPathComponent:@"Vitrine/Audio effects"] stringByAppendingPathComponent:libraryName(kind)];
     os_unfair_lock_lock(&lock);
     BOOL isDirectory = NO;
     if (![NSFileManager.defaultManager fileExistsAtPath:directory isDirectory:&isDirectory] || !isDirectory) {

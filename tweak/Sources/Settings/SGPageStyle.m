@@ -1,11 +1,69 @@
 #import "SGPageStyle.h"
 #import "Core/SGCore.h"
 
-static UIFont *sg_titleFont, *sg_subtitleFont;
+// The rows' title font of Spotify's settings list ([0]) and of its side drawer ([1]).
+static UIFont *sg_spotifyFont[2];
 
-UIColor *SGGrey(void) { return [UIColor colorWithWhite:0xB3 / 255.0 alpha:1]; }
-UIFont *SGTitleFont(void) { return sg_titleFont ?: [UIFont systemFontOfSize:13 weight:UIFontWeightBold]; }
-UIFont *SGSubtitleFont(void) { return sg_subtitleFont ?: [UIFont systemFontOfSize:11]; }
+// The dark appearance's secondary label, fixed rather than dynamic so a view that is not set dark reads it too.
+UIColor *SGGrey(void) { return [UIColor colorWithRed:0xEB / 255.0 green:0xEB / 255.0 blue:0xF5 / 255.0 alpha:0.6]; }
+
+// Spotify's typeface at the sizes of its own lists, asked for by name so the app font of Shared/Fonts follows,
+// and the system font before Spotify has registered it. Grown with Dynamic Type through the accessibility
+// sizes, with no cap: the rows laid out by hand measure their text from these fonts.
+static UIFont *scaled(UIFontTextStyle style, CGFloat size) {
+    UIFont *font = [UIFont fontWithName:@"SpotifyMixUI-Regular" size:size] ?: [UIFont systemFontOfSize:size];
+    return [[UIFontMetrics metricsForTextStyle:style] scaledFontForFont:font];
+}
+
+UIFont *SGTitleFont(void) { return scaled(UIFontTextStyleBody, 13); }
+UIFont *SGSubtitleFont(void) { return scaled(UIFontTextStyleFootnote, 11); }
+UIFont *SGCappedFont(UIFont *font, CGFloat largest) {
+    return font.pointSize > largest ? [font fontWithSize:largest] : font;
+}
+
+BOOL SGAccessibilityTextSize(void) {
+    return UIContentSizeCategoryIsAccessibilityCategory(UIApplication.sharedApplication.preferredContentSizeCategory);
+}
+
+static CGFloat textHeight(NSString *text, UIFont *font, CGFloat width) {
+    if (!text.length) return 0;
+    return ceil([text boundingRectWithSize:CGSizeMake(MAX(1, width), CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
+                                attributes:@{NSFontAttributeName: font} context:nil].size.height);
+}
+
+CGFloat SGSliderTextHeight(NSString *title, NSString *subtitle, CGFloat width) {
+    CGFloat line = ceil(SGTitleFont().lineHeight);
+    CGFloat height = SGAccessibilityTextSize() ? textHeight(title, SGTitleFont(), width) + line : line;
+    return height + textHeight(subtitle, SGSubtitleFont(), width);
+}
+
+CGFloat SGLayOutSliderText(UILabel *title, UILabel *value, UILabel *subtitle, CGFloat x, CGFloat y, CGFloat width) {
+    CGFloat line = ceil(title.font.lineHeight);
+    BOOL stacked = SGAccessibilityTextSize();
+    title.numberOfLines = stacked ? 0 : 1;
+    value.textAlignment = stacked ? NSTextAlignmentNatural : NSTextAlignmentRight;
+    if (stacked) {
+        CGFloat height = textHeight(title.text, title.font, width);
+        title.frame = CGRectMake(x, y, width, height);
+        y += height;
+        value.frame = CGRectMake(x, y, width, line);
+    } else {
+        [value sizeToFit];
+        CGFloat valueWidth = MIN(width, MAX(value.bounds.size.width, 44));
+        value.frame = CGRectMake(x + width - valueWidth, y, valueWidth, line);
+        title.frame = CGRectMake(x, y, MAX(1, CGRectGetMinX(value.frame) - x - 8), line);
+    }
+    y += line;
+    if (subtitle && !subtitle.hidden && subtitle.text.length) {
+        subtitle.numberOfLines = 0;
+        CGFloat height = textHeight(subtitle.text, subtitle.font, width);
+        subtitle.frame = CGRectMake(x, y, width, height);
+        y += height;
+    }
+    return y;
+}
+
+UIFont *SGSpotifyListFont(BOOL drawer) { return sg_spotifyFont[drawer] ?: [UIFont systemFontOfSize:13 weight:UIFontWeightBold]; }
 
 UIImageView *SGSymbolView(NSString *name, CGFloat size, UIImageSymbolWeight weight, CGFloat box) {
     UIImage *image = [UIImage systemImageNamed:name withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:size weight:weight]];
@@ -16,11 +74,12 @@ UIImageView *SGSymbolView(NSString *name, CGFloat size, UIImageSymbolWeight weig
     return view;
 }
 
-// A grey note in a wrapper view, for the table header and footer.
+// A gray note in a wrapper view, for the table header and footer.
 UIView *SGNote(NSString *text) {
     UILabel *label = [UILabel new];
     label.text = text;
     label.font = SGSubtitleFont();
+    label.adjustsFontForContentSizeCategory = YES;
     label.textColor = SGGrey();
     label.numberOfLines = 0;
     UIView *wrapper = [UIView new];
@@ -33,6 +92,7 @@ UIView *SGNote(NSString *text) {
 // loop forever.
 void SGFitNote(UITableView *table, UIView *wrapper, CGFloat top, CGFloat bottom) {
     UILabel *label = wrapper.subviews.firstObject;
+    label.font = SGSubtitleFont();
     CGFloat inset = table.layoutMargins.left;
     CGFloat width = table.bounds.size.width - 2 * inset;
     CGFloat height = ceil([label sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)].height);
@@ -67,10 +127,8 @@ void SGInsetForBars(UITableView *table) {
     table.verticalScrollIndicatorInsets = inset;
 }
 
-// The pages follow the running look's black and accent colour, read here by their keys so the page
-// framework depends on no layer: the native look's AMOLED switch and accent (Native/Appearance), or the
-// redesign's accent (Redesigned/Kit/SGRAccent.h), which is always black.
-static NSString *const kAmoledKey = @"spotifyglass.amoled";
+// The pages follow the running look's accent color, read here by its key so the page framework depends on no
+// layer: the native look's (Native/Appearance) or the redesign's (Redesigned/Kit/SGRAccent.h).
 static NSString *const kAccentKey = @"spotifyglass.accent";
 static NSString *const kRedesignAccentKey = @"spotifyglass.redesign.accent";
 
@@ -80,34 +138,64 @@ static UIColor *lookAccent(void) {
     return [UIColor colorWithRed:((rgb >> 16) & 0xFF) / 255.0 green:((rgb >> 8) & 0xFF) / 255.0 blue:(rgb & 0xFF) / 255.0 alpha:1];
 }
 
-static BOOL lookBlack(void) {
-    return SGRedesignedUI() || SGFlag(kAmoledKey, NO);
+UIColor *SGGreen(void) { return lookAccent() ?: [UIColor colorWithRed:0x1E / 255.0 green:0xD7 / 255.0 blue:0x60 / 255.0 alpha:1]; }
+// Relative sRGB luminance, shared by filled controls and small marks on the dark cards.
+static CGFloat luminance(UIColor *color) {
+    CGFloat r = 0, g = 0, b = 0, a = 1;
+    [color getRed:&r green:&g blue:&b alpha:&a];
+    CGFloat (^linear)(CGFloat) = ^CGFloat(CGFloat c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); };
+    return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
 }
 
-UIColor *SGGreen(void) { return lookAccent() ?: [UIColor colorWithRed:0x1E / 255.0 green:0xD7 / 255.0 blue:0x60 / 255.0 alpha:1]; }
-UIColor *SGRed(void) { return [UIColor colorWithRed:0xF1 / 255.0 green:0x5E / 255.0 blue:0x6B / 255.0 alpha:1]; }
-UIColor *SGDiscordColor(void) { return [UIColor colorWithRed:0x58 / 255.0 green:0x65 / 255.0 blue:0xF2 / 255.0 alpha:1]; }
-UIColor *SGPageBackground(void) { return lookBlack() ? UIColor.blackColor : [UIColor colorWithWhite:0x12 / 255.0 alpha:1]; }
-// Spotify's own elevated grey on its dark grey; iOS's own card grey on the AMOLED black.
-UIColor *SGCardBackground(void) { return [UIColor colorWithWhite:(lookBlack() ? 0x1C : 0x2A) / 255.0 alpha:1]; }
+UIColor *SGOnAccent(void) {
+    CGFloat light = luminance(SGGreen());
+    return (light + 0.05) / 0.05 >= 1.05 / (light + 0.05) ? UIColor.blackColor : UIColor.whiteColor;
+}
 
-UIImage *SGTileImage(NSString *symbol) {
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightMedium];
+UIColor *SGAccentMark(void) {
+    CGFloat contrast = (luminance(SGGreen()) + 0.05) / (luminance(SGCardBackground()) + 0.05);
+    return contrast >= (UIAccessibilityDarkerSystemColorsEnabled() ? 4.5 : 3) ? SGGreen() : UIColor.whiteColor;
+}
+
+// The dark appearance's system red, and its grouped background and the cards on it, whichever look runs.
+UIColor *SGRed(void) { return [UIColor colorWithRed:0xFF / 255.0 green:0x45 / 255.0 blue:0x3A / 255.0 alpha:1]; }
+UIColor *SGPageBackground(void) { return UIColor.blackColor; }
+UIColor *SGCardBackground(void) { return [UIColor colorWithRed:0x1C / 255.0 green:0x1C / 255.0 blue:0x1E / 255.0 alpha:1]; }
+
+// 29pt with a 7pt continuous corner and the glyph at 16pt, the size Settings draws its own; a row's title
+// starts 13pt after it, as before the tiles grew, so the pages' own separator insets still line up.
+const CGFloat SGTileRowInset = 16 + 29 + 13;
+
+UIImage *SGTileImageTinted(NSString *symbol, UIColor *color) {
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightMedium];
     UIImage *glyph = [[UIImage systemImageNamed:symbol withConfiguration:config] imageWithTintColor:UIColor.whiteColor renderingMode:UIImageRenderingModeAlwaysOriginal];
-    CGRect box = CGRectMake(0, 0, 28, 28);
+    CGRect box = CGRectMake(0, 0, 29, 29);
+    // A system color is drawn in its dark appearance, the one the pages wear, whatever the phone's.
+    color = [color resolvedColorWithTraitCollection:[UITraitCollection traitCollectionWithUserInterfaceStyle:UIUserInterfaceStyleDark]];
     UIImage *tile = [[[UIGraphicsImageRenderer alloc] initWithSize:box.size] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-        [[UIColor colorWithWhite:1 alpha:0.12] setFill];
+        [color setFill];
         [[UIBezierPath bezierPathWithRoundedRect:box cornerRadius:7] fill];
+        // A wide glyph is fitted inside the square's padding rather than over its edge.
         CGSize size = glyph.size;
+        CGFloat fit = MIN(1, MIN(21 / size.width, 21 / size.height));
+        size = CGSizeMake(size.width * fit, size.height * fit);
         [glyph drawInRect:CGRectMake((box.size.width - size.width) / 2, (box.size.height - size.height) / 2, size.width, size.height)];
     }];
     return [tile imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
 }
 
-const CGFloat SGSectionHeaderHeight = 38;
+UIImage *SGTileImage(NSString *symbol) {
+    return SGTileImageTinted(symbol, [UIColor colorWithRed:0x8E / 255.0 green:0x8E / 255.0 blue:0x93 / 255.0 alpha:1]);
+}
+
+UIImageView *SGChevronView(void) {
+    return SGSymbolView(@"chevron.right", 13, UIImageSymbolWeightBold, 16);
+}
+
+CGFloat SGSectionHeaderHeight(void) { return MAX(38, ceil(SGSubtitleFont().lineHeight) + 14); }
 const CGFloat SGSectionGap = 20;
 
-// Every page below draws Spotify's own list row: a 13pt white title over an 11pt grey subtitle,
+// Every page below draws the same row: a 13pt white title over an 11pt gray subtitle in Spotify's typeface,
 // with an optional symbol in the leading slot.
 void SGFillCell(UITableViewCell *cell, NSString *title, NSString *subtitle, UIColor *color, NSString *symbolName) {
     UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
@@ -117,12 +205,12 @@ void SGFillCell(UITableViewCell *cell, NSString *title, NSString *subtitle, UICo
     content.textProperties.color = color ?: UIColor.whiteColor;
     content.secondaryTextProperties.font = SGSubtitleFont();
     content.secondaryTextProperties.color = SGGrey();
-    content.textToSecondaryTextVerticalPadding = 0;
-    content.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(10, 16, 10, 16);
+    content.textToSecondaryTextVerticalPadding = 2;
+    content.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(11, 16, 11, 16);
     if (symbolName) {
-        content.image = [UIImage systemImageNamed:symbolName withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:15 weight:UIImageSymbolWeightRegular]];
+        content.image = [UIImage systemImageNamed:symbolName withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightRegular]];
         content.imageProperties.tintColor = color ?: UIColor.whiteColor;
-        content.imageToTextPadding = 14;
+        content.imageToTextPadding = 13;
     }
     cell.contentConfiguration = content;
     cell.backgroundColor = SGCardBackground();
@@ -134,10 +222,13 @@ UIView *SGSectionHeader(UITableView *table, NSString *title) {
     UILabel *label = [UILabel new];
     label.text = title.uppercaseString;
     label.font = SGSubtitleFont();
+    label.adjustsFontForContentSizeCategory = YES;
     label.textColor = SGGrey();
-    label.frame = CGRectMake(16, 20, table.bounds.size.width - 32, 14);
+    // On the header's foot, 7pt over the card, however tall Dynamic Type makes the line.
+    CGFloat height = ceil(label.font.lineHeight);
+    label.frame = CGRectMake(16, SGSectionHeaderHeight() - 7 - height, table.bounds.size.width - 32, height);
     label.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, table.bounds.size.width, SGSectionHeaderHeight)];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, table.bounds.size.width, SGSectionHeaderHeight())];
     [header addSubview:label];
     return header;
 }
@@ -158,6 +249,7 @@ UIView *SGSectionFooter(UITableView *table, NSString *text) {
     UILabel *label = [UILabel new];
     label.text = text;
     label.font = SGSubtitleFont();
+    label.adjustsFontForContentSizeCategory = YES;
     label.textColor = SGGrey();
     label.numberOfLines = 0;
     label.frame = CGRectMake(16, kFooterTop, table.bounds.size.width - 32, footerTextHeight(table, text));
@@ -171,65 +263,35 @@ CGFloat SGSectionFooterHeight(UITableView *table, NSString *text) {
     return kFooterTop + footerTextHeight(table, text) + kFooterBottom;
 }
 
-static NSString *linkShown(NSString *url) {
-    NSURL *link = [NSURL URLWithString:url];
-    return link.host ?: url;
-}
-
-NSString *SGLinkedFooterText(NSString *text, NSString *url) {
-    return [NSString stringWithFormat:@"%@ %@", text, linkShown(url)];
-}
-
-@interface SGLinkFooter : UIView
-@property (nonatomic, copy) NSString *url;
-@end
-
-@implementation SGLinkFooter
-- (void)tapped {
-    SGOpenURL(self.url);
-}
-@end
-
-UIView *SGLinkedSectionFooter(UITableView *table, NSString *text, NSString *url) {
-    NSString *whole = SGLinkedFooterText(text, url);
-    UIView *plain = SGSectionFooter(table, whole);
-    UILabel *label = plain.subviews.firstObject;
-    NSMutableAttributedString *styled = [[NSMutableAttributedString alloc] initWithString:whole attributes:@{
-        NSFontAttributeName: SGSubtitleFont(), NSForegroundColorAttributeName: SGGrey()}];
-    [styled addAttribute:NSForegroundColorAttributeName value:SGGreen() range:NSMakeRange(whole.length - linkShown(url).length, linkShown(url).length)];
-    label.attributedText = styled;
-    SGLinkFooter *footer = [[SGLinkFooter alloc] initWithFrame:plain.frame];
-    footer.url = url;
-    [footer addSubview:label];
-    [footer addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:footer action:@selector(tapped)]];
-    footer.isAccessibilityElement = YES;
-    footer.accessibilityLabel = whole;
-    footer.accessibilityTraits = UIAccessibilityTraitLink;
-    return footer;
-}
-
 UITableViewCell *SGDequeueCell(UITableView *table, NSString *identifier) {
     return [table dequeueReusableCellWithIdentifier:identifier]
         ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
 }
 
-static CGFloat brightness(UIColor *color) {
-    CGFloat white = 0;
-    [color getWhite:&white alpha:NULL];
-    return white;
-}
-
-// Spotify's list labels carry its typeface: 13pt titles and 11pt grey subtitles.
-void SGAdoptFonts(UIView *list, UIView *row) {
-    if (sg_titleFont && sg_subtitleFont) return;
+// The rows' titles are the font most of the list's labels between 13 and 18 pt have: 13 pt in 9.1.78's settings
+// list (App/ModSettings.x), larger in the drawer and in 9.1.90's, where the 13 pt subtitles are as many as the
+// titles, so a tie goes to the larger. The drawer's 13 pt labels count only when it has no larger one: the
+// first 13 pt label, which it once took, was there a badge another tweak adds, bold, and the row read smaller and
+// heavier than its neighbours (the phone, 2026-10-23).
+BOOL SGAdoptFonts(UIView *list, UIView *row, BOOL drawer) {
+    if (sg_spotifyFont[drawer]) return NO;
+    NSCountedSet<UIFont *> *titles = [NSCountedSet set];
+    __block UIFont *best = nil, *small = nil;
     SGForEachView(list, ^(UIView *v) {
         if (![v isKindOfClass:UILabel.class] || SGIsInside(v, row)) return;
         UILabel *label = (UILabel *)v;
-        if (label.text.length < 2) return;
-        CGFloat size = label.font.pointSize, white = brightness(label.textColor);
-        if (size == 13 && !sg_titleFont) sg_titleFont = label.font;
-        if (size == 11 && !sg_subtitleFont && white > 0.3 && white < 0.95) sg_subtitleFont = label.font;
+        CGFloat size = label.font.pointSize;
+        if (label.text.length < 2 || size < 13 || size > 18) return;
+        if (drawer && size < 14) {
+            if (!small) small = label.font;
+            return;
+        }
+        [titles addObject:label.font];
+        NSUInteger count = [titles countForObject:label.font], most = [titles countForObject:best];
+        if (!best || count > most || (count == most && size > best.pointSize)) best = label.font;
     });
+    sg_spotifyFont[drawer] = best ?: small;
+    return sg_spotifyFont[drawer] != nil;
 }
 
 UIViewController *SGTopController(void) {
@@ -245,10 +307,43 @@ UIViewController *SGTopController(void) {
     return top;
 }
 
-NSString *const SGSiteURL = @"";
-NSString *const SGRepoURL = @"";
-NSString *const SGDiscordURL = @"";
-NSString *const SGSupportedSpotifyVersion = @"9.1.78";
+@interface SGPopoverStyle : NSObject <UIPopoverPresentationControllerDelegate>
+@end
+
+@implementation SGPopoverStyle
+- (UIModalPresentationStyle)adaptivePresentationStyleForPresentationController:(UIPresentationController *)controller
+                                                               traitCollection:(UITraitCollection *)traits {
+    return UIModalPresentationNone;
+}
+@end
+
+void SGPresentPopover(UIViewController *panel, UIView *from) {
+    if (!from.window) return;
+    static SGPopoverStyle *style;
+    if (!style) style = [SGPopoverStyle new];
+    panel.modalPresentationStyle = UIModalPresentationPopover;
+    UIPopoverPresentationController *popover = panel.popoverPresentationController;
+    popover.sourceView = from;
+    popover.sourceRect = from.bounds;
+    popover.permittedArrowDirections = UIPopoverArrowDirectionUp | UIPopoverArrowDirectionDown;
+    popover.delegate = style;
+    SGPresentDark(panel);
+    __block int tries = 0;
+    __block void (^present)(void);
+    present = ^{
+        UIViewController *top = SGTopController();
+        if ((top.isBeingDismissed || top.isBeingPresented || top.transitionCoordinator) && ++tries < 20) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), present);
+            return;
+        }
+        present = nil;
+        [top presentViewController:panel animated:YES completion:nil];
+    };
+    dispatch_async(dispatch_get_main_queue(), present);
+}
+
+// The fork's repo. Its links stay hidden while this is nil.
+NSString *const SGRepoURL = @"https://github.com/My-Name-Is-Jeff/vitrine";
 
 void SGOpenURL(NSString *url) {
     NSURL *target = url ? [NSURL URLWithString:url] : nil;

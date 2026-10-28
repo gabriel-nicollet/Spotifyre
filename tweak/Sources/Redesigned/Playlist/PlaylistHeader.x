@@ -1,12 +1,12 @@
 // Playlist redesign: the header the Music app gives a playlist (iOS 26.4). The cover runs full bleed across
-// the top of the page and dissolves into the page's colour; the title, the creator and the length are centred
+// the top of the page and dissolves into the page's color; the title, the creator and the length are centered
 // on the bottom of that dissolve; under them one row -- shuffle, a white Play capsule, and save (someone
 // else's playlist) or download (one's own, Liked Songs) -- and the description last.
 //
 // Tree (trees/clean/playlist/01.txt:640-869). Spotify's header is id=PL.Header, and at rest its
 // HeaderContentLayout starts at the very top of the page. It holds exactly two things:
 //
-//     Components.Header.UI.ArtworkImage   a ShadowContainer, the cover square, centred at {80, 68} 243x243
+//     Components.Header.UI.ArtworkImage   a ShadowContainer, the cover square, centered at {80, 68} 243x243
 //     the block                           a plain UIView at {0, 327} 386x178: a column of title, description,
 //                                         creator row and length, and under it the action row
 //
@@ -41,8 +41,8 @@ static const CGFloat kDissolve = 0.46, kTopScrim = 140, kTopScrimAlpha = 0.28;
 static const CGFloat kMinHero = 120, kMinCover = 80;
 
 static char kCoverKey, kMetaKey, kPlayKey, kLayoutKey, kToolbarKey, kScrimKey, kBarScrimKey;
-static char kShuffleKey, kAddKey, kDownloadKey, kInfoKey, kBlockHeightKey, kBlockWatchedKey;
-static char kHeroKey, kHeroHeightKey, kRestPlaneKey, kRowKey, kRowWatchedKey, kMoreKey, kCreatorKey, kPinnedMoreKey, kSortKey;
+static char kShuffleKey, kAddKey, kDownloadKey, kPlainDownloadKey, kInfoKey, kBlockHeightKey, kBlockWatchedKey;
+static char kHeroKey, kHeroHeightKey, kRestPlaneKey, kRowKey, kRowWatchedKey, kMoreKey, kCreatorKey, kPinnedMoreKey, kSortKey, kTitleKey;
 
 #pragma mark - finding things
 
@@ -52,13 +52,16 @@ static char kHeroKey, kHeroHeightKey, kRestPlaneKey, kRowKey, kRowWatchedKey, kM
 @implementation SGRWeakView
 @end
 
-// The page the header is on: FTPViewController's own view, which holds the field, the list and the header
-// and does not scroll. Walked from the header rather than taken off sgr_playlistRoot, so a playlist under
+// The page the header is on: FTPViewController's own view -- or, for the songs the user liked by one artist,
+// CollectionArtistViewController's, the same header kit with no cover -- which holds the field, the list and the
+// header and does not scroll. Walked from the header rather than taken off sgr_playlistRoot, so a playlist under
 // another one on the stack pins its own ⋯ and not the one on top.
 UIView *SGRPlaylistPageOf(UIView *view) {
     for (UIResponder *r = view; r; r = r.nextResponder) {
         if (![r isKindOfClass:UIViewController.class]) continue;
-        if ([NSStringFromClass(r.class) containsString:@"FTPViewController"]) return ((UIViewController *)r).viewIfLoaded;
+        NSString *name = NSStringFromClass(r.class);
+        // The page of the songs liked by one artist is the cover-less case of the same header kit.
+        if ([name containsString:@"FTPViewController"] || [name hasSuffix:@"CollectionArtistViewController"]) return ((UIViewController *)r).viewIfLoaded;
     }
     return nil;
 }
@@ -66,12 +69,13 @@ UIView *SGRPlaylistPageOf(UIView *view) {
 UIViewController *SGRPlaylistHeaderOf(UIView *view) {
     for (UIResponder *r = view; r; r = r.nextResponder) {
         if (![r isKindOfClass:UIViewController.class]) continue;
-        return [NSStringFromClass(r.class) containsString:@"FreeTierPlaylist"] ? (UIViewController *)r : nil;
+        NSString *name = NSStringFromClass(r.class);
+        return [name containsString:@"FreeTierPlaylist"] || [name hasSuffix:@"CollectionArtistHeaderViewController"] ? (UIViewController *)r : nil;
     }
     return nil;
 }
 
-// Invisible for good, whatever Spotify does to it. It fades its cover square and its colour wash back in
+// Invisible for good, whatever Spotify does to it. It fades its cover square and its color wash back in
 // from the scroll itself (trees/continuous/1.txt, 2026-09-17), which a hidden layer shrugs off; but pressing
 // Play reconfigures the header, and that shows the wash, the find bar and the play disc again with
 // -setHidden:NO, which writes the layer's own hidden and so undid this: the wash came back over the
@@ -101,12 +105,12 @@ static UIView *firstOfClass(UIView *root, Class wanted) {
 #pragma mark - the cover, full bleed
 
 // The picture across the top of the page, a scrim over its top for the status bar, and its bottom masked
-// away so the field shows through whatever colour it is at that height: pulled down, the hero ends where
-// the field is already fading to black, and a fade to the field's flat colour showed as an edge.
+// away so the field shows through whatever color it is at that height: pulled down, the hero ends where
+// the field is already fading to black, and a fade to the field's flat color showed as an edge.
 @interface SGRPlaylistHero : UIView
 @property (nonatomic, readonly) UIImageView *picture;
 @property (nonatomic) CGFloat coverPixels;   // the widest copy of the artwork it has been shown
-// The cover in Spotify's artwork view, and every cover it puts there afterwards: the hero keeps itself
+// The cover in Spotify's artwork view, and every cover it puts there afterward: the hero keeps itself
 // right, rather than being handed a picture on each of the header's passes and staying empty between them.
 - (void)followCover:(UIImageView *)source;
 @end
@@ -176,9 +180,8 @@ static UIView *firstOfClass(UIView *root, Class wanted) {
 
     self.coverPixels = image.size.width;
     _picture.image = image;
-    // The page's field takes its colour from the same picture.
+    // The page's field takes its color from the same picture.
     SGRPlaylistSetArtwork(self, image);
-    SGRRevealMark(SGRPlaylistPageOf(self), SGRRevealPicture);
     static BOOL logged;
     if (late && !logged) {
         logged = YES;
@@ -202,7 +205,7 @@ static UIImageView *coverImageIn(UIView *cover) {
     return found ?: empty;
 }
 
-// The hero sits in the plane Spotify's colour wash is drawn on, which slides away as the header collapses, so
+// The hero sits in the plane Spotify's color wash is drawn on, which slides away as the header collapses, so
 // Core Animation carries it and its frame is only measured at rest: reading the header per frame flickers.
 // Pulled down past the top the plane grows and the hero stretches with it, bottom kept in place.
 static void applyHero(UIView *layout, UIView *cover, UIView *plane, UIView *block, CGFloat reach, CGFloat stretch) {
@@ -233,6 +236,12 @@ static void applyHero(UIView *layout, UIView *cover, UIView *plane, UIView *bloc
     if (!CGRectEqualToRect(hero.frame, frame)) hero.frame = frame;
 
     [hero followCover:coverImageIn(cover)];
+    // Full bleed covers off: Spotify's own square stays above the block, shrinking as the header collapses, and the
+    // hero only reads the picture for the field. A mix's picture is full bleed in Spotify's own layout, so it stays.
+    if (!SGRFullBleedCovers() && [cover.accessibilityIdentifier isEqualToString:@"Components.Header.UI.ArtworkImage"]) {
+        hero.hidden = YES;
+        return;
+    }
     conceal(cover);
 }
 
@@ -266,6 +275,9 @@ static BOOL modelFlag(id model, NSString *name, BOOL fallback) {
 // A description is HTML: links to other playlists as <a> and entities for quotes and ampersands.
 static NSString *plainText(NSString *html) {
     if (!html.length) return nil;
+    // The header's passes hand the same description over on every step of the collapse.
+    static NSString *lastHTML, *lastText;
+    if ([html isEqualToString:lastHTML]) return lastText;
     static NSRegularExpression *tags;
     if (!tags) tags = [NSRegularExpression regularExpressionWithPattern:@"<[^>]+>" options:0 error:NULL];
     NSMutableString *text = [[tags stringByReplacingMatchesInString:html options:0 range:NSMakeRange(0, html.length)
@@ -276,7 +288,9 @@ static NSString *plainText(NSString *html) {
         [text replaceOccurrencesOfString:entity withString:entities[entity] options:0 range:NSMakeRange(0, text.length)];
     }
     NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return trimmed.length ? trimmed : nil;
+    lastHTML = [html copy];
+    lastText = trimmed.length ? trimmed : nil;
+    return lastText;
 }
 
 static NSString *firstText(UIView *root, UIView *skip) {
@@ -296,7 +310,7 @@ static NSString *firstText(UIView *root, UIView *skip) {
 static NSString *creatorIn(UIView *block) {
     __block UIView *facepile = nil;
     SGForEachView(block, ^(UIView *v) {
-        if (!facepile && [NSStringFromClass(v.class) containsString:@"FacepileView"]) facepile = v;
+        if (!facepile && SGClassNamed(v.class, @"FacepileView")) facepile = v;
     });
     UIView *row = facepile.superview;
     for (NSUInteger level = 0; row && row != block && level < 3; level++, row = row.superview) {
@@ -311,12 +325,40 @@ static NSString *lengthIn(UIView *block) {
     return firstText(SGRFindByIdentifier(block, @"Components.Header.UI.Metadata", &kMetaKey), nil);
 }
 
+// Someone else's playlist shows save until it is in the library, and then download in its place, as the
+// Music app turns add into download once a playlist is added; taking it out of the library again is
+// Spotify's own Remove from Your Library in the ⋯ menu. Download only where Spotify has put its own
+// download button in the row and left it enabled, so an account that cannot download keeps save (and its
+// checkmark) and nothing is offered that Spotify does not offer: the button fires Spotify's. A playlist
+// already downloading or downloaded shows download whatever save says.
+static BOOL showsDownload(UIView *save, UIView *download) {
+    if (![download isKindOfClass:UIControl.class] || !((UIControl *)download).enabled) return NO;
+    BOOL added = NO;
+    SGRDownloadState state = SGRDownloadNone;
+    return (SGRReadAddTo(save, &added) && added) || (SGRReadDownload(download, &state, NULL) && state != SGRDownloadNone);
+}
+
+// The header of the songs the user liked by one artist: the playlist page's kit with no playlist behind it.
+static BOOL isCollectionArtist(UIView *root) {
+    return [NSStringFromClass(SGRPlaylistHeaderOf(root).class) hasSuffix:@"CollectionArtistHeaderViewController"];
+}
+
+// The name on the songs liked by one artist: the page's big label. Not the first text of the block, which is the
+// word on Spotify's Follow button for as long as the name has not been filled in.
+static NSString *artistTitle(UIView *block) {
+    UIView *label = SGRFindByIdentifier(block, @"Encore.Label-internal", &kTitleKey);
+    NSString *text = [label isKindOfClass:UILabel.class] ? ((UILabel *)label).text : nil;
+    text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return text.length ? text : nil;
+}
+
 // What the playlist's header shows: the name and the description from the page's model, the creator and the
-// length from Spotify's concealed labels, and on Play's right save for someone else's playlist, download for
-// one's own and for Liked Songs, which Spotify reports as neither owned nor unsaved (isOwnedBySelf NO,
-// formatListType liked-songs).
+// length from Spotify's concealed labels, and on Play's right save for someone else's playlist (download once
+// it is saved, showsDownload), download for one's own and for Liked Songs, which Spotify reports as neither
+// owned nor unsaved (isOwnedBySelf NO, formatListType liked-songs).
 static void showPlaylist(SGRHeaderInfo *info, UIView *block, UIView *root, id model) {
-    NSString *title = modelString(model, @"playlistName") ?: firstText(block, nil);
+    BOOL artistPage = isCollectionArtist(root);
+    NSString *title = modelString(model, @"playlistName") ?: (artistPage ? artistTitle(block) : firstText(block, nil));
     [info showTitle:title creator:creatorIn(block) length:lengthIn(block)
               about:plainText(modelString(model, @"playlistDescription"))];
 
@@ -325,7 +367,11 @@ static void showPlaylist(SGRHeaderInfo *info, UIView *block, UIView *root, id mo
     UIView *shuffle = SGRFindByIdentifier(block, @"Components.UI.ShuffleButton", &kShuffleKey);
     UIView *play = SGRFindByIdentifier(root, @"header-play-button", &kPlayKey);
     UIView *save = own ? nil : SGRFindByIdentifier(block, @"Components.UI.AddToButton", &kAddKey);
-    UIView *download = save ? nil : SGRFindByIdentifier(block, @"DownloadButton.Granular*", &kDownloadKey);
+    // The Granular button of the playlist pages, or the plain one the songs liked by one artist have.
+    UIView *download = SGRFindByIdentifier(block, @"DownloadButton.Granular*", &kDownloadKey)
+        ?: SGRFindByIdentifier(block, @"Components.UI.DownloadButton", &kPlainDownloadKey);
+    if (save && showsDownload(save, download)) save = nil;
+    if (save) download = nil;
     [info showShuffle:shuffle play:play trailing:save ?: download
      trailingFallback:[UIImage systemImageNamed:save ? @"plus" : @"arrow.down"] playColor:SGRPlaylistFieldColor(info)];
     // Only what the button draws goes: a concealed layer still sends the actions the capsule fires.
@@ -333,18 +379,17 @@ static void showPlaylist(SGRHeaderInfo *info, UIView *block, UIView *root, id mo
 
     // Whoever made the playlist, opened from the line that names them. Spotify's own button carries the
     // facepile and the name and takes the tap to a profile -- or, for a playlist several people are on, to
-    // the picker it opens itself (issue #56). Liked Songs has no such button, so no faces either.
+    // the picker it opens itself (issue #56).
     UIView *creator = SGRFindByIdentifier(block, @"Components.PlaylistHeader.collaboratorsButton", &kCreatorKey);
     [info showCreatorLink:creator];
-    [info showFacesIn:creator];
+    // And their picture before their name, the first face of the facepile that button carries.
+    [info showCreatorPicture:SGRCreatorPicture(creator)];
 
     // More, pinned over the page rather than left in the block, which is concealed and scrolls away; and
     // Spotify's own Sort, from the find-on-page toolbar this header conceals, for the ⋯ sheet to fire.
     UIView *page = SGRPlaylistPageOf(root);
     SGRPinnedMore(page, &kPinnedMoreKey, SGRFindByIdentifier(block, @"Components.UI.ContextMenuButton*", &kMoreKey));
     SGRPlaylistTakeSort(page, SGRFindByIdentifier(root, @"Components.Header.UI.Toolbar.Button", &kSortKey));
-    // The name and Play are what the header waits for; the row's other buttons fade in on their own when late.
-    if (title && play) SGRRevealMark(page, SGRRevealHeader);
 
     static BOOL logged;
     if (!logged && info.window && (title || play)) {
@@ -390,7 +435,7 @@ static SGRHeaderInfo *applyInfo(UIView *block, UIView *headerRoot, UIViewControl
     for (UIView *sub in block.subviews) {
         if (sub != info) conceal(sub);
     }
-    // The page's width, centred on the screen: Spotify's block is 16pt narrower than the page (386 of 402).
+    // The page's width, centered on the screen: Spotify's block is 16pt narrower than the page (386 of 402).
     CGFloat x = -[block convertPoint:CGPointZero toView:headerRoot].x;
     CGRect frame = CGRectMake(round(x), 0, headerRoot.bounds.size.width, block.bounds.size.height);
     if (!CGRectEqualToRect(info.frame, frame)) info.frame = frame;
@@ -407,7 +452,7 @@ static SGRHeaderInfo *applyInfo(UIView *block, UIView *headerRoot, UIViewControl
 #pragma mark - the header's pass
 
 // Find on this page and Sort sit above the cover, shown as the page is pulled down. They stay Spotify's own
-// controls, so the tap opens Spotify's find page; only the grey box becomes glass.
+// controls, so the tap opens Spotify's find page; only the gray box becomes glass.
 static void glassUp(UIView *box, const void *key) {
     CGSize size = box.bounds.size;
     if (size.width < 1 || size.height < 1) return;
@@ -431,7 +476,7 @@ static void applyToolbar(UIView *headerRoot) {
     }
 }
 
-// Two scrims Spotify fades in under the navigation bar as the page scrolls, each tinted with its own colour
+// Two scrims Spotify fades in under the navigation bar as the page scrolls, each tinted with its own color
 // for the page rather than the field's: LiquidGlass.gradientContainer (124pt, a child of HeaderLayout) and
 // the HeaderNavigationBar's GradientView. On Liked Songs the first is Spotify's blue, a band across the top
 // of a black page (trees/continuous/2.txt, 2026-09-18). UIKit's own scroll edge effect is still there under
@@ -446,13 +491,13 @@ static void applyScrims(UIView *headerRoot) {
     if (!bar) bar = NSClassFromString(@"_TtC28EncoreConsumerMobile_BaseKit19HeaderNavigationBar");
     UIView *navigation = firstOfClass(headerRoot, bar);
     for (UIView *sub in navigation.subviews) {
-        if (![NSStringFromClass(sub.class) containsString:@"GradientView"]) continue;
+        if (!SGClassNamed(sub.class, @"GradientView")) continue;
         conceal(sub);
         objc_setAssociatedObject(headerRoot, &kBarScrimKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
 
-// Spotify's colour wash goes, so the page's field shows through, and the plane it was drawn on is handed
+// Spotify's color wash goes, so the page's field shows through, and the plane it was drawn on is handed
 // back: it is where the hero belongs (applyHero).
 //
 // The wash is a gradient on a plain view of its own, and that view is painted the base surface. Spotify
@@ -472,7 +517,7 @@ static UIView *applyBackground(UIView *layout) {
     SGRPlaylistHero *hero = objc_getAssociatedObject(plane, &kHeroKey);
     SGForEachView(container, ^(UIView *v) {
         if (hero && (v == hero || [v isDescendantOfView:hero])) return;
-        if ([NSStringFromClass(v.class) containsString:@"GradientView"]) {
+        if (SGClassNamed(v.class, @"GradientView")) {
             conceal(v);
             return;
         }
@@ -550,6 +595,8 @@ static void applyHeader(UIView *layout) {
     }
     CGFloat reach = rest - SGRHeaderInfoBottom - [info contentHeightForWidth:info.bounds.size.width] + SGRHeaderInfoTitleRise;
     if (cover) applyHero(layout, cover, plane, block, reach, stretch);
+    // Liked Songs has no cover at all, so there is nothing for its page to wait for once it has its title.
+    else if (info.window && modelString(viewModelOf(headerVC), @"playlistName")) SGRPlaylistShowPage(layout);
 }
 
 // The content layout of the page `root` belongs to, kept weakly on it: the header lays out on every step of

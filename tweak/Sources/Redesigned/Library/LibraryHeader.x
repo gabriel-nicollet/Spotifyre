@@ -27,7 +27,7 @@
 // pass and stays where it is put.
 //
 // Each control moves by a transform rather than by a frame. Spotify's stack lays them out from constraints of
-// its own on every pass, and Auto Layout sets a view's centre and bounds and leaves its transform alone, so the
+// its own on every pass, and Auto Layout sets a view's center and bounds and leaves its transform alone, so the
 // move outlives the pass that made it (Search moves the Browse cells the same way). Nothing leaves the stack:
 // an arranged view of Spotify's that hides traps its stack in updateConstraints (Kit/SGRRestyle.h), so what
 // goes is alpha, touches and accessibility, and the title Spotify draws goes that way while ours is a subview
@@ -78,10 +78,12 @@ void SGRLibraryClearScrim(UIView *header) {
 
 // The header's controls, in the order they are to read from the leading edge, leaving out what this build does
 // not have, what Spotify has hidden (a folder shows play or pause, never both) and what has not been laid out.
-static NSMutableArray<UIView *> *controlsIn(UIView *header, NSArray<NSString *> *identifiers, const void **keys) {
+static NSMutableArray<UIView *> *controlsIn(UIView *header, NSArray<NSString *> *identifiers, const void *const keys[]) {
+    UIView *controls[identifiers.count];
+    SGRFindByIdentifiers(header, identifiers, keys, controls);
     NSMutableArray<UIView *> *found = [NSMutableArray array];
     for (NSUInteger i = 0; i < identifiers.count; i++) {
-        UIView *control = SGRFindByIdentifier(header, identifiers[i], keys[i]);
+        UIView *control = controls[i];
         if (control && !control.hidden && control.alpha > 0.01 && control.bounds.size.width > 1) [found addObject:control];
     }
     return found;
@@ -93,7 +95,7 @@ static CGFloat placeTrailing(UIView *header, NSArray<UIView *> *controls) {
     CGFloat right = header.bounds.size.width - kRowInset;
     for (UIView *control in controls.reverseObjectEnumerator) {
         CGFloat width = control.bounds.size.width;
-        // The centre is where Auto Layout put the control, whatever transform is on it; its frame is not.
+        // The center is where Auto Layout put the control, whatever transform is on it; its frame is not.
         CGFloat natural = [control.superview convertPoint:CGPointZero toView:header].x + control.center.x - width / 2;
         CGAffineTransform move = CGAffineTransformMakeTranslation(right - width - natural, 0);
         if (!CGAffineTransformEqualToTransform(control.transform, move)) control.transform = move;
@@ -172,9 +174,7 @@ static void layoutTitle(UIView *header, UIView *spotifyTitle, CGFloat leading, C
 #pragma mark - the two headers
 
 static BOOL isFace(UIView *view) {
-    static Class faceClass;
-    if (!faceClass) faceClass = NSClassFromString(@"_TtC29ListeningActivity_ElementsKit21AdaptiveFaceContainer");
-    return faceClass && [view isKindOfClass:faceClass];
+    return SGRIsAvatar(view);
 }
 
 // The root header's controls at its trailing edge, the avatar last, and the title before them. Answers what it

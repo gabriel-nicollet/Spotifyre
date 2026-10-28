@@ -17,8 +17,13 @@ NSString *SGURIString(id uri);
 @protocol SGPlayerStateObserver <NSObject>
 // Called when the track, the context, paused, playing, loading or shuffle changed, not for position.
 - (void)playerStateDidChange:(SPTPlayerState *)state;
+@optional
+// Every accepted report, including position-only updates. Called before the change callback.
+- (void)playerStateDidReport:(SPTPlayerState *)state;
 @end
 // Observers are held weakly and need no removal.
 void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer);
 // The last state reported, nil before the player has reported one.
 SPTPlayerState *SGPlayerState(void);
+// The SPTEsperantoPlayer the mod observes, nil until the app has added its first observer.
+id SGPlayer(void);

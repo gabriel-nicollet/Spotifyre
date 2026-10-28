@@ -145,7 +145,7 @@ void SGDSPWideRun(void *state, float *left, float *right, uint32_t frames) {
     double extra = wide->side - 1;
     for (uint32_t i = 0; i < frames; i++) {
         double mid = 0.5 * ((double)left[i] + right[i]), side = 0.5 * ((double)left[i] - right[i]);
-        // Narrowing scales the whole side; widening adds to it over 150 Hz only, so the bass stays centred.
+        // Narrowing scales the whole side; widening adds to it over 150 Hz only, so the bass stays centered.
         double highs = SGBiquadTick(&wide->highs, &wide->highsState, side);
         side = extra > 0 ? side + extra * highs : side * wide->side;
         left[i] = (float)(mid + side);

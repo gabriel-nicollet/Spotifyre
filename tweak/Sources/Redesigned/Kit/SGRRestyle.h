@@ -13,9 +13,11 @@
 
 // Alpha 0, no touches, hidden from accessibility, and kept so: the instance becomes a runtime subclass
 // of its own class (the way KVO does it, `class` still answers the original) whose setAlpha: and
-// setUserInteractionEnabled: hold those values. For plain UIKit views (a UIImageView, a UILabel); a
-// Swift class, or an instance already observed with KVO, gets the values once instead, re-applied on
-// the next call, and a log line says so once.
+// setUserInteractionEnabled: hold those values. For plain UIKit views (a UIImageView, a UILabel). One of
+// Spotify's Swift classes, or an instance KVO observes, keeps its alpha (only its alpha: touches and
+// accessibility are set again on each call) through an override on its class that holds only the instances
+// suppressed; where neither takes, the values are set once instead, re-applied
+// on the next call, and a log line says so once.
 void SGRSuppress(UIView *view);
 
 // Digits of one width in the label, kept through Spotify's own setText:, setAttributedText: and
@@ -45,6 +47,14 @@ BOOL SGRObserveLayout(UIView *view, void (^laidOut)(UIView *view));
 // answer is kept weakly on `root` under `cacheKey` and searched for again only when it is gone, has
 // left `root` or changed its identifier. nil when there is none; a miss is not cached.
 UIView *SGRFindByIdentifier(UIView *root, NSString *identifier, const void *cacheKey);
+// SGRFindByIdentifier for every identifier at once, in one walk (Core's SGFindRememberedAll): `found[i]` is
+// identifiers[i]'s view or nil. For lookups made back to back with nothing between them that changes the tree.
+void SGRFindByIdentifiers(UIView *root, NSArray<NSString *> *identifiers, const void *const cacheKeys[], UIView *__strong found[]);
+
+// Whether `view` is the profile avatar that opens the side drawer, in the Home, Search and Library headers. Known by
+// its identifier, which every version gives it: 9.1.88 draws it in an AdaptiveFaceContainer, 9.1.90 in an Encore
+// button around a listening-activity pulse, which a check by class alone took for something else.
+BOOL SGRIsAvatar(UIView *view);
 
 // A view that draws only a shadow, for a view whose own layer clips (rounded artwork): made once per
 // host under `key`, inserted at the bottom of `host`. The caller gives it its frame and transform; its
@@ -59,11 +69,11 @@ SGRShadowPlate *SGRShadowPlateIn(UIView *host, const void *key);
 // The base surface a list cell paints over a page's field, cleared: the #121212 the redesign's AMOLED
 // black has already turned black, on the cell and on everything under it nearly as wide as the cell, and
 // the full-width fade a "see more" draws over its last row, which the black makes a dark band. The Kit's
-// repaint hook misses all of it -- it only hears about a colour when Spotify sets it, and a cell is painted
+// repaint hook misses all of it -- it only hears about a color when Spotify sets it, and a cell is painted
 // before it is inside the page and brings its old paint with it when it is reused -- so this runs from the
 // cell's own layout pass, and is cheap enough to.
 //
-// Only what is nearly as wide as the cell: a badge's black disc, a card's grey and an image's placeholder
+// Only what is nearly as wide as the cell: a badge's black disc, a card's gray and an image's placeholder
 // are their own. A cell nested inside the cell and narrower than that (a card in a carousel) is not walked
 // into: its own row decides for it.
 void SGRClearCellPaint(UIView *cell);
@@ -77,3 +87,8 @@ void SGRActivate(UIView *source);
 // else those for touch up inside. NO when the control has neither (an Encore control that reads its
 // touches through a gesture recognizer); what was found is logged once per class.
 BOOL SGRFire(UIControl *control);
+
+// Gives a scroll view the hard top edge effect, a dark band, and keeps the soft one SGREdgeEffect.x sets on every
+// other scroll view off it: for text that stays over a page scrolling under it (Home's kept title, HomeHeader.x).
+// iOS 26 on; nothing before.
+void SGRHardTopEdge(UIScrollView *scrollView);

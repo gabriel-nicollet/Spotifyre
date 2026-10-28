@@ -5,7 +5,7 @@ harness's own, so lines sung over each other, instrumental breaks, pronunciation
 be looked at on the Mac without the phone. The songs are TTML read by the real `SGTTML.m`, or LRC timed
 by the real estimate in `KaraokeTiming.m`.
 
-    ./build.sh                  # this checkout; ./build.sh old builds HEAD's for a before and after, OPT=-O2 optimised
+    ./build.sh                  # this checkout; ./build.sh old builds HEAD's for a before and after, OPT=-O2 optimized
     xcrun simctl install <udid> build/new/LyricsHarness.app
     xcrun simctl launch <udid> com.vojta.lyricsharness.new -song duet -at 114000 -pauseAt 117600
     xcrun simctl io <udid> screenshot shot.png
@@ -27,6 +27,8 @@ The fixtures are real TTML and LRC with every word swapped for filler of the sam
 - `spotify-line`, `spotify-static` Spotify's own color-lyrics JSON, LINE_SYNCED and UNSYNCED, read by
   the real `SGKaraokeLinesFromBody`; `static` plain text, as LRCLIB's plainLyrics
   (these four are written by `fixtures/linetimed.py` from `plain`'s timing)
+- `scripts` (built in) a line in each of Japanese, Korean, Chinese, Russian, Greek, Thai, Hindi, Arabic and
+  Hebrew among English ones, every other one translated, for `-spotifyglass.lyricsRomanised 1`
 - `rtl` (built in) right to left lines among left to right ones, a second voice, a break before the
   last line; `rtlx` the same with translations and a romanization
 
@@ -39,8 +41,9 @@ at launch. `-dumpTo PATH` writes the dump to a file, for when `--console` shows 
 A real file goes in with `-file /path/song.ttml`: the simulator reads the Mac's paths.
 
 `-perf LABEL` logs the view's per frame cost (its display link's `tick`) every 240 frames; run with
-`simctl launch --console` to read it. `-dump 1` prints the lines as read, with their pronunciations and
-translations, and quits. `-openMenu 3` opens the pronunciation and translation menu three seconds in,
+`simctl launch --console` to read it. `-dump 1` prints the lines as read, with their pronunciations,
+translations and romanized readings, and quits. `-romanise 1` asserts the romanized readings
+(`Shared/Lyrics/Romanise.m`) and quits with the number that failed. `-openMenu 3` opens the pronunciation and translation menu three seconds in,
 `-toggleAt 3` switches both over as the menu would, and `-light 1` puts the window in light mode.
 
 A screen recording catches the motion: `simctl io <udid> recordVideo -f run.mp4`, then e.g.

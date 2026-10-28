@@ -1,6 +1,6 @@
-// Player redesign: previous, play and next as bare glyphs, the way the Music app draws them, and the
-// timestamps under the slider in digits of one width, so they stop twitching every second. A tap on the
-// bar seeks there.
+// Player redesign: previous, play and next as bare glyphs, the way the Music app draws them, shuffle and
+// repeat left out on request, and the timestamps under the slider in digits of one width, so they stop
+// twitching every second.
 //
 // The glyphs are drawn over Spotify's controls rather than instead of them: each button keeps its
 // action, its enabled state, its accessibility and the Gestures zones around it, and the glyph takes no
@@ -21,6 +21,7 @@
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Shared/Haptics/Haptics.h"
+#import "Shared/Lyrics/Lyrics.h"
 #import "Player.h"
 
 static const CGFloat kSkipGlyphSize = 32, kPlayGlyphSize = 44;
@@ -31,7 +32,7 @@ static const NSTimeInterval kSpinnerCheck = 0.6;
 // one sent before the player caught up, for this long; after it the player's word is final.
 static const NSTimeInterval kTapTrust = 1.2;
 
-static char kPreviousKey, kNextKey, kPlayKey, kGlyphKey, kTakeKey, kRemainingKey;
+static char kPreviousKey, kNextKey, kPlayKey, kGlyphKey, kTakeKey, kRemainingKey, kRowKey, kShuffleKey, kRepeatKey;
 static __weak UIView *sg_playView;
 static __weak UIButton *sg_playButton;
 static CFTimeInterval sg_tappedUntil;
@@ -63,8 +64,8 @@ static SGRGlyphView *glyphFor(UIView *owner, NSString *symbol, CGFloat size) {
     return glyph;
 }
 
-// Centred by the autoresizing mask as well as here: the unit lays out before the buttons in its row
-// have a size, so a centre set then is the middle of nothing, (0, 0), and no later pass of the unit's
+// Centered by the autoresizing mask as well as here: the unit lays out before the buttons in its row
+// have a size, so a center set then is the middle of nothing, (0, 0), and no later pass of the unit's
 // comes to move it (trees/continuous/1.txt, 2026-09-17: glyphs at {-23.7, -14.7} in 56pt buttons).
 static void keepOnTop(UIView *view, UIView *host) {
     if (view.superview != host) {
@@ -93,6 +94,55 @@ static void skipGlyph(UIView *host, NSString *identifier, const void *findKey, N
         if (view != glyph && [view isKindOfClass:icon]) SGRPlayerVanish(view);
     });
     keepOnTop(glyph, content);
+}
+
+#pragma mark - shuffle and repeat
+
+// Each switched on under Hide on the player (SGRKeyPlayerHideShuffle, SGRKeyPlayerHideRepeat), read at launch. By
+// alpha in their slots: the row is Spotify's stack of five, and setting `hidden` in an Encore stack crashes. Kept by
+// SGRSuppress, since Spotify's state render sets a button's alpha back to 1 when shuffle or repeat changes.
+static BOOL sg_hideShuffle, sg_hideRepeat;
+// The ordinary player's controls, apart from sg_controlsHost, which the DJ's set too.
+static __weak UIView *sg_buttonsHost;
+static NSString *const kShuffleID = @"Components.UI.ShuffleButton", *const kRepeatID = @"Nowplaying-RepeatButton";
+
+static BOOL isHiddenButton(UIView *view) {
+    NSString *identifier = view.accessibilityIdentifier;
+    return (sg_hideShuffle && [identifier isEqualToString:kShuffleID])
+        || (sg_hideRepeat && [identifier isEqualToString:kRepeatID]);
+}
+
+// Spotify also swaps in a new button a moment after the controls lay out (seen for repeat on 9.1.90: the instance
+// found leaves the window 40 ms later and another arrives at alpha 1), with no layout pass after it. The new one is
+// caught as it arrives. The class is an Encore button's, taken from the first one found (`class`, not a KVO class
+// it may be observed through), since its name carries a build hash. It is the class of every Encore button, the
+// playlist, album and artist headers' shuffle among them, so only one inside the player's controls goes; any other
+// pays a window check and an identifier compare as it moves.
+%group SGRPlayerButtonArrival
+%hook SGRPlayerButton
+- (void)didMoveToWindow {
+    %orig;
+    UIView *view = (UIView *)self;
+    if (view.window && isHiddenButton(view) && sg_buttonsHost && [view isDescendantOfView:sg_buttonsHost]) SGRSuppress(view);
+}
+%end
+%end
+
+static void suppressButton(UIView *button) {
+    if (!button) return;
+    SGRSuppress(button);
+    static BOOL hooked;
+    if (hooked) return;
+    hooked = YES;
+    %init(SGRPlayerButtonArrival, SGRPlayerButton = button.class);
+}
+
+// Each is looked for only in its own end of the row, so a row without it (a podcast's) costs a walk of one
+// element, not the unit.
+static void hideShuffleAndRepeat(UIView *host, UIStackView *row) {
+    sg_buttonsHost = host;
+    if (sg_hideShuffle) suppressButton(SGRFindByIdentifier(row.arrangedSubviews.firstObject, kShuffleID, &kShuffleKey));
+    if (sg_hideRepeat) suppressButton(SGRFindByIdentifier(row.arrangedSubviews.lastObject, kRepeatID, &kRepeatKey));
 }
 
 #pragma mark - play
@@ -133,7 +183,9 @@ static void playTapped(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kTapTrust * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ refreshPlayGlyph(YES); });
 }
 
-static void playGlyph(UIView *host) {
+void SGRPlayerPlayGlyphIn(UIView *host) {
+    // A state that lands after the layout asks this unit to lay out again (the watcher below).
+    sg_controlsHost = host;
     UIView *play = SGRFindByIdentifier(host, @"SPTNowPlayingPlayButton", &kPlayKey);
     if (!play) {
         logMissing(@"SPTNowPlayingPlayButton");
@@ -175,29 +227,18 @@ static void playGlyph(UIView *host) {
     dispatch_once(&once, ^{ SGLog(@"redesign player: play glyph over %@ (disc %@ suppressed), spinner %@", NSStringFromClass(play.class), NSStringFromClass(disc.class), spinnerShowing(button) ? @"showing" : @"hidden"); });
 }
 
-static void layOutControls(UIViewController *unit) {
-    UIView *host = unit.viewIfLoaded;
-    if (!host) return;
-    // The unit lays out before its row does, and the glyphs are centred on the buttons in it.
-    [SGRowIn(host) layoutIfNeeded];
-    sg_controlsHost = host;
-    skipGlyph(host, @"SPTNowPlayingPreviousTrackButton", &kPreviousKey, @"backward.fill");
-    skipGlyph(host, @"SPTNowPlayingNextTrackButton", &kNextKey, @"forward.fill");
-    playGlyph(host);
-}
-
 %hook _TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    layOutControls((UIViewController *)self);
-}
-%end
-
-// Spotify Free's player builds the same elements into units of its own (Player.h).
-%hook _TtC32ReinventFree_ReinventFreeNpvImpl40ReinventFreePlaybackControlsElementsUnit
-- (void)viewDidLayoutSubviews {
-    %orig;
-    layOutControls((UIViewController *)self);
+    UIView *host = ((UIViewController *)self).viewIfLoaded;
+    if (!host) return;
+    // The unit lays out before its row does, and the glyphs are centered on the buttons in it.
+    UIStackView *row = (UIStackView *)SGFindRemembered(host, &kRowKey, ^BOOL(UIView *v) { return SGIsRow(v); });
+    [row layoutIfNeeded];
+    skipGlyph(host, @"SPTNowPlayingPreviousTrackButton", &kPreviousKey, @"backward.fill");
+    skipGlyph(host, @"SPTNowPlayingNextTrackButton", &kNextKey, @"forward.fill");
+    SGRPlayerPlayGlyphIn(host);
+    hideShuffleAndRepeat(host, row);
 }
 %end
 
@@ -245,181 +286,167 @@ static UILabel *monospaced(UIView *host, NSString *identifier, const void *findK
 
 #pragma mark - tap to seek
 
-// Spotify's position slider (NowPlaying_ECMKit.ProgressBar.Slider) moves only under a drag of its thumb.
-// A tap elsewhere on the bar is played to it as that drag: its unit seeks on the control events a drag
-// sends and leaves a tracking slider alone when the position comes in, so the thumb stays where it went.
-static const CGFloat kTapSlop = 10;                 // further than this and the finger is dragging
-static const NSTimeInterval kTapLongest = 0.5;
-static const CGFloat kBarReach = 12;                // past either end of the bar a tap still counts
+// Spotify's slider only drags. A tap in the band around it seeks: anywhere across the duration unit's height,
+// up to kSeekReach past either end of the bar, moving at most kSeekSlop and lifting within kSeekLongest. A tap
+// on the thumb is the thumb's, and a tap on a time is Spotify's, which turns the remaining time into the length.
+static const CGFloat kSeekReach = 12, kSeekSlop = 10, kThumbSlop = 6;
+static const NSTimeInterval kSeekLongest = 0.5;
+// The tap is played to the slider as a short drag, so Spotify's unit seeks the way it does at the end of one.
+// Meanwhile the slider says it is still tracking, until the player's position is this near the place tapped or
+// for this long at most, so the unit does not put the thumb back to the old place first. A drag that did not
+// seek by kSeekCheck is seeked directly.
+static const NSInteger kSeekNear = 1500;
+static const NSTimeInterval kSeekHold = 2, kSeekCheck = 1;
 
-static char kSliderKey, kSeekWatcherKey;
-static __weak UISlider *sg_seekingSlider;           // answers isTracking while a tap plays its drag
-static __weak UITouch *sg_tapTouch;                 // the touch the watcher follows
-static BOOL sg_sliderTookTap;                       // and the slider began tracking it too (its thumb)
+static char kSliderKey, kSeekTapKey, kTakeTimeKey, kRemainingTimeKey;
+static __weak UISlider *sg_seekSlider;
+static NSInteger sg_seekTarget;
+static CFTimeInterval sg_seekHeldUntil;
 
-static BOOL seekable(UISlider *slider) {
-    return slider.window && slider.enabled && slider.userInteractionEnabled && !slider.hidden && slider.alpha > 0.01
-        && slider.maximumValue > slider.minimumValue;
+static CGFloat thumbCentre(UISlider *slider, float value) {
+    CGRect bounds = slider.bounds;
+    return CGRectGetMidX([slider thumbRectForBounds:bounds trackRect:[slider trackRectForBounds:bounds] value:value]);
 }
 
-// Where the thumb's middle would be under `point`, in the slider's own space.
-static float valueAt(UISlider *slider, CGPoint point) {
-    CGRect track = [slider trackRectForBounds:slider.bounds];
-    CGFloat from = CGRectGetMidX([slider thumbRectForBounds:slider.bounds trackRect:track value:slider.minimumValue]);
-    CGFloat to = CGRectGetMidX([slider thumbRectForBounds:slider.bounds trackRect:track value:slider.maximumValue]);
-    if (fabs(to - from) < 1) return slider.value;
-    CGFloat share = MIN(MAX((point.x - from) / (to - from), 0), 1);
-    return slider.minimumValue + (float)share * (slider.maximumValue - slider.minimumValue);
+// Where along the song a point on the slider is, over the thumb's travel rather than the slider's width, so
+// either end of the bar is the song's start or end exactly.
+CGFloat SGRSeekShareAt(UISlider *slider, CGPoint point) {
+    CGFloat start = thumbCentre(slider, slider.minimumValue), end = thumbCentre(slider, slider.maximumValue);
+    if (end - start < 1) return NAN;
+    return MIN(1, MAX(0, (point.x - start) / (end - start)));
 }
 
-static void seekOnTap(UISlider *slider, CGPoint point) {
-    float value = valueAt(slider, point), was = slider.value;
-    CGRect thumb = [slider thumbRectForBounds:slider.bounds trackRect:[slider trackRectForBounds:slider.bounds] value:was];
-    // A tap on the thumb is the thumb's, as it always was.
-    if (sg_sliderTookTap && fabs(point.x - CGRectGetMidX(thumb)) <= thumb.size.width / 2 + 2) return;
-    // Still holding a touch it took itself (a bar that scrubs from anywhere), it seeks where it is put
-    // when it lets go.
-    BOOL own = sg_sliderTookTap && slider.isTracking;
-    if (own) {
-        [slider setValue:value animated:NO];
-        [slider sendActionsForControlEvents:UIControlEventValueChanged];
-    } else {
-        sg_seekingSlider = slider;
-        [slider sendActionsForControlEvents:UIControlEventTouchDown];
-        [slider setValue:value animated:NO];
-        [slider sendActionsForControlEvents:UIControlEventValueChanged];
-        // What its endTrackingWithTouch: sends, then the touch up the unit seeks on.
-        [slider sendActionsForControlEvents:UIControlEventTouchCancel];
-        [slider sendActionsForControlEvents:UIControlEventTouchUpInside];
-        sg_seekingSlider = nil;
-    }
-    SGPlayFeedback(SGFeedbackSkip);
-    static NSUInteger logged;
-    if (logged++ < 3) SGLog(@"redesign player: tap to seek from %.3f to %.3f (%@), now %.3f", was, value, own ? @"its own touch" : @"played as a drag", slider.value);
-}
-
-// Watches the band around the bar for a tap and never recognizes, so it holds up, cancels and stands in
-// the way of nothing: the slider's own drag and the pull that closes the player go on as they did.
-@interface SGRSeekTapWatcher : UIGestureRecognizer
-@property (nonatomic, weak) UISlider *slider;
-@property (nonatomic, weak) UIView *taken, *remaining;
-@end
-
-@implementation SGRSeekTapWatcher {
-    __weak UITouch *_touch;
-    CGPoint _start;
-    NSTimeInterval _began;
-}
-
-// The times under the bar are not the bar: the remaining time turns into the length when tapped.
-- (BOOL)takes:(UITouch *)touch {
-    UISlider *slider = self.slider;
-    UIView *band = self.view;
-    if (!seekable(slider) || ![slider isDescendantOfView:band]) return NO;
-    CGPoint point = [touch locationInView:band];
-    CGRect bar = [band convertRect:slider.bounds fromView:slider];
-    if (point.x < CGRectGetMinX(bar) - kBarReach || point.x > CGRectGetMaxX(bar) + kBarReach) return NO;
-    UIView *times[] = {self.taken, self.remaining};
-    for (size_t i = 0; i < sizeof(times) / sizeof(*times); i++) {
-        UIView *view = times[i];
-        if (!view.window || view.alpha < 0.01) continue;
-        if (CGRectContainsPoint(CGRectInset([band convertRect:view.bounds fromView:view], -kTapSlop / 2, 0), point)) return NO;
+// Whether a tap at `point` in the duration unit's view seeks.
+BOOL SGRSeekTapLands(UIView *unit, UISlider *slider, CGPoint point) {
+    // The AI DJ's unit keeps a slider in a hidden element on a live stream: nothing to seek there.
+    if (!slider.window || !slider.enabled || ![slider isDescendantOfView:unit] || !SGShownUnder(slider, unit) || !CGRectContainsPoint(unit.bounds, point)) return NO;
+    CGRect bar = [unit convertRect:slider.bounds fromView:slider];
+    if (point.x < CGRectGetMinX(bar) - kSeekReach || point.x > CGRectGetMaxX(bar) + kSeekReach) return NO;
+    CGRect bounds = slider.bounds;
+    CGRect thumb = [slider thumbRectForBounds:bounds trackRect:[slider trackRectForBounds:bounds] value:slider.value];
+    if (CGRectContainsPoint(CGRectInset([unit convertRect:thumb fromView:slider], -kThumbSlop, -kThumbSlop), point)) return NO;
+    for (UIView *time in @[SGRFindByIdentifier(unit, @"now-playing-time-take-label", &kTakeTimeKey) ?: NSNull.null,
+                           SGRFindByIdentifier(unit, @"now-playing-time-remaning-label", &kRemainingTimeKey) ?: NSNull.null]) {
+        if ([time isKindOfClass:UIView.class] && !time.hidden && CGRectContainsPoint([unit convertRect:time.bounds fromView:time], point)) return NO;
     }
     return YES;
 }
 
+static BOOL seekHeld(void) {
+    if (!sg_seekHeldUntil) return NO;
+    NSInteger at = SGKaraokePositionMs();
+    if (CACurrentMediaTime() < sg_seekHeldUntil && (at < 0 || labs(at - sg_seekTarget) >= kSeekNear)) return YES;
+    sg_seekHeldUntil = 0;
+    return NO;
+}
+
+// Whether Spotify listens to the slider's control events, which is how a played drag reaches it.
+static BOOL listensToSlider(UISlider *slider) {
+    __block BOOL listens = NO;
+    [slider enumerateEventHandlers:^(UIAction *action, id target, SEL selector, UIControlEvents events, BOOL *stop) {
+        if (events & (UIControlEventTouchUpInside | UIControlEventValueChanged)) listens = *stop = YES;
+    }];
+    return listens;
+}
+
+static void seekTo(UISlider *slider, CGFloat share) {
+    SPTPlayerState *state = SGPlayerState();
+    if (!state || state.duration <= 0 || isnan(share)) return;
+    NSInteger ms = (NSInteger)(share * state.duration * 1000);
+    SGPlayFeedback(SGFeedbackSkip);
+    BOOL played = listensToSlider(slider);
+    static NSUInteger logged;
+    if (logged++ < 3) SGLog(@"redesign player: a tap seeks to %.3f of the song, %@", share, played ? @"played to the slider as a drag" : @"directly (nothing listens to the slider)");
+    if (!played) {
+        SGKaraokeSeek(ms);
+        return;
+    }
+    [slider setValue:slider.minimumValue + share * (slider.maximumValue - slider.minimumValue) animated:NO];
+    sg_seekSlider = slider;
+    sg_seekTarget = ms;
+    sg_seekHeldUntil = CACurrentMediaTime() + kSeekHold;
+    [slider sendActionsForControlEvents:UIControlEventTouchDown];
+    [slider sendActionsForControlEvents:UIControlEventValueChanged];
+    [slider sendActionsForControlEvents:UIControlEventTouchUpInside];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kSeekCheck * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSInteger at = SGKaraokePositionMs();
+        if (sg_seekTarget != ms || at < 0 || labs(at - ms) < kSeekNear) return;
+        SGLog(@"redesign player: the played drag did not seek (at %ld ms, not %ld), seeking directly", (long)at, (long)ms);
+        sg_seekHeldUntil = 0;
+        SGKaraokeSeek(ms);
+    });
+}
+
+// A recognizer of its own rather than a tap: UIKit lets a slider keep a single tap from a tap recognizer
+// over it, and the band reaches past the slider.
+@interface SGRSeekTap : UIGestureRecognizer
+@property (nonatomic, weak) UISlider *slider;
+@end
+
+@implementation SGRSeekTap {
+    CGPoint _start;
+    CFTimeInterval _began;
+}
+
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [super touchesBegan:touches withEvent:event];
+    UIView *unit = self.view;
     UITouch *touch = touches.anyObject;
-    if (_touch || event.allTouches.count > 1 || ![self takes:touch]) {
+    CGPoint point = [touch locationInView:unit];
+    if (touches.count > 1 || [event touchesForGestureRecognizer:self].count > 1 || !SGRSeekTapLands(unit, self.slider, point)) {
         self.state = UIGestureRecognizerStateFailed;
         return;
     }
-    _touch = touch;
-    _start = [touch locationInView:self.view];
-    _began = touch.timestamp;
-    sg_tapTouch = touch;
-    sg_sliderTookTap = NO;
+    _start = point;
+    _began = CACurrentMediaTime();
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [super touchesMoved:touches withEvent:event];
-    UITouch *touch = _touch;
-    if (!touch || ![touches containsObject:touch]) return;
-    CGPoint now = [touch locationInView:self.view];
-    if (hypot(now.x - _start.x, now.y - _start.y) > kTapSlop) self.state = UIGestureRecognizerStateFailed;
+    CGPoint point = [touches.anyObject locationInView:self.view];
+    if (hypot(point.x - _start.x, point.y - _start.y) > kSeekSlop) self.state = UIGestureRecognizerStateFailed;
 }
 
-// Gesture recognizers hear of the touch before the views do, and a scroll view above the slider may
-// hand it its touch only now, so the seek waits until the slider has had it.
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [super touchesEnded:touches withEvent:event];
-    UITouch *touch = _touch;
-    UISlider *slider = self.slider;
-    if (touch && [touches containsObject:touch] && touch.timestamp - _began <= kTapLongest && seekable(slider)) {
-        CGPoint now = [touch locationInView:self.view], onBar = [touch locationInView:slider];
-        if (hypot(now.x - _start.x, now.y - _start.y) <= kTapSlop) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (seekable(slider)) seekOnTap(slider, onBar);
-            });
-        }
-    }
-    self.state = UIGestureRecognizerStateFailed;
+    BOOL tap = CACurrentMediaTime() - _began <= kSeekLongest;
+    self.state = tap ? UIGestureRecognizerStateEnded : UIGestureRecognizerStateFailed;
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [super touchesCancelled:touches withEvent:event];
     self.state = UIGestureRecognizerStateFailed;
 }
 
-- (void)reset {
-    [super reset];
-    _touch = nil;
+- (void)sgr_seek {
+    UISlider *slider = self.slider;
+    if (slider) seekTo(slider, SGRSeekShareAt(slider, [self.view convertPoint:_start toView:slider]));
 }
-
-- (BOOL)canPreventGestureRecognizer:(UIGestureRecognizer *)other { return NO; }
-
 @end
+
+static void watchSlider(UIView *host) {
+    UISlider *slider = (UISlider *)SGRFindByIdentifier(host, @"SPTNowPlayingSliderV2", &kSliderKey);
+    if (![slider isKindOfClass:UISlider.class]) return;
+    SGRSeekTap *tap = objc_getAssociatedObject(host, &kSeekTapKey);
+    if (!tap) {
+        tap = [[SGRSeekTap alloc] initWithTarget:nil action:nil];
+        [tap addTarget:tap action:@selector(sgr_seek)];
+        [host addGestureRecognizer:tap];
+        objc_setAssociatedObject(host, &kSeekTapKey, tap, OBJC_ASSOCIATION_ASSIGN);
+        SGLog(@"redesign player: a tap around the progress bar seeks");
+    }
+    tap.slider = slider;
+}
 
 %hook _TtCO17NowPlaying_ECMKit11ProgressBar6Slider
 - (BOOL)isTracking {
-    return (UISlider *)self == sg_seekingSlider || %orig;
-}
-
-- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    BOOL tracking = %orig;
-    if (tracking && touch == sg_tapTouch) sg_sliderTookTap = YES;
-    return tracking;
+    return ((UISlider *)self == sg_seekSlider && seekHeld()) || %orig;
 }
 %end
 
-static void watchForSeekTaps(UIView *host, UILabel *taken, UILabel *remaining) {
-    UISlider *slider = (UISlider *)SGRFindByIdentifier(host, @"SPTNowPlayingSliderV2", &kSliderKey);
-    if (![slider isKindOfClass:UISlider.class]) {
-        logMissing(@"the position slider");
-        return;
-    }
-    SGRSeekTapWatcher *watcher = objc_getAssociatedObject(host, &kSeekWatcherKey);
-    if (!watcher) {
-        watcher = [[SGRSeekTapWatcher alloc] initWithTarget:nil action:NULL];
-        watcher.cancelsTouchesInView = NO;
-        watcher.delaysTouchesEnded = NO;
-        [host addGestureRecognizer:watcher];
-        objc_setAssociatedObject(host, &kSeekWatcherKey, watcher, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        SGLog(@"redesign player: tap to seek on %@ over %@ in %@", NSStringFromClass(slider.class),
-              NSStringFromCGRect([host convertRect:slider.bounds fromView:slider]), NSStringFromCGRect(host.bounds));
-    }
-    watcher.slider = slider;
-    watcher.taken = taken;
-    watcher.remaining = remaining;
-}
-
-static void layOutTimes(UIViewController *unit) {
+// The ordinary player's duration unit and the AI DJ's (DJMDurationElementsUnit) hold the same progress bar and times.
+static void durationLaidOut(UIViewController *unit) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
+    watchSlider(host);
     UILabel *taken = monospaced(host, @"now-playing-time-take-label-internal", &kTakeKey);
-    UILabel *remaining = monospaced(host, @"now-playing-time-remaning-label-internal", &kRemainingKey);
-    watchForSeekTaps(host, taken, remaining);
+    monospaced(host, @"now-playing-time-remaning-label-internal", &kRemainingKey);
     // Whether Spotify's font has digits of one width shows in the descriptor's feature settings.
     if (!taken) return;
     static dispatch_once_t once;
@@ -429,29 +456,34 @@ static void layOutTimes(UIViewController *unit) {
 %hook _TtC20NowPlaying_ModesImpl19DurationElementUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    layOutTimes((UIViewController *)self);
+    durationLaidOut((UIViewController *)self);
 }
 %end
 
-%hook _TtC32ReinventFree_ReinventFreeNpvImpl20DurationElementsUnit
+// The DJ unit is another class, hooked only when the build has it (see %ctor).
+%group SGRDJControlsDurationHooks
+%hook SGRDJControlsDurationUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    layOutTimes((UIViewController *)self);
+    durationLaidOut((UIViewController *)self);
 }
+%end
 %end
 
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
+    sg_hideShuffle = SGHidden(SGRKeyPlayerHideShuffle);
+    sg_hideRepeat = SGHidden(SGRKeyPlayerHideRepeat);
+    Class djDuration = SGRDJClass(@"DJMDurationElementsUnit");
+    if (djDuration) { %init(SGRDJControlsDurationHooks, SGRDJControlsDurationUnit = djDuration); }
     sg_controlsWatcher = [SGRPlayerControlsWatcher new];
     SGAddPlayerStateObserver(sg_controlsWatcher);
     SGRequireClasses(@[
         @"_TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit",
         @"_TtC20NowPlaying_ModesImpl19DurationElementUnit",
-        @"_TtC32ReinventFree_ReinventFreeNpvImpl40ReinventFreePlaybackControlsElementsUnit",
-        @"_TtC32ReinventFree_ReinventFreeNpvImpl20DurationElementsUnit",
         @"_TtC28EncoreConsumerMobile_BaseKit14PlayButtonView",
-        @"_TtCO17NowPlaying_ECMKit11ProgressBar6Slider",
         @"SPTEncoreIconView",
+        @"_TtCO17NowPlaying_ECMKit11ProgressBar6Slider",
     ]);
 }

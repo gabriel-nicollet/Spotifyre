@@ -9,11 +9,15 @@
 const CGFloat SGRHeaderInfoBottom = 14;
 const CGFloat SGRHeaderInfoTitleRise = 56;
 
+BOOL SGRFullBleedCovers(void) {
+    static BOOL on;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ on = SGEnabled(SGRKeyFullBleedCovers); });
+    return on;
+}
+
 // The text kSide in from the edges; Play at least kPlayWidth wide, the Music app's; the gaps between.
 static const CGFloat kSide = 20, kPlayWidth = 148, kRowSpacing = 16, kRowAbove = 16, kAboutAbove = 14;
-// The faces: Spotify's 24pt, overlap and 8pt gap, but no taller than the name's line, so none moves the title.
-static const CGFloat kFaceMax = 22, kFaceStep = 0.85, kFaceGap = 8, kFaceRing = 1.5;
-static const NSUInteger kFaceCap = 3;
 
 static UILabel *infoLabel(UIView *parent, UIFont *font, UIColor *color, NSInteger lines, NSTextAlignment alignment) {
     UILabel *label = [UILabel new];
@@ -34,56 +38,46 @@ static BOOL setText(UILabel *label, NSString *text) {
     return YES;
 }
 
-// Each face of the Encore facepile under `row` is a plain UIImageView inside an AvatarView; the pile's icon
-// disc and its "+N" are not faces. Left to right, as the pile draws them.
-static NSArray<UIImageView *> *faceViewsIn(UIView *row, BOOL *found) {
-    __block UIView *pile = nil;
-    SGForEachView(row, ^(UIView *v) {
-        if (!pile && [NSStringFromClass(v.class) containsString:@"FacepileView"]) pile = v;
-    });
-    *found = pile != nil;
-    if (!pile) return nil;
-    NSMutableArray<UIImageView *> *faces = [NSMutableArray array];
-    SGForEachView(pile, ^(UIView *v) {
-        if (![v isKindOfClass:UIImageView.class] || v.hidden) return;
-        BOOL avatar = NO;
-        for (UIView *up = v.superview; up && up != pile; up = up.superview) {
-            if (up.hidden) return;
-            if ([NSStringFromClass(up.class) containsString:@"AvatarView"]) avatar = YES;
-        }
-        if (avatar) [faces addObject:(UIImageView *)v];
-    });
-    [faces sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
-        CGFloat ax = [a convertPoint:CGPointZero toView:pile].x, bx = [b convertPoint:CGPointZero toView:pile].x;
-        return ax < bx ? NSOrderedAscending : (ax > bx ? NSOrderedDescending : NSOrderedSame);
-    }];
-    return faces;
-}
+// The most a title picture takes: a share of the text's width, and a height near three lines of the title.
+static const CGFloat kLogoWidthShare = 0.8, kLogoMaxHeight = 64;
+// Between the creator's picture and the name.
+static const CGFloat kPictureGap = 8;
 
-static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
-    if (a.count != b.count) return NO;
-    for (NSUInteger i = 0; i < a.count; i++) {
-        if (a[i] != b[i]) return NO;
-    }
-    return YES;
+// A face is at least this wide, and square give or take a point.
+static const CGFloat kMinFace = 16;
+
+UIImageView *SGRCreatorPicture(UIView *root) {
+    if (!root) return nil;
+    // The faces of a facepile overlap, the leading one first to the eye.
+    BOOL rtl = root.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    __block UIImageView *found = nil;
+    __block CGFloat edge = 0;
+    SGForEachView(root, ^(UIView *v) {
+        CGSize size = v.bounds.size;
+        if (![v isKindOfClass:UIImageView.class] || size.width < kMinFace || fabs(size.width - size.height) > 1) return;
+        CGFloat x = [v convertPoint:CGPointMake(rtl ? size.width : 0, 0) toView:root].x;
+        if (!found || (rtl ? x > edge : x < edge)) found = (UIImageView *)v, edge = x;
+    });
+    return found;
 }
 
 @implementation SGRHeaderInfo {
     UILabel *_title, *_creator, *_length, *_about;
+    UIImageView *_logo;
+    UIImageView *_picture;   // the creator's, round, before the name
+    __weak UIImageView *_pictureSource;
+    UIImage *_titleImage;   // what the title's place is laid out for; the logo keeps its picture while it fades out
     SGRMirrorButton *_shuffle, *_trailing;
     SGRPlayCapsule *_play;
     __weak UIView *_creatorLink;
-    UIView *_faces;
-    NSMutableArray<UIImageView *> *_faceViews;
-    NSArray<UIImage *> *_faceImages;
-    __weak UIView *_facesRow;
-    NSHashTable<UIImageView *> *_watchedFaces;
-    CGFloat _faceSide;
-    BOOL _facesQueued, _creatorDrawn;
+    // contentHeightForWidth:'s last answer, for _measuredWidth; a negative width is none. Cleared when the text or
+    // the title picture changes, the only things it measures.
+    CGFloat _measuredWidth, _measuredHeight;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
+    _measuredWidth = -1;
     _title = infoLabel(self, SGRFont(UIFontTextStyleTitle2, UIFontWeightBold, UIContentSizeCategoryExtraLarge),
                        SGRPrimary(), 2, NSTextAlignmentCenter);
     _title.accessibilityTraits = UIAccessibilityTraitHeader;
@@ -93,10 +87,15 @@ static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
                         SGRTertiary(), 1, NSTextAlignmentCenter);
     _about = infoLabel(self, SGRFont(UIFontTextStyleFootnote, UIFontWeightRegular, UIContentSizeCategoryExtraLarge),
                        SGRSecondary(), 2, NSTextAlignmentNatural);
+    _picture = [UIImageView new];
+    _picture.contentMode = UIViewContentModeScaleAspectFill;
+    _picture.clipsToBounds = YES;
+    _picture.hidden = YES;
+    [self addSubview:_picture];
 
     _shuffle = [[SGRMirrorButton alloc] initWithFrame:CGRectZero];
     _shuffle.fallbackGlyph = [UIImage systemImageNamed:@"shuffle"];
-    // White like the buttons beside it while off -- Spotify's off grey read as a disabled button next to the
+    // White like the buttons beside it while off -- Spotify's off gray read as a disabled button next to the
     // white download (issue #65) -- and the accent while on, so its state still shows.
     _shuffle.glyphColor = SGRPrimary();
     _shuffle.onGlyphColor = SGRAccent();
@@ -107,16 +106,6 @@ static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
         button.hidden = YES;
         [self addSubview:button];
     }
-
-    _faces = [UIView new];
-    _faces.hidden = YES;
-    // Transparent while empty: a fade begins from what is on screen, and a hidden layer is there at 1.
-    _faces.alpha = 0;
-    _faces.userInteractionEnabled = NO;
-    _faces.accessibilityElementsHidden = YES;
-    [self addSubview:_faces];
-    _faceViews = [NSMutableArray array];
-    _faceImages = @[];
     return self;
 }
 
@@ -124,8 +113,65 @@ static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
 // pull or a tap through to the page under it.
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit = [super hitTest:point withEvent:event];
+    // The creator label is the width of the view, so the label itself answers a touch well away from the
+    // name; both it and the view answer only where the name is drawn.
     if (hit == self || hit == _creator) return [self sgr_creatorHit:point];
     return hit;
+}
+
+// The picture often arrives from the network with the page already on screen. There the picture and the
+// title cross over, and the block makes room for the picture in one move rather than in a frame, the picture
+// growing out of the title's place; out of a window it all happens at once.
+- (void)showTitleImage:(UIImage *)image {
+    if (_titleImage == image) return;
+    if (!_logo) {
+        _logo = [UIImageView new];
+        _logo.contentMode = UIViewContentModeScaleAspectFit;
+        _logo.isAccessibilityElement = YES;
+        _logo.accessibilityTraits = UIAccessibilityTraitHeader;
+        _logo.alpha = 0;
+        [self addSubview:_logo];
+    }
+    _titleImage = image;
+    _measuredWidth = -1;
+    _title.accessibilityElementsHidden = image != nil;
+    if (image) {
+        if (!_logo.image) [UIView performWithoutAnimation:^{ self->_logo.frame = self->_title.frame; }];
+        _logo.image = image;
+        _logo.hidden = NO;
+    }
+    [self setNeedsLayout];
+    void (^fade)(void) = ^{
+        self->_logo.alpha = image ? 1 : 0;
+        self->_title.alpha = image ? 0 : 1;
+    };
+    void (^faded)(BOOL) = ^(BOOL finished) {
+        if (self->_titleImage) return;
+        self->_logo.image = nil;
+        self->_logo.hidden = YES;
+    };
+    if (!self.window) {
+        fade();
+        faded(YES);
+        return;
+    }
+    SGRAnimate(SGRMotionFade, fade, faded);
+    SGRAnimateLayout(self, ^{ [self layoutIfNeeded]; }, nil);
+}
+
+// The space under a line: a picture needs more room under it than a line of text does.
+- (CGFloat)sgr_gapAfter:(UILabel *)label {
+    if (label == _title && _titleImage) return 8;
+    return label == _creator ? 4 : 2;
+}
+
+// The title's line: the picture's fitted height where there is a picture, the label's otherwise.
+- (CGSize)sgr_sizeOf:(UILabel *)label width:(CGFloat)text {
+    if (label != _title || !_titleImage) return [label sizeThatFits:CGSizeMake(text, CGFLOAT_MAX)];
+    CGSize image = _titleImage.size;
+    if (image.width <= 0 || image.height <= 0) return CGSizeZero;
+    CGFloat scale = MIN(text * kLogoWidthShare / image.width, kLogoMaxHeight / image.height);
+    return CGSizeMake(round(image.width * scale), round(image.height * scale));
 }
 
 - (BOOL)showTitle:(NSString *)title creator:(NSString *)creator length:(NSString *)length about:(NSString *)about {
@@ -134,12 +180,16 @@ static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
     changed |= setText(_creator, creator);
     changed |= setText(_length, length);
     changed |= setText(_about, about);
-    if (changed) [self setNeedsLayout];
+    if (changed) {
+        _measuredWidth = -1;
+        [self setNeedsLayout];
+    }
     return changed;
 }
 
-// The creator line, tappable where its name and faces are drawn -- a tap either side of a short name belongs
-// to the page under it, which a pull down starts on. Spotify's own control stays concealed and only fires.
+// The creator line, tappable. The label is as wide as the view and centered, so the target is narrowed to
+// the text itself -- a tap either side of a short name belongs to the page under it, which a pull down
+// starts on. Spotify's own control stays concealed where it is and only fires.
 - (void)showCreatorLink:(UIView *)control {
     _creatorLink = control;
     BOOL live = control != nil;
@@ -154,134 +204,37 @@ static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
     SGRActivate(_creatorLink);
 }
 
-// The label is only as wide as its name, and the faces take no touches of their own: both answer as the name.
+- (void)showCreatorPicture:(UIImageView *)source {
+    if (source != _pictureSource) {
+        _pictureSource = source;
+        __weak SGRHeaderInfo *weakSelf = self;
+        if (source) SGRObserveImage(source, ^(UIImageView *view) {
+            SGRHeaderInfo *info = weakSelf;
+            if (info && view == info->_pictureSource) [info sgr_takePicture:view.image];
+        });
+    }
+    [self sgr_takePicture:source.image];
+}
+
+// The picture fades in where it lands with the page on screen; the name makes room for it in the same move.
+- (void)sgr_takePicture:(UIImage *)image {
+    if (image == _picture.image) return;
+    BOOL appears = image && !_picture.image;
+    _picture.image = image;
+    _picture.hidden = image == nil;
+    [self setNeedsLayout];
+    if (!appears || !self.window) return;
+    _picture.alpha = 0;
+    SGRAnimate(SGRMotionFade, ^{ self->_picture.alpha = 1; }, nil);
+    SGRAnimateLayout(self, ^{ [self layoutIfNeeded]; }, nil);
+}
+
+// The creator line takes a touch only where its text and its picture are; everything else of the view is the
+// page's. The label is laid out at the text's own width (-layoutSubviews).
 - (UIView *)sgr_creatorHit:(CGPoint)point {
     if (!_creator.userInteractionEnabled || _creator.hidden) return nil;
-    CGRect line = _creator.frame;
-    if (!_faces.hidden) line = CGRectUnion(line, _faces.frame);
+    CGRect line = _picture.hidden ? _creator.frame : CGRectUnion(_creator.frame, _picture.frame);
     return CGRectContainsPoint(CGRectInset(line, -8, -6), point) ? _creator : nil;
-}
-
-- (void)showFacesIn:(UIView *)row {
-    _facesRow = row;
-    BOOL pile = NO;
-    NSArray<UIImageView *> *views = row ? faceViewsIn(row, &pile) : nil;
-    NSMutableArray<UIImage *> *images = [NSMutableArray array];
-    for (UIImageView *view in views) {
-        [self sgr_watchFace:view];
-        if (view.image && images.count < kFaceCap) [images addObject:view.image];
-    }
-    static BOOL loggedNoPile, loggedEmpty;
-    if (row && !pile && !loggedNoPile) {
-        loggedNoPile = YES;
-        SGLog(@"redesign header: no facepile under %@ (%@)", NSStringFromClass(row.class), row.accessibilityIdentifier);
-    }
-    if (views.count && !images.count && !_faceImages.count && !loggedEmpty) {
-        loggedEmpty = YES;
-        SGLog(@"redesign header: %lu face(s) before \"%@\", no picture yet", (unsigned long)views.count, _creator.text);
-    }
-    // Faces still loading, or loading again, keep what is drawn; one with no picture ever draws nothing.
-    if (views.count && !images.count) return;
-    [self sgr_takeFaces:images];
-}
-
-// A picture lands with no layout pass anywhere, so its image view is watched; the Kit's class-level watch
-// covers Encore's own classes, and these are plain UIImageViews.
-- (void)sgr_watchFace:(UIImageView *)view {
-    if (!_watchedFaces) _watchedFaces = [NSHashTable weakObjectsHashTable];
-    if ([_watchedFaces containsObject:view]) return;
-    [_watchedFaces addObject:view];
-    __weak SGRHeaderInfo *weakSelf = self;
-    SGRObserveImage(view, ^(UIImageView *changed) { [weakSelf sgr_faceLanded]; });
-}
-
-// Called from inside Spotify's setImage:, so read once it has returned, and once for faces landing together.
-- (void)sgr_faceLanded {
-    if (_facesQueued) return;
-    _facesQueued = YES;
-    __weak SGRHeaderInfo *weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        SGRHeaderInfo *info = weakSelf;
-        if (!info) return;
-        info->_facesQueued = NO;
-        UIView *row = info->_facesRow;
-        if (row) [info showFacesIn:row];
-    });
-}
-
-- (void)sgr_takeFaces:(NSArray<UIImage *> *)images {
-    if (sameImages(images, _faceImages)) return;
-    BOOL arriving = !_faceImages.count && images.count;
-    _faceImages = [images copy];
-    while (_faceViews.count < images.count) {
-        UIImageView *face = [UIImageView new];
-        face.contentMode = UIViewContentModeScaleAspectFill;
-        face.clipsToBounds = YES;
-        // Each face under the one before it, as the pile draws them.
-        [_faces insertSubview:face atIndex:0];
-        [_faceViews addObject:face];
-        _faceSide = 0;
-    }
-    for (NSUInteger i = 0; i < _faceViews.count; i++) {
-        _faceViews[i].image = i < images.count ? images[i] : nil;
-        _faceViews[i].hidden = i >= images.count;
-    }
-    if (arriving) {
-        static BOOL loggedFirst, loggedLate;
-        BOOL *logged = _creatorDrawn ? &loggedLate : &loggedFirst;
-        if (!*logged) {
-            *logged = YES;
-            SGLog(@"redesign header: %lu face(s) before \"%@\", %@", (unsigned long)images.count, _creator.text,
-                  _creatorDrawn ? @"landed after the line was drawn, faded in" : @"there on the first pass");
-        }
-    }
-    [self setNeedsLayout];
-    if (!images.count) _faces.alpha = 0;
-    if (!arriving) return;
-    if (!_creatorDrawn || !self.window || _creator.hidden) {
-        _faces.alpha = 1;
-        return;
-    }
-    // Late, over a line already drawn: the name slides aside once while the faces fade in beside it.
-    CGPoint from = _creator.center;
-    [UIView performWithoutAnimation:^{ [self layoutIfNeeded]; }];
-    CGPoint to = _creator.center;
-    _creator.center = from;
-    SGRAnimate(SGRMotionLayout, ^{ self->_creator.center = to; }, nil);
-    SGRAnimate(SGRMotionFade, ^{ self->_faces.alpha = 1; }, nil);
-}
-
-// The name as wide as its text, the faces before it (after it, right to left), the two centred as one.
-- (void)sgr_layoutCreator:(CGRect)line {
-    NSUInteger count = _faceImages.count;
-    CGFloat side = MIN(kFaceMax, ceil(_creator.font.lineHeight) + 1), step = round(side * kFaceStep);
-    CGFloat faces = count ? side + (count - 1) * step : 0, lead = count ? faces + kFaceGap : 0;
-    CGFloat name = MIN(ceil([_creator sizeThatFits:CGSizeMake(CGFLOAT_MAX, CGFLOAT_MAX)].width), line.size.width - lead);
-    CGFloat x = line.origin.x + round((line.size.width - lead - name) / 2);
-    BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
-    _creator.frame = CGRectMake(rtl ? x : x + lead, line.origin.y, name, line.size.height);
-    _creatorDrawn = YES;
-    _faces.hidden = count == 0;
-    if (!count) return;
-    _faces.frame = CGRectMake(rtl ? x + name + kFaceGap : x, line.origin.y + round((line.size.height - side) / 2), faces, side);
-    for (NSUInteger i = 0; i < count; i++) _faceViews[i].frame = CGRectMake(i * step, 0, side, side);
-    if (_faceSide == side) return;
-    _faceSide = side;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    for (NSUInteger i = 0; i < _faceViews.count; i++) {
-        CALayer *layer = _faceViews[i].layer;
-        layer.cornerRadius = side / 2;
-        if (i == 0) continue;
-        // A ring of the field between a face and the one over it, cut rather than drawn, whatever the colour.
-        UIBezierPath *cut = [UIBezierPath bezierPathWithRect:CGRectMake(0, 0, side, side)];
-        [cut appendPath:[UIBezierPath bezierPathWithOvalInRect:CGRectInset(CGRectMake(-step, 0, side, side), -kFaceRing, -kFaceRing)]];
-        CAShapeLayer *mask = [CAShapeLayer layer];
-        mask.fillRule = kCAFillRuleEvenOdd;
-        mask.path = cut.CGPath;
-        layer.mask = mask;
-    }
-    [CATransaction commit];
 }
 
 - (void)showShuffle:(UIView *)shuffle play:(UIView *)play trailing:(UIView *)trailing
@@ -297,22 +250,22 @@ static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
         if (playColor) _play.contentColor = playColor;
         [_play feedFrom:play];
     }
-    if (trailing) [_trailing feedFrom:trailing];
+    // Another of Spotify's buttons in the trailing place (save becoming download once the playlist is saved) is
+    // a crossfade, a change of what the button is rather than a move.
+    if (trailing && _trailing.source && trailing != _trailing.source && !_trailing.hidden && self.window) {
+        [UIView transitionWithView:_trailing duration:SGRCrossfade options:UIViewAnimationOptionTransitionCrossDissolve
+                        animations:^{ [self->_trailing feedFrom:trailing]; } completion:nil];
+    }
+    else if (trailing) [_trailing feedFrom:trailing];
 
     BOOL changed = NO;
     NSArray<UIView *> *buttons = @[_shuffle, _play, _trailing];
     NSArray<NSNumber *> *shown = @[@(shuffle != nil), @(play != nil), @(trailing != nil)];
     for (NSUInteger i = 0; i < buttons.count; i++) {
-        UIView *button = buttons[i];
         BOOL hide = !shown[i].boolValue;
-        if (button.hidden == hide) continue;
-        button.hidden = hide;
-        changed = YES;
-        // One of Spotify's buttons that turns up after the page is on screen (save, on a playlist opened for
-        // the first time) fades in beside the others rather than popping in.
-        if (!hide && self.window) {
-            button.alpha = 0;
-            SGRAnimate(SGRMotionFade, ^{ button.alpha = 1; }, nil);
+        if (buttons[i].hidden != hide) {
+            buttons[i].hidden = hide;
+            changed = YES;
         }
     }
     if (changed) [self setNeedsLayout];
@@ -323,42 +276,65 @@ static BOOL sameImages(NSArray<UIImage *> *a, NSArray<UIImage *> *b) {
 }
 
 - (CGFloat)contentHeightForWidth:(CGFloat)width {
+    if (width == _measuredWidth) return _measuredHeight;
     CGFloat text = MAX(0, width - 2 * kSide), height = 0;
     UILabel *previous = nil;
     for (UILabel *label in @[_title, _creator, _length]) {
         if (label.hidden) continue;
-        if (previous) height += previous == _creator ? 4 : 2;
-        height += ceil([label sizeThatFits:CGSizeMake(text, CGFLOAT_MAX)].height);
+        if (previous) height += [self sgr_gapAfter:previous];
+        height += ceil([self sgr_sizeOf:label width:text].height);
         previous = label;
     }
     if (previous) height += kRowAbove;
     height += SGRActionHeight;
     if (!_about.hidden) height += kAboutAbove + ceil([_about sizeThatFits:CGSizeMake(text, CGFLOAT_MAX)].height);
+    _measuredWidth = width;
+    _measuredHeight = height;
     return height;
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat width = self.bounds.size.width, text = MAX(0, width - 2 * kSide);
-    CGFloat y = round(self.bounds.size.height - SGRHeaderInfoBottom - [self contentHeightForWidth:width]);
+    CGFloat content = [self contentHeightForWidth:width];
+    CGFloat y = round(self.bounds.size.height - SGRHeaderInfoBottom - content);
+    if (self.pinnedTop > 0 && self.pinnedTop + content <= self.bounds.size.height) y = round(self.pinnedTop);
+    // No name, no picture: it belongs to the line.
+    _picture.hidden = !_picture.image || _creator.hidden;
 
     UILabel *previous = nil;
     for (UILabel *label in @[_title, _creator, _length]) {
         if (label.hidden) continue;
-        if (previous) y += previous == _creator ? 4 : 2;
-        CGFloat height = ceil([label sizeThatFits:CGSizeMake(text, CGFLOAT_MAX)].height);
-        if (label == _creator) [self sgr_layoutCreator:CGRectMake(kSide, y, text, height)];
-        else label.frame = CGRectMake(kSide, y, text, height);
+        if (previous) y += [self sgr_gapAfter:previous];
+        CGSize size = [self sgr_sizeOf:label width:text];
+        CGFloat height = ceil(size.height);
+        label.frame = CGRectMake(kSide, y, text, height);
+        // The name at its own width, so a tap beside it is the page's (-sgr_creatorHit:), and before it the
+        // picture, a line high so the line keeps its height, the two centered together. The picture leads, so it
+        // is on the right in a right-to-left language.
+        if (label == _creator) {
+            CGFloat picture = _picture.hidden ? 0 : height + kPictureGap;
+            CGFloat named = MIN(ceil(size.width), MAX(0, text - picture));
+            CGFloat x = round((width - picture - named) / 2);
+            BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+            _picture.frame = CGRectMake(rtl ? x + named + kPictureGap : x, y, height, height);
+            _picture.layer.cornerRadius = height / 2;
+            label.frame = CGRectMake(rtl ? x : x + picture, y, named, height);
+        }
+        if (label == _title && _titleImage) {
+            _logo.frame = CGRectMake(round((width - size.width) / 2), y, size.width, height);
+            _logo.accessibilityLabel = _title.text;
+        }
         y += height;
         previous = label;
     }
-    if (_creator.hidden) _faces.hidden = YES;
     if (previous) y += kRowAbove;
 
     // Play on the middle of the page, the other two hung off its sides, so it holds its place whether both
     // are there or not.
     CGFloat side = SGRActionHeight;
-    CGFloat playWidth = MAX(kPlayWidth, [_play sgr_width]);
+    // As wide as its word, short of pushing the other two off the page.
+    CGFloat playWidth = MIN(MAX(kPlayWidth, [_play sgr_width]), width - 2 * (kSide + side + kRowSpacing));
     CGRect play = CGRectMake(round((width - playWidth) / 2), y, playWidth, side);
     _play.frame = play;
     _shuffle.frame = CGRectMake(CGRectGetMinX(play) - kRowSpacing - side, y, side, side);

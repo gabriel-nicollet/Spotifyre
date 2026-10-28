@@ -4,7 +4,7 @@
 // Tree (trees/clean/playlist/02.txt:164-247): a cell id=Playlist.ItemCell holds an Encore.ListRow painted the
 // base surface, and in it Encore.ImageView 48x48 (the artwork), Track.Row.Content.Title,
 // Track.Row.Content.Subtitle and, at the trailing edge, Components.UI.ContextMenuButton. The row's own paint
-// is cleared here rather than left to the Kit's repaint hook, which only hears about a colour when Spotify
+// is cleared here rather than left to the Kit's repaint hook, which only hears about a color when Spotify
 // sets it and not when a reused cell already carries one.
 //
 // Spotify's type and its spacing are left alone: the row is 64pt for a title of 18pt, and a larger font of
@@ -28,7 +28,14 @@
 // Under the text rather than the whole row, as the Music app draws it; the trailing end clears the page margin.
 static const CGFloat kHairline = 0.5, kHairlineGap = 12;
 
-static char kRowKey, kArtKey, kSubtitleKey, kLineKey, kToolbarKey;
+static char kRowKey, kTrackRowKey, kArtKey, kArtHolderKey, kSubtitleKey, kLineKey, kToolbarKey;
+
+@interface SGRRowArtHolder : NSObject
+@property (nonatomic, weak) UIView *view;
+@end
+
+@implementation SGRRowArtHolder
+@end
 
 static UIView *identified(UIView *root, NSString *identifier, const void *cacheKey) {
     return SGRFindByIdentifier(root, identifier, cacheKey);
@@ -58,20 +65,40 @@ static void applyHairline(UIView *row, CGFloat leading) {
     [CATransaction commit];
 }
 
-static void applyRow(UIView *cell) {
+// Where the artwork has no Encore.ImageView of its own (Track.Row): the holder the picture is drawn in, a private
+// class of the row kit that is told by its name. Kept on the row, as the lookups by identifier are.
+static UIView *artHolderIn(UIView *row) {
+    SGRRowArtHolder *box = objc_getAssociatedObject(row, &kArtHolderKey);
+    UIView *cached = box.view;
+    if (cached && [cached isDescendantOfView:row]) return cached;
+    __block UIView *found = nil;
+    SGForEachView(row, ^(UIView *v) {
+        if (!found && [NSStringFromClass(v.class) hasSuffix:@"ImageViewHolder"]) found = v;
+    });
+    if (found) {
+        if (!box) {
+            box = [SGRRowArtHolder new];
+            objc_setAssociatedObject(row, &kArtHolderKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        box.view = found;
+    }
+    return found;
+}
+
+// A playlist's row is an Encore.ListRow; the songs liked by one artist have a Track.Row of the same kit.
+static UIView *rowIn(UIView *cell) {
+    return identified(cell, @"Encore.ListRow", &kRowKey) ?: identified(cell, @"Track.Row", &kTrackRowKey);
+}
+
+// YES when the cell holds a track row.
+static BOOL applyRow(UIView *cell) {
     clearSurface(cell);
-    UIView *row = identified(cell, @"Encore.ListRow", &kRowKey);
-    if (!row) return;
+    UIView *row = rowIn(cell);
+    if (!row) return NO;
     clearSurface(row);
 
-    // The first track with its title in is the list the page waits for (Kit/SGRReveal.h). A row still loading
-    // is Components.UI.RetrievalRowLoadingElementUI rather than Encore.ListRow, grey bars with no text in them
-    // (trees/continuous/1.txt).
-    UIView *page = SGRPlaylistPageOf(cell);
-    if (SGRRevealWaitsFor(page, SGRRevealList) && SGRRevealShowsText(row)) SGRRevealMark(page, SGRRevealList);
-
     CGFloat leading = SGRSideMargin + 48 + kHairlineGap;
-    UIView *art = identified(row, @"Encore.ImageView", &kArtKey);
+    UIView *art = identified(row, @"Encore.ImageView", &kArtKey) ?: artHolderIn(row);
     if (art) {
         if (art.layer.cornerRadius != SGRRadiusThumb) {
             art.layer.cornerRadius = SGRRadiusThumb;
@@ -90,6 +117,7 @@ static void applyRow(UIView *cell) {
     });
 
     applyHairline(row, leading);
+    return YES;
 }
 
 %hook _TtC35ListUXPlatform_FreeTierPlaylistImpl25ElementCollectionViewCell
@@ -98,8 +126,8 @@ static void applyRow(UIView *cell) {
     UIView *cell = (UIView *)self;
     if (!SGRPlaylistHeaderOf(cell)) return;
     SGRClearCellPaint(cell);
-    SGRPlaylistTakeCuration(cell);
-    applyRow(cell);
+    // A track row is not the curation row, so only the other cells are searched for its toolbar.
+    if (!applyRow(cell)) SGRPlaylistTakeCuration(cell);
 }
 
 - (UICollectionViewLayoutAttributes *)preferredLayoutAttributesFittingAttributes:(UICollectionViewLayoutAttributes *)attributes {
@@ -113,8 +141,20 @@ static void applyRow(UIView *cell) {
 }
 %end
 
+// The rows of the songs liked by one artist are another cell (a UITableView's, Track.Row painted the base surface)
+// with the same row kit in it, so they get the playlist's row: no paint, rounded artwork, the hairline.
+%hook SPTEncoreSwipeableTableViewCell
+- (void)layoutSubviews {
+    %orig;
+    UIView *cell = (UIView *)self;
+    if (!sgr_playlistRoot || !SGIsInside(cell, sgr_playlistRoot)) return;
+    SGRClearCellPaint(cell);
+    applyRow(cell);
+}
+%end
+
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
-    SGRequireClasses(@[@"_TtC35ListUXPlatform_FreeTierPlaylistImpl25ElementCollectionViewCell"]);
+    SGRequireClasses(@[@"_TtC35ListUXPlatform_FreeTierPlaylistImpl25ElementCollectionViewCell", @"SPTEncoreSwipeableTableViewCell"]);
 }

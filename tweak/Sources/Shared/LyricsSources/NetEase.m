@@ -30,55 +30,38 @@ static void get(NSString *path, NSDictionary<NSString *, NSString *> *query, voi
 
 // [43060,3600](43060,120,0)To (43180,330,0)seize (43510,420,0)everything …
 // A line's start and length in ms, then each piece's start and length before its text. A piece not
-// ending in a space runs on into the next one ("wanted" "…"), as in richsync.
-static NSArray<SGKaraokeLine *> *linesFromYrc(NSString *yrc) {
-    static NSRegularExpression *header, *piece;
+// ending in a space runs on into the next one ("wanted" "…"), as in richsync. KuGou's KRC is written
+// the same way, its pieces in <> and timed from the start of their line instead of the track's.
+NSArray<SGKaraokeLine *> *SGLyricsPieceLines(NSString *body, BOOL krc) {
+    static NSRegularExpression *header, *yrcPiece, *krcPiece;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         header = [NSRegularExpression regularExpressionWithPattern:@"^\\[(\\d+),(\\d+)\\]" options:0 error:nil];
-        piece = [NSRegularExpression regularExpressionWithPattern:@"\\((\\d+),(\\d+),-?\\d+\\)" options:0 error:nil];
+        yrcPiece = [NSRegularExpression regularExpressionWithPattern:@"\\((\\d+),(\\d+),-?\\d+\\)" options:0 error:nil];
+        krcPiece = [NSRegularExpression regularExpressionWithPattern:@"<(\\d+),(\\d+),-?\\d+>" options:0 error:nil];
     });
+    NSRegularExpression *piece = krc ? krcPiece : yrcPiece;
     NSMutableArray<SGKaraokeLine *> *lines = [NSMutableArray array];
-    for (NSString *row in [yrc componentsSeparatedByString:@"\n"]) {
+    for (NSString *row in [body componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
         NSTextCheckingResult *head = [header firstMatchInString:row options:0 range:NSMakeRange(0, row.length)];
         if (!head) continue;
         NSArray<NSTextCheckingResult *> *pieces = [piece matchesInString:row options:0 range:NSMakeRange(NSMaxRange(head.range), row.length - NSMaxRange(head.range))];
-        NSMutableArray<SGKaraokeWord *> *words = [NSMutableArray array];
-        SGKaraokeWord *open = nil;
-        BOOL spaced = YES;   // a space has gone by, so the next word is not joined to the last
+        NSInteger lineStart = [row substringWithRange:[head rangeAtIndex:1]].integerValue;
+        NSMutableArray<SGKaraokePiece *> *timed = [NSMutableArray array];
         for (NSUInteger i = 0; i < pieces.count; i++) {
             NSUInteger from = NSMaxRange(pieces[i].range), to = i + 1 < pieces.count ? pieces[i + 1].range.location : row.length;
             NSString *raw = [row substringWithRange:NSMakeRange(from, to - from)];
-            NSString *text = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-            NSInteger start = [row substringWithRange:[pieces[i] rangeAtIndex:1]].integerValue;
-            NSInteger end = start + [row substringWithRange:[pieces[i] rangeAtIndex:2]].integerValue;
-            // yrc times a Chinese or Japanese syllable a piece at a time and never spaces them, so
-            // each one is a word of its own; only a spaced script runs its pieces together.
-            BOOL unspaced = SGKaraokeUnspacedScript(text);
-            if (text.length && open && !unspaced) {
-                open.text = [open.text stringByAppendingString:text];
-                open.end = end;
-            } else if (text.length) {
-                SGKaraokeWord *word = [SGKaraokeWord new];
-                word.text = text;
-                word.start = start;
-                word.end = end;
-                word.joined = !spaced;
-                [words addObject:word];
-                open = unspaced ? nil : word;
-                spaced = NO;
-            }
-            if (raw.length > text.length || !text.length) {
-                open = nil;
-                spaced = YES;
-            }
+            SGKaraokePiece *piece = [SGKaraokePiece new];
+            piece.text = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            piece.start = [row substringWithRange:[pieces[i] rangeAtIndex:1]].integerValue + (krc ? lineStart : 0);
+            // A piece of no length is still shown, for a moment.
+            piece.end = piece.start + MAX([row substringWithRange:[pieces[i] rangeAtIndex:2]].integerValue, 1);
+            // A space ends the word after the piece, even one in front of it.
+            piece.spaceAfter = raw.length > piece.text.length;
+            [timed addObject:piece];
         }
-        if (!words.count) continue;
-        SGKaraokeLine *line = [SGKaraokeLine new];
-        line.words = words;
-        line.start = [row substringWithRange:[head rangeAtIndex:1]].integerValue;
-        line.end = line.start + [row substringWithRange:[head rangeAtIndex:2]].integerValue;
-        [lines addObject:line];
+        SGKaraokeLine *line = SGKaraokePieceLine(timed, lineStart, lineStart + [row substringWithRange:[head rangeAtIndex:2]].integerValue);
+        if (line) [lines addObject:line];
     }
     return lines.count ? lines : nil;
 }
@@ -90,7 +73,7 @@ static void tryLyrics(NSArray<NSNumber *> *songs, NSUInteger index, void (^done)
     }
     get(@"song/lyric/v1", @{@"id": songs[index].stringValue, @"lv": @"1", @"yv": @"1", @"tv": @"-1"}, ^(NSDictionary *root) {
         id yrc = [root[@"yrc"] isKindOfClass:NSDictionary.class] ? root[@"yrc"][@"lyric"] : nil;
-        NSArray<SGKaraokeLine *> *lines = [yrc isKindOfClass:NSString.class] ? linesFromYrc(yrc) : nil;
+        NSArray<SGKaraokeLine *> *lines = [yrc isKindOfClass:NSString.class] ? SGLyricsPieceLines(yrc, NO) : nil;
         if (lines) {
             SGLog(@"netease: song %@ has %lu word timed lines", songs[index], (unsigned long)lines.count);
             done(lines);

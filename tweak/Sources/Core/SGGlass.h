@@ -10,5 +10,9 @@ void SGHideGlassFrom(UIView *host, NSUInteger count);
 // Glass takes its shape from cornerConfiguration on iOS 26; layer.cornerRadius is the fallback.
 void SGShapeGlass(UIView *glass, CGFloat radius, BOOL capsule);
 
+// Dark whatever the system is set to, for a controller the mod presents. A sheet's glass is its presentation's,
+// which the controller's own override does not reach. Call it after modalPresentationStyle is set.
+void SGPresentDark(UIViewController *controller);
+
 // The areas each look keeps transparent are its own: Native/Appearance/Repaint.h and
 // Redesigned/Kit/SGRRepaint.h.

@@ -15,7 +15,7 @@ Complete API reference for all SwiftUI Liquid Glass modifiers and types. Always 
 9. [TabView Glass APIs](#tabview-glass-apis)
 10. [Sheet Glass APIs](#sheet-glass-apis)
 11. [Accessibility APIs](#accessibility-apis)
-12. [UIKit Bridge](#uikit-bridge)
+12. [UIKit Bridge](#uikit-bridge) (full UIKit API: [uikit.md](uikit.md))
 
 ---
 
@@ -390,14 +390,14 @@ var body: some View {
 For cases where SwiftUI glass has rendering issues (e.g., rotation animations):
 
 ```swift
-// UIKit glass effect
-let glassEffect = UIGlassEffect()
+// UIKit glass effect. init(style:) is the only initializer; a bare UIGlassEffect() draws a plain blur.
+let glassEffect = UIGlassEffect(style: .regular)
 let effectView = UIVisualEffectView(effect: glassEffect)
 
 // In UIViewRepresentable
 struct GlassView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIVisualEffectView {
-        let effect = UIGlassEffect()
+        let effect = UIGlassEffect(style: .regular)
         return UIVisualEffectView(effect: effect)
     }
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) { }
@@ -408,3 +408,5 @@ Use this bridge when:
 - `rotationEffect` causes glass shape morphing artifacts
 - You need precise control over glass rendering in complex layouts
 - Integrating glass into existing UIKit view hierarchies
+
+The full UIKit API is in [uikit.md](uikit.md).

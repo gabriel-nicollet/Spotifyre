@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<!--
+    THIS IS A TEMPLATE THAT SHOULD BE USED EVERY TIME AND MODIFIED.
+    WHAT TO KEEP:
+    ✓ Overall structure (header, sidebar, main content)
+    ✓ Anthropic branding (colors, fonts, layout)
+    ✓ Seed navigation section (always include this)
+    ✓ Self-contained artifact (everything inline)
+
+    WHAT TO CREATIVELY EDIT:
+    ✗ The p5.js algorithm (implement YOUR vision)
+    ✗ The parameters (define what YOUR art needs)
+    ✗ The UI controls (match YOUR parameters)
+
+    Let your philosophy guide the implementation.
+    The world is your oyster - be creative!
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reeded Light</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* Anthropic Brand Colors */
+        :root {
+            --anthropic-dark: #141413;
+            --anthropic-light: #faf9f5;
+            --anthropic-mid-gray: #b0aea5;
+            --anthropic-light-gray: #e8e6dc;
+            --anthropic-orange: #d97757;
+            --anthropic-blue: #6a9bcc;
+            --anthropic-green: #788c5d;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, var(--anthropic-light) 0%, #f5f3ee 100%);
+            min-height: 100vh;
+            color: var(--anthropic-dark);
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+            padding: 20px;
+            gap: 20px;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 320px;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(20, 20, 19, 0.1);
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .sidebar h1 {
+            font-family: 'Lora', serif;
+            font-size: 24px;
+            font-weight: 500;
+            color: var(--anthropic-dark);
+            margin-bottom: 8px;
+        }
+
+        .sidebar .subtitle {
+            color: var(--anthropic-mid-gray);
+            font-size: 14px;
+            margin-bottom: 32px;
+            line-height: 1.4;
+        }
+
+        /* Control Sections */
+        .control-section {
+            margin-bottom: 32px;
+        }
+
+        .control-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--anthropic-dark);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-section h3::before {
+            content: '•';
+            color: var(--anthropic-orange);
+            font-weight: bold;
+        }
+
+        /* Seed Controls */
+        .seed-input {
+            width: 100%;
+            background: var(--anthropic-light);
+            padding: 12px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin-bottom: 12px;
+            border: 1px solid var(--anthropic-light-gray);
+            text-align: center;
+        }
+
+        .seed-input:focus {
+            outline: none;
+            border-color: var(--anthropic-orange);
+            box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.1);
+            background: white;
+        }
+
+        .seed-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .regen-button {
+            margin-bottom: 0;
+        }
+
+        /* Parameter Controls */
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--anthropic-dark);
+            margin-bottom: 8px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .slider-container input[type="range"] {
+            flex: 1;
+            height: 4px;
+            background: var(--anthropic-light-gray);
+            border-radius: 2px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--anthropic-orange);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .slider-container input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+            background: #c86641;
+        }
+
+        .slider-container input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: var(--anthropic-orange);
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .value-display {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+            min-width: 60px;
+            text-align: right;
+        }
+
+        /* Color Pickers */
+        .color-group {
+            margin-bottom: 16px;
+        }
+
+        .color-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+            margin-bottom: 4px;
+        }
+
+        .color-picker-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .color-picker-container input[type="color"] {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: none;
+            padding: 0;
+        }
+
+        .color-value {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: var(--anthropic-mid-gray);
+        }
+
+        /* Buttons */
+        .button {
+            background: var(--anthropic-orange);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .button:hover {
+            background: #c86641;
+            transform: translateY(-1px);
+        }
+
+        .button:active {
+            transform: translateY(0);
+        }
+
+        .button.secondary {
+            background: var(--anthropic-blue);
+        }
+
+        .button.secondary:hover {
+            background: #5a8bb8;
+        }
+
+        .button.tertiary {
+            background: var(--anthropic-green);
+        }
+
+        .button.tertiary:hover {
+            background: #6b7b52;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .button-row .button {
+            flex: 1;
+        }
+
+        /* Canvas Area */
+        .canvas-area {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 0;
+        }
+
+        #canvas-container {
+            width: 100%;
+            max-width: 1000px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(20, 20, 19, 0.1);
+            background: white;
+        }
+
+        #canvas-container canvas {
+            display: block;
+            width: 100% !important;
+            height: auto !important;
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--anthropic-mid-gray);
+        }
+
+        /* Responsive - Stack on mobile */
+        @media (max-width: 600px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+            }
+
+            .canvas-area {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Control Sidebar -->
+        <div class="sidebar">
+            <!-- Headers (CUSTOMIZE THIS FOR YOUR ART) -->
+            <h1>Reeded Light</h1>
+            <div class="subtitle">Vitrine's icon: a field of light read through fluted glass, set in a pane like a shop window.</div>
+
+            <!-- Seed Section (ALWAYS KEEP THIS) -->
+            <div class="control-section">
+                <h3>Seed</h3>
+                <input type="number" id="seed-input" class="seed-input" value="7" onchange="updateSeed()">
+                <div class="seed-controls">
+                    <button class="button secondary" onclick="previousSeed()">← Prev</button>
+                    <button class="button secondary" onclick="nextSeed()">Next →</button>
+                </div>
+                <button class="button tertiary regen-button" onclick="randomSeedAndUpdate()">↻ Random</button>
+            </div>
+
+            <!-- Parameters Section (CUSTOMIZE THIS FOR YOUR ART) -->
+            <div class="control-section">
+                <h3>Parameters</h3>
+
+                <div class="control-group">
+                    <label>Flutes</label>
+                    <div class="slider-container">
+                        <input type="range" id="flutes" min="5" max="16" step="1" value="9" oninput="updateParam('flutes', this.value)">
+                        <span class="value-display" id="flutes-value">9</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Lens power</label>
+                    <div class="slider-container">
+                        <input type="range" id="lensPower" min="0.6" max="3.2" step="0.05" value="1.9" oninput="updateParam('lensPower', this.value)">
+                        <span class="value-display" id="lensPower-value">1.9</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Dispersion</label>
+                    <div class="slider-container">
+                        <input type="range" id="dispersion" min="0" max="0.08" step="0.005" value="0.03" oninput="updateParam('dispersion', this.value)">
+                        <span class="value-display" id="dispersion-value">0.03</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Disc size</label>
+                    <div class="slider-container">
+                        <input type="range" id="orbSize" min="0.12" max="0.42" step="0.01" value="0.27" oninput="updateParam('orbSize', this.value)">
+                        <span class="value-display" id="orbSize-value">0.27</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Light warp</label>
+                    <div class="slider-container">
+                        <input type="range" id="warp" min="0" max="1.5" step="0.05" value="0.6" oninput="updateParam('warp', this.value)">
+                        <span class="value-display" id="warp-value">0.6</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Pane inset</label>
+                    <div class="slider-container">
+                        <input type="range" id="paneInset" min="0" max="0.2" step="0.005" value="0.115" oninput="updateParam('paneInset', this.value)">
+                        <span class="value-display" id="paneInset-value">0.115</span>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Grooves</label>
+                    <div class="slider-container">
+                        <input type="range" id="grooves" min="0" max="1" step="0.05" value="0.5" oninput="updateParam('grooves', this.value)">
+                        <span class="value-display" id="grooves-value">0.5</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Colors Section (OPTIONAL - CUSTOMIZE OR REMOVE) -->
+            <div class="control-section">
+                <h3>Colors</h3>
+
+                <div class="color-group">
+                    <label>Disc and first light</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color1" value="#fa2d48" onchange="updateColor('color1', this.value)">
+                        <span class="color-value" id="color1-value">#fa2d48</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Second light</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color2" value="#7a3cff" onchange="updateColor('color2', this.value)">
+                        <span class="color-value" id="color2-value">#7a3cff</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Third light</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color3" value="#ff8a3d" onchange="updateColor('color3', this.value)">
+                        <span class="color-value" id="color3-value">#ff8a3d</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions Section (ALWAYS KEEP THIS) -->
+            <div class="control-section">
+                <h3>Actions</h3>
+                <div class="button-row">
+                    <button class="button" onclick="initializeSystem()">Regenerate</button>
+                    <button class="button" onclick="resetParameters()">Reset</button>
+                </div>
+                <div class="button-row" style="margin-top: 8px">
+                    <button class="button secondary" onclick="saveCanvas('vitrine-icon-seed-' + params.seed, 'png')">Download PNG</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Canvas Area -->
+        <div class="canvas-area">
+            <div id="canvas-container">
+                <div class="loading">Initializing generative art...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════════
+        // GENERATIVE ART PARAMETERS - CUSTOMIZE FOR YOUR ALGORITHM
+        // ═══════════════════════════════════════════════════════════════════════
+
+        let params = {
+            seed: 7,
+            flutes: 9,          // glass flutes across the pane
+            lensPower: 1.9,     // how wide a strip each flute gathers, turned over, relative to its own width
+            dispersion: 0.03,   // how differently red and blue bend
+            orbSize: 0.27,      // the hidden disc's radius, as a share of the canvas
+            warp: 0.6,          // how far noise bends the light sources' shapes
+            paneInset: 0.115,   // the glass pane's margin inside the frame
+            grooves: 0.5,       // how deeply the disc's grooves cut its light
+            colorPalette: ['#fa2d48', '#7a3cff', '#ff8a3d']
+        };
+
+        let defaultParams = {...params, colorPalette: [...params.colorPalette]}; // Store defaults for reset
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // REEDED LIGHT
+        // An unseen scene of light is computed once into a buffer. What is drawn is that scene read
+        // through a pane of cylindrical flutes, each channel bent by its own amount.
+        // ═══════════════════════════════════════════════════════════════════════
+
+        const S = 1024;
+        const PHI = 0.6180339887;
+        let scene;   // Float32Array, S*S*3, linear light
+
+        function setup() {
+            pixelDensity(1);
+            let canvas = createCanvas(S, S);
+            canvas.parent('canvas-container');
+            noLoop();
+            initializeSystem();
+            document.querySelector('.loading').style.display = 'none';
+        }
+
+        function initializeSystem() {
+            randomSeed(params.seed);
+            noiseSeed(params.seed);
+            buildScene();
+            redraw();
+        }
+
+        function hexToLinear(hex) {
+            const n = parseInt(hex.slice(1), 16);
+            return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => Math.pow(v / 255, 2.2));
+        }
+
+        function ease(e0, e1, x) {
+            const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+            return t * t * (3 - 2 * t);
+        }
+
+        function buildScene() {
+            const pal = params.colorPalette.map(hexToLinear);
+            const ink = [0.006, 0.003, 0.012];
+
+            // The sources sit around the disc, never on it, so the flutes always have edges to split.
+            const lights = [];
+            for (let i = 0; i < 4; i++) {
+                const a = random(TWO_PI);
+                const d = random(0.22, 0.48);
+                lights.push({
+                    x: 0.5 + cos(a) * d, y: 0.5 + sin(a) * d,
+                    r: random(0.2, 0.38), k: random(0.7, 1.25), c: pal[(i + 1) % pal.length]
+                });
+            }
+            // The disc rests on the golden section, left or right by the seed.
+            const ox = random() < 0.5 ? PHI : 1 - PHI, oy = 0.5 + random(-0.06, 0.06);
+            const orbR = params.orbSize;
+            const warm = [1.0, 0.86, 0.80];
+
+            scene = new Float32Array(S * S * 3);
+            const ns = 2.4, w = params.warp * 0.16;
+            for (let y = 0; y < S; y++) {
+                const v = y / S;
+                for (let x = 0; x < S; x++) {
+                    const u = x / S;
+                    const wu = u + w * (noise(u * ns, v * ns) - 0.5) * 2;
+                    const wv = v + w * (noise(u * ns + 31.7, v * ns + 17.3) - 0.5) * 2;
+                    let r = ink[0], g = ink[1], b = ink[2];
+                    for (const L of lights) {
+                        const dx = wu - L.x, dy = wv - L.y;
+                        const e = Math.exp(-(dx * dx + dy * dy) / (L.r * L.r) * 1.7) * L.k;
+                        r += L.c[0] * e; g += L.c[1] * e; b += L.c[2] * e;
+                    }
+                    // The disc: a warm face shading to the first color at its edge, cut by grooves
+                    // around a plain label, with a halo past its rim.
+                    const dx = u - ox, dy = v - oy;
+                    const d = Math.sqrt(dx * dx + dy * dy) / orbR;
+                    if (d < 1.0) {
+                        const face = ease(1.0, 0.97, d);
+                        const groove = 1 - params.grooves * 0.45 * (0.5 + 0.5 * Math.sin(d * orbR * S * 0.55))
+                                         * ease(0.3, 0.36, d) * ease(0.97, 0.9, d);
+                        const t = Math.pow(d, 1.6);
+                        const k = face * groove * 1.55;
+                        r = r * (1 - face) + (warm[0] * (1 - t) + pal[0][0] * t) * k;
+                        g = g * (1 - face) + (warm[1] * (1 - t) + pal[0][1] * t) * k;
+                        b = b * (1 - face) + (warm[2] * (1 - t) + pal[0][2] * t) * k;
+                    }
+                    const halo = Math.exp(-Math.pow((d - 1) * 4.5, 2)) * 0.55;
+                    r += pal[0][0] * halo; g += pal[0][1] * halo; b += pal[0][2] * halo;
+                    const i = (y * S + x) * 3;
+                    scene[i] = r; scene[i + 1] = g; scene[i + 2] = b;
+                }
+            }
+        }
+
+        // One channel of the scene at a fractional point, clamped to the edge.
+        function sampleScene(x, y, ch) {
+            x = Math.min(S - 1.001, Math.max(0, x));
+            y = Math.min(S - 1.001, Math.max(0, y));
+            const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0;
+            const i00 = (y0 * S + x0) * 3 + ch, i10 = i00 + 3, i01 = i00 + S * 3, i11 = i01 + 3;
+            return (scene[i00] * (1 - fx) + scene[i10] * fx) * (1 - fy) + (scene[i01] * (1 - fx) + scene[i11] * fx) * fy;
+        }
+
+        // Signed distance to the pane's rounded square, negative inside.
+        function paneDistance(x, y, inset, radius) {
+            const h = S / 2 - inset - radius;
+            const qx = Math.abs(x - S / 2) - h, qy = Math.abs(y - S / 2) - h;
+            return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius;
+        }
+
+        // Filmic shoulder, then the display's gamma.
+        function toDisplay(c) {
+            return 255 * Math.pow(1 - Math.exp(-c * 1.35), 1 / 2.2);
+        }
+
+        // One pixel's light at a sub-pixel point: through glass inside the pane, dimmed around it.
+        function shadeAt(px, py, x0, W, inset, radius, out) {
+            const d = paneDistance(px, py, inset, radius);
+            if (d > 0) {
+                const dim = 0.32;
+                for (let ch = 0; ch < 3; ch++) out[ch] = sampleScene(px, py, ch) * dim;
+                // The cabinet's shadow under the pane's edge.
+                const sh = 1 - 0.5 * Math.exp(-d / 10);
+                out[0] *= sh; out[1] *= sh; out[2] *= sh;
+                return;
+            }
+            const local = (px - x0) / W;
+            const fi = Math.floor(local);
+            const s = local - fi - 0.5;                 // -0.5 .. 0.5 across this flute
+            const cx = x0 + (fi + 0.5) * W;
+            const lens = params.lensPower;
+            for (let ch = 0; ch < 3; ch++) {
+                const p = lens * (1 + (ch - 1) * params.dispersion * 3);
+                // Turned over and gathered from a strip wider than the flute; a slight vertical
+                // lift toward each flute's edges keeps the staves from reading as a flat grid.
+                out[ch] = sampleScene(cx - s * W * p, py + s * s * W * 0.35, ch);
+            }
+            const curve = 0.5 + 0.5 * Math.cos(s * Math.PI);          // the ridge turning from the eye
+            // The highlight lives where light stands behind the glass, so the flutes never read as bars.
+            const lum = (out[0] + out[1] + out[2]) / 3;
+            const spec = Math.exp(-Math.pow((s + 0.24) / 0.05, 2)) * 0.16 * Math.min(1, lum * 1.6);
+            for (let ch = 0; ch < 3; ch++) out[ch] = out[ch] * (0.42 + 0.58 * curve) + spec;
+            // The pane's rim catches one bright line; a full-bleed pane has no rim, the icon's own edge is it.
+            if (inset < 1) return;
+            const rim = Math.exp(-Math.pow((d + 2.2) / 1.6, 2)) * 0.9 * (0.55 + 0.45 * (1 - py / S));
+            out[0] += rim; out[1] += rim; out[2] += rim;
+        }
+
+        function draw() {
+            if (!scene) return;
+            const inset = params.paneInset * S;
+            const radius = (S - 2 * inset) * 0.17;
+            const x0 = inset, W = (S - 2 * inset) / params.flutes;
+            const a = [0, 0, 0], acc = [0, 0, 0];
+            // 3x3 samples a pixel, so the flutes' edges never alias at any size the icon is shown.
+            const n = 3, offs = [1 / 6, 0.5, 5 / 6];
+            loadPixels();
+            for (let y = 0; y < S; y++) {
+                for (let x = 0; x < S; x++) {
+                    acc[0] = acc[1] = acc[2] = 0;
+                    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+                        shadeAt(x + offs[i], y + offs[j], x0, W, inset, radius, a);
+                        acc[0] += a[0]; acc[1] += a[1]; acc[2] += a[2];
+                    }
+                    const k = (y * S + x) * 4;
+                    pixels[k] = toDisplay(acc[0] / 9);
+                    pixels[k + 1] = toDisplay(acc[1] / 9);
+                    pixels[k + 2] = toDisplay(acc[2] / 9);
+                    pixels[k + 3] = 255;
+                }
+            }
+            updatePixels();
+            window.renderDone = true;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // UI CONTROL HANDLERS
+        // ═══════════════════════════════════════════════════════════════════════
+
+        const paramIds = ['flutes', 'lensPower', 'dispersion', 'orbSize', 'warp', 'paneInset', 'grooves'];
+
+        function updateParam(paramName, value) {
+            params[paramName] = paramName === 'flutes' ? parseInt(value) : parseFloat(value);
+            document.getElementById(paramName + '-value').textContent = value;
+            initializeSystem();
+        }
+
+        function updateColor(colorId, value) {
+            params.colorPalette[parseInt(colorId.slice(5)) - 1] = value;
+            document.getElementById(colorId + '-value').textContent = value;
+            initializeSystem();
+        }
+
+        // ?render=1&seed=N shows the canvas alone at 1024 px, for rendering the icon headless.
+        (function () {
+            const q = new URLSearchParams(location.search);
+            if (q.get('seed')) params.seed = parseInt(q.get('seed'));
+            for (const id of paramIds) if (q.get(id)) params[id] = parseFloat(q.get(id));
+            if (q.get('render')) {
+                const st = document.createElement('style');
+                st.textContent = '.sidebar{display:none}.container{padding:0}#canvas-container{max-width:none;width:1024px;border-radius:0;box-shadow:none}body{background:#000;margin:0}';
+                document.head.appendChild(st);
+            }
+        })();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SEED CONTROL FUNCTIONS - ALWAYS KEEP THESE
+        // ═══════════════════════════════════════════════════════════════════════
+
+        function updateSeedDisplay() {
+            document.getElementById('seed-input').value = params.seed;
+        }
+
+        function updateSeed() {
+            let input = document.getElementById('seed-input');
+            let newSeed = parseInt(input.value);
+            if (newSeed && newSeed > 0) {
+                params.seed = newSeed;
+                initializeSystem();
+            } else {
+                // Reset to current seed if invalid
+                updateSeedDisplay();
+            }
+        }
+
+        function previousSeed() {
+            params.seed = Math.max(1, params.seed - 1);
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        function nextSeed() {
+            params.seed = params.seed + 1;
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        function randomSeedAndUpdate() {
+            params.seed = Math.floor(Math.random() * 999999) + 1;
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        function resetParameters() {
+            params = {...defaultParams, colorPalette: [...defaultParams.colorPalette]};
+
+            // Update UI elements
+            for (const id of paramIds) {
+                document.getElementById(id).value = params[id];
+                document.getElementById(id + '-value').textContent = params[id];
+            }
+
+            // Reset colors
+            for (let c = 0; c < 3; c++) {
+                document.getElementById('color' + (c + 1)).value = params.colorPalette[c];
+                document.getElementById('color' + (c + 1) + '-value').textContent = params.colorPalette[c];
+            }
+
+            updateSeedDisplay();
+            initializeSystem();
+        }
+
+        // Initialize UI on load
+        window.addEventListener('load', function() {
+            updateSeedDisplay();
+        });
+    </script>
+</body>
+</html>

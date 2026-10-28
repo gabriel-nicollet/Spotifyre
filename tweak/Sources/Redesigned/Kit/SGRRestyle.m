@@ -4,14 +4,7 @@
 #import "SGRRestyle.h"
 #import "SGRTokens.h"
 
-static char kPlateKey, kImageObserverKey, kLayoutObserverKey;
-
-@interface SGRWeakBox : NSObject
-@property (nonatomic, weak) id value;
-@end
-
-@implementation SGRWeakBox
-@end
+static char kPlateKey, kImageObserverKey, kLayoutObserverKey, kSuppressedKey;
 
 #pragma mark - instance subclasses
 
@@ -119,14 +112,21 @@ void SGRSuppress(UIView *view) {
             ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&parent, @selector(setUserInteractionEnabled:), NO);
         });
     });
-    if (!kept) {
-        static NSMutableSet<NSString *> *logged;
-        if (!logged) logged = [NSMutableSet set];
-        NSString *name = NSStringFromClass(object_getClass(view));
-        if (![logged containsObject:name]) {
-            [logged addObject:name];
-            SGLog(@"redesign kit: %@ cannot keep being suppressed, set once per call", name);
-        }
+    // One of Spotify's Swift classes (an Encore button, whose state render sets its alpha back to 1) keeps it
+    // through an override on the class, which only holds the instances marked here. The class `class` answers,
+    // so an instance KVO observes (the player's repeat button) is held too: KVO's class passes setAlpha: on to it.
+    // Only a class inside the app: a plain UILabel KVO observes answers UILabel, which must never be touched.
+    // An instance marked on an earlier call is held already: callers ask on every layout pass.
+    BOOL onClass = objc_getAssociatedObject(view, &kSuppressedKey) != nil;
+    if (!kept && !onClass) {
+        BOOL spotifys = [[NSBundle bundleForClass:view.class].bundlePath hasPrefix:NSBundle.mainBundle.bundlePath];
+        onClass = spotifys && overrideOnClass(view.class, @selector(setAlpha:), ^id(IMP replaced) {
+            return ^(UIView *self, CGFloat alpha) {
+                ((void (*)(id, SEL, CGFloat))replaced)(self, @selector(setAlpha:), objc_getAssociatedObject(self, &kSuppressedKey) ? 0 : alpha);
+            };
+        });
+        if (onClass) objc_setAssociatedObject(view, &kSuppressedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        logWatch(view, @selector(setAlpha:), onClass, onClass);
     }
     view.alpha = 0;
     view.userInteractionEnabled = NO;
@@ -264,20 +264,23 @@ static UIView *findIdentifier(UIView *view, NSString *identifier) {
     return nil;
 }
 
+BOOL SGRIsAvatar(UIView *view) {
+    static Class faceClass;
+    if (!faceClass) faceClass = NSClassFromString(@"_TtC29ListeningActivity_ElementsKit21AdaptiveFaceContainer");
+    return [view.accessibilityIdentifier isEqualToString:@"Components.UI.SideDrawerButton"]
+        || (faceClass && [view isKindOfClass:faceClass]);
+}
+
 UIView *SGRFindByIdentifier(UIView *root, NSString *identifier, const void *cacheKey) {
     if (!root || !identifier.length) return nil;
-    SGRWeakBox *box = cacheKey ? objc_getAssociatedObject(root, cacheKey) : nil;
-    UIView *cached = box.value;
-    if (cached && identifierMatches(cached.accessibilityIdentifier, identifier) && [cached isDescendantOfView:root]) return cached;
-    UIView *found = findIdentifier(root, identifier);
-    if (found && cacheKey) {
-        if (!box) {
-            box = [SGRWeakBox new];
-            objc_setAssociatedObject(root, cacheKey, box, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        box.value = found;
-    }
-    return found;
+    if (!cacheKey) return findIdentifier(root, identifier);
+    return SGFindRemembered(root, cacheKey, ^BOOL(UIView *v) { return identifierMatches(v.accessibilityIdentifier, identifier); });
+}
+
+void SGRFindByIdentifiers(UIView *root, NSArray<NSString *> *identifiers, const void *const cacheKeys[], UIView *__strong found[]) {
+    SGFindRememberedAll(root, identifiers.count, cacheKeys, ^BOOL(NSUInteger i, UIView *v) {
+        return identifierMatches(v.accessibilityIdentifier, identifiers[i]);
+    }, found);
 }
 
 @implementation SGRShadowPlate {
@@ -337,7 +340,7 @@ SGRShadowPlate *SGRShadowPlateIn(UIView *host, const void *key) {
 // disc is 26pt and an avatar's ring the same.
 static const CGFloat kPaintedShare = 0.75;
 
-// The layer's colour, not the view's. -[UIView backgroundColor] answers only what was set through the
+// The layer's color, not the view's. -[UIView backgroundColor] answers only what was set through the
 // view; a view painted straight on its layer reads back nil there, and the first pass of this left the
 // playlist's Refresh band black while everything beside it cleared (device, trees/continuous/1.txt
 // 2026-09-20). The layer is where the paint really is, and where the Kit's repaint hook watches for it.
@@ -345,15 +348,65 @@ static const CGFloat kPaintedShare = 0.75;
 // A cell nested inside the cell is walked into only while it is as wide as the band being looked for:
 // a card in a carousel is its own and narrower, while the element framework wraps a cell's content in
 // views of its own that are the full width, and stopping at one of those is stopping before the paint.
+// A "see more" fade lies over the section's last row with the footer drawn on top of both, its button over the
+// row's bottom line (Popular's 6th track, device 2026-10-07: the fade over the whole cell, the footer from 40pt).
+// With the fade gone, the row fades itself out above the footer instead, so the field shows through, not a paint.
+// Only above a section footer (ListSectionFooterElement): the About card lays its photo, a fade and its words out the
+// same way, and its photo is not to fade (device 2026-10-08).
+static char kRowFadeKey;
+static BOOL isFooter(UIView *view) {
+    return SGClassNamed(view.class, @"ListSectionFooter");
+}
+
+static void fadeRowsAbove(UIView *gradient) {
+    NSArray<UIView *> *siblings = gradient.superview.subviews;
+    NSUInteger at = [siblings indexOfObject:gradient];
+    if (at == NSNotFound || at + 1 >= siblings.count || !isFooter(siblings[at + 1])) return;
+    CGFloat footerTop = siblings[at + 1].frame.origin.y;
+    for (NSUInteger i = 0; i < at; i++) {
+        UIView *row = siblings[i];
+        CGFloat top = footerTop - 12 - row.frame.origin.y, bottom = footerTop + 8 - row.frame.origin.y, height = row.bounds.size.height;
+        if (footerTop <= row.frame.origin.y || top >= height || height <= 0) continue;
+        CAGradientLayer *fade = objc_getAssociatedObject(row, &kRowFadeKey);
+        if (!fade) {
+            fade = [CAGradientLayer layer];
+            fade.colors = @[(id)UIColor.blackColor.CGColor, (id)UIColor.clearColor.CGColor];
+            objc_setAssociatedObject(row, &kRowFadeKey, fade, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        fade.frame = row.bounds;
+        fade.locations = @[@(fmax(0, top) / height), @(fmin(bottom, height) / height)];
+        [CATransaction commit];
+        if (row.layer.mask != fade) row.layer.mask = fade;
+    }
+}
+
+// A row reused away from the footer, with no fade and footer after it any more, is shown whole again.
+static BOOL aboveFooter(UIView *row) {
+    NSArray<UIView *> *siblings = row.superview.subviews;
+    NSUInteger at = [siblings indexOfObject:row];
+    for (NSUInteger i = at + 1; at != NSNotFound && i + 1 < siblings.count; i++) {
+        if (SGClassNamed(siblings[i].class, @"GradientView") && isFooter(siblings[i + 1])) return YES;
+    }
+    return NO;
+}
+
 static void clearPaint(UIView *view, UIView *cell, CGFloat wide) {
     BOOL full = view.bounds.size.width >= wide;
     if (view != cell && !full && [view isKindOfClass:UICollectionViewCell.class]) return;
+    // A row's fade is only ever in place as its mask, so an unmasked view has none to take off.
+    CALayer *mask = view.layer.mask;
+    if (mask && mask == objc_getAssociatedObject(view, &kRowFadeKey) && !aboveFooter(view)) view.layer.mask = nil;
     if (full) {
         // Read off the layer, written through the view, so the two are left saying the same thing: the
-        // clear colour lands on both, and reads back with an alpha the next pass does not take for paint.
+        // clear color lands on both, and reads back with an alpha the next pass does not take for paint.
         CGColorRef color = view.layer.backgroundColor;
         if (color && SGIsBaseSurface(color)) view.backgroundColor = UIColor.clearColor;
-        if (!view.layer.mask && [NSStringFromClass(view.class) containsString:@"GradientView"]) view.layer.mask = [CALayer layer];
+        if (SGClassNamed(view.class, @"GradientView")) {
+            if (!view.layer.mask) view.layer.mask = [CALayer layer];
+            fadeRowsAbove(view);
+        }
     }
     for (UIView *sub in view.subviews) clearPaint(sub, cell, wide);
 }

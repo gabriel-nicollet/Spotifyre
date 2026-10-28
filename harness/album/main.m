@@ -2,8 +2,8 @@
 // trees/clean/album/03.txt, so Redesigned/Album can be laid out and looked at on the Mac.
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <AVFoundation/AVFoundation.h>
 #import "../download-mock.h"
-#import "../faces-mock.h"
 
 #pragma mark - Spotify's classes, by name
 
@@ -63,6 +63,15 @@ static UILabel *label(UIView *parent, CGRect frame, NSString *text, CGFloat size
     inner.accessibilityIdentifier = [identifier stringByAppendingString:@"-internal"];
     [encore addSubview:inner];
     return inner;
+}
+
+static UIView *byIdentifier(UIView *root, NSString *identifier) {
+    if ([root.accessibilityIdentifier isEqualToString:identifier]) return root;
+    for (UIView *sub in root.subviews) {
+        UIView *found = byIdentifier(sub, identifier);
+        if (found) return found;
+    }
+    return nil;
 }
 
 static UIImage *artwork(void) {
@@ -206,6 +215,7 @@ static NSString *trailingLabel(UIView *root) {
     NSMutableArray<_TtC12Element_List18CollectionViewCell *> *_footerCells;
     UIView *_listView;
     CGFloat _tracksBottom;
+    UIView *_baseCard, *_greyCard;
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
@@ -219,10 +229,10 @@ static NSString *trailingLabel(UIView *root) {
     UIView *page = box(root.view, _TtC28CreativeWorkPlatform_PageKit24CreativeWorkTemplateView.class,
                        CGRectMake(0, 0, W, H), @"CreativeWorkPlatform.CreativeWorkTemplateView");
 
-    // Spotify's colour wash behind the header, the height of the header at rest.
+    // Spotify's color wash behind the header, the height of the header at rest.
     UIView *wash = box(page, _TtCO19LegacyUI_ECMCoreKit5Views10HeaderView.class, CGRectMake(0, 0, W, 486.67), nil);
     UIView *gradient = box(wash, _TtC19LegacyUI_ECMCoreKit12GradientView.class, wash.bounds, nil);
-    // The colour Spotify read off the whole cover, down to its base surface.
+    // The color Spotify read off the whole cover, down to its base surface.
     ((CAGradientLayer *)gradient.layer).colors = @[(id)[UIColor colorWithRed:0.29 green:0.22 blue:0.62 alpha:1].CGColor,
                                                    (id)[UIColor colorWithRed:0.07 green:0.07 blue:0.07 alpha:1].CGColor];
 
@@ -245,11 +255,7 @@ static NSString *trailingLabel(UIView *root) {
     UIView *coverElement = box(artRow, UIView.class, CGRectMake(round((W - 248) / 2), 0, 248, 248), nil);
     UIView *cover = box(coverElement, UIView.class, coverElement.bounds, @"CreativeWorkPlatform.Components.UI.ArtWorkElement.WithCoverArt");
     UIImageView *coverPicture = [[UIImageView alloc] initWithFrame:cover.bounds];
-    // `apple` on the launch line: a real album, looked up at Apple Music for its animated cover, with the cover
-    // read from SG_HARNESS_COVER (SIMCTL_CHILD_SG_HARNESS_COVER=<path> before simctl launch).
-    BOOL apple = [NSProcessInfo.processInfo.arguments containsObject:@"apple"];
-    NSString *coverPath = NSProcessInfo.processInfo.environment[@"SG_HARNESS_COVER"];
-    coverPicture.image = (apple && coverPath ? [UIImage imageWithContentsOfFile:coverPath] : nil) ?: artwork();
+    coverPicture.image = artwork();
     coverPicture.contentMode = UIViewContentModeScaleAspectFill;
     coverPicture.clipsToBounds = YES;
     coverPicture.accessibilityIdentifier = @"Encore.ImageView";
@@ -259,50 +265,38 @@ static NSString *trailingLabel(UIView *root) {
     _titleBlock = box(groupStack, UIView.class, CGRectMake(0, 264, 215.33, 57.33), nil);
     _titleStack = box(_titleBlock, UIStackView.class, CGRectMake(16, 0, 183.33, 57.33), nil);
     label(_titleStack, CGRectZero, @"", 17, UIColor.whiteColor, @"CreativeWorkPlatform.Components.UI.PreTitleRow");
-    NSString *album = apple ? @"Graduation" : @"Hurry Up Tomorrow", *artist = apple ? @"Kanye West" : @"The Weeknd";
-    label(_titleStack, CGRectMake(0, 0, 183.33, 25.33), album, 21, UIColor.whiteColor,
+    label(_titleStack, CGRectMake(0, 0, 183.33, 25.33), @"Hurry Up Tomorrow", 21, UIColor.whiteColor,
           @"CreativeWorkPlatform.Components.UI.TitleRow");
-    // The artist line with its facepile (trees/clean/album/01.txt:62-86). `facelate` on the launch line: the
-    // picture lands at 2 s, after the header and the curtain; `faces3` three artists; `noface` an artist with
-    // no picture, only Spotify's initial.
-    NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
-    BOOL faces3 = [args containsObject:@"faces3"];
-    if (faces3) artist = @"The Weeknd, Justice, Anitta";
-    UIView *parentElement = box(_titleStack, UIView.class, CGRectMake(0, 33.33, faces3 ? 210 : 96, 24), nil);
-    UIControl *parentRow = (UIControl *)box(parentElement, MockEncoreButton.class, parentElement.bounds, @"CreativeWorkPlatform.Components.UI.ParentRow");
-    parentRow.accessibilityLabel = artist;
-    [parentRow addTarget:self action:@selector(sgr_parentFired) forControlEvents:UIControlEventTouchUpInside];
-    UIView *parentStack = box(parentRow, UIView.class, parentRow.bounds, @"Encore.StackView");
-    UIView *faceButton = box(parentStack, UIView.class, CGRectMake(0, 0, faces3 ? 64.8 : 24, 24), nil);
-    NSArray<UIImageView *> *faces = mockFacepile(faceButton, CGPointZero, faces3 ? @[@"T", @"J", @"A"] : @[@"T"], NO);
-    NSArray<UIImage *> *pictures = @[mockFace(0.58), mockFace(0.08), mockFace(0.33)];
-    BOOL facelate = [args containsObject:@"facelate"], noface = [args containsObject:@"noface"];
-    if (!facelate && !noface) {
-        for (NSUInteger i = 0; i < faces.count; i++) faces[i].image = pictures[i];
-    }
-    label(parentStack, CGRectMake(faces3 ? 72.8 : 32, 4.33, faces3 ? 137 : 64, 15.33), artist, 11, UIColor.whiteColor, @"Encore.Label");
-    if (facelate) {
-        at(2, ^{
-            faces[0].image = pictures[0];
-            NSLog(@"[harness] faces: the artist's picture landed");
-        });
-        at(2.2, ^{ NSLog(@"[harness] faces mid fade: %@", facesReport(root.view)); });
-    }
-    for (NSNumber *when in @[@1.6, @3]) {
-        at(when.doubleValue, ^{ NSLog(@"[harness] faces at %@s: %@", when, facesReport(root.view)); });
-    }
-    at(3.2, ^{
-        NSMutableArray<UIView *> *walk = [NSMutableArray arrayWithObject:root.view];
-        while (walk.count) {
-            UIView *v = walk.lastObject;
-            [walk removeLastObject];
-            if ([NSStringFromClass(v.class) isEqualToString:@"SGRHeaderInfo"]) {
-                [v performSelector:NSSelectorFromString(@"sgr_creatorTapped")];
-                break;
-            }
-            [walk addObjectsFromArray:v.subviews];
-        }
+    UIView *parentElement = box(_titleStack, UIView.class, CGRectMake(0, 33.33, 96, 24), nil);
+    UIView *parentRow = box(parentElement, MockEncoreButton.class, parentElement.bounds, @"CreativeWorkPlatform.Components.UI.ParentRow");
+    parentRow.accessibilityLabel = @"The Weeknd";
+    UIImageView *avatar = (UIImageView *)box(parentRow, UIImageView.class, CGRectMake(0, 0, 24, 24), @"Encore.ImageView");
+    avatar.backgroundColor = [UIColor colorWithWhite:0.8 alpha:1];
+    avatar.layer.cornerRadius = 12;
+    // The artist's picture lands at 1.5 s, after the header has laid out; at 2.2 s the log says where the
+    // redesign drew it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        avatar.image = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(48, 48)] imageWithActions:^(UIGraphicsImageRendererContext *c) {
+            [UIColor.orangeColor setFill];
+            UIRectFill(CGRectMake(0, 0, 48, 48));
+        }];
     });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIView *info = nil;
+        for (UIView *v = avatar; v && !info; v = v.superview) {
+            for (UIView *sub in v.subviews) {
+                if ([NSStringFromClass(sub.class) isEqualToString:@"SGRHeaderInfo"]) info = sub;
+            }
+        }
+        UIView *picture = nil, *name = nil;
+        for (UIView *sub in info.subviews) {
+            if ([sub isKindOfClass:UIImageView.class] && !sub.hidden && ((UIImageView *)sub).image) picture = sub;
+            if ([sub isKindOfClass:UILabel.class] && [((UILabel *)sub).text isEqualToString:@"The Weeknd"]) name = sub;
+        }
+        NSLog(@"[harness] artist picture: %@, name at %@", picture ? NSStringFromCGRect(picture.frame) : @"none",
+              NSStringFromCGRect(name.frame));
+    });
+    label(parentRow, CGRectMake(32, 4.33, 72, 15.33), @"The Weeknd", 11, UIColor.whiteColor, @"Encore.Label");
 
     UIView *bottomGroup = box(outer, UIView.class, CGRectMake(0, 329.33, W, 71.33), nil);
     UIStackView *bottomStack = (UIStackView *)box(bottomGroup, UIStackView.class, bottomGroup.bounds, nil);
@@ -350,13 +344,20 @@ static NSString *trailingLabel(UIView *root) {
     UIView *collection = box(_listView, UIView.class, _listView.bounds, nil);
     collection.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
 
-    NSArray<NSArray<NSString *> *> *tracks = @[@[@"Wake Me Up (feat. Justice)", @"The Weeknd, Justice"],
-                                               @[@"Cry For Me", @"The Weeknd"],
-                                               @[@"I Can't Fucking Sing", @"The Weeknd"],
-                                               @[@"São Paulo (feat. Anitta)", @"The Weeknd, Anitta"],
-                                               @[@"Until We're Skin & Bones", @"The Weeknd"],
-                                               @[@"Baptized In Fear", @"The Weeknd"]];
+    // The third column: E for a row with Spotify's explicit badge, a label-backed view beside the artist line.
+    // The artists the redesign drops are the ones that only repeat the header's The Weeknd; Justice named with
+    // no "feat." and Playboi Carti with no mention at all keep theirs.
+    NSArray<NSArray<NSString *> *> *tracks = @[@[@"Wake Me Up (feat. Justice)", @"The Weeknd, Justice", @"E"],
+                                               @[@"Cry For Me", @"The Weeknd", @""],
+                                               @[@"I Can't Fucking Sing", @"The Weeknd", @"E"],
+                                               @[@"São Paulo (feat. Anitta)", @"The Weeknd, Anitta", @"E"],
+                                               @[@"Until We're Skin & Bones", @"The Weeknd", @""],
+                                               @[@"Timeless Justice", @"The Weeknd, Justice", @""],
+                                               @[@"Timeless", @"The Weeknd, Playboi Carti", @"E"],
+                                               @[@"A Title Long Enough To Run Under The Badge And Beyond", @"The Weeknd", @"E"],
+                                               @[@"Baptized In Fear", @"The Weeknd", @""]];
     CGFloat y = 8;
+    NSMutableArray<UICollectionViewCell *> *trackCells = [NSMutableArray array];
     for (NSArray<NSString *> *track in tracks) {
         UICollectionViewCell *cell = [[_TtC12Element_List18CollectionViewCell alloc] initWithFrame:CGRectMake(0, y, W, 56)];
         cell.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
@@ -365,27 +366,88 @@ static NSString *trailingLabel(UIView *root) {
         UIView *row = box(content, UIView.class, content.bounds, @"Components.UI.RetrievalRowElementUI");
         row.backgroundColor = [UIColor colorWithWhite:0.07 alpha:1];
         label(row, CGRectMake(16, 8, W - 90, 18), track[0], 13, UIColor.whiteColor, @"EncoreConsumerMobile.View.Granular.Title");
-        label(row, CGRectMake(16, 30, W - 90, 15.33), track[1], 11, UIColor.whiteColor, @"EncoreConsumerMobile.View.Granular.Subtitle");
+        CGFloat artistX = 16;
+        if (track[2].length) {
+            UIView *badge = box(row, UIView.class, CGRectMake(16, 31, 13, 13), @"Components.UI.ExplicitIcon");
+            badge.backgroundColor = [UIColor colorWithWhite:0.7 alpha:1];
+            badge.layer.cornerRadius = 2;
+            UILabel *e = [[UILabel alloc] initWithFrame:badge.bounds];
+            e.text = @"E";
+            e.font = [UIFont boldSystemFontOfSize:9];
+            e.textAlignment = NSTextAlignmentCenter;
+            e.textColor = UIColor.blackColor;
+            [badge addSubview:e];
+            artistX = 33;
+        }
+        label(row, CGRectMake(artistX, 30, W - 74 - artistX, 15.33), track[1], 11, UIColor.whiteColor, @"EncoreConsumerMobile.View.Granular.Subtitle");
         actionButton(row, CGRectMake(W - 64, 4, 48, 48), @"Components.UI.ContextMenuButton-5673WA8EEUSPx1ir26lhGW", @"ellipsis", @"More options");
+        [trackCells addObject:cell];
         y += 56;
     }
     _tracksBottom = y;
 
+    // What each row shows once the header has given its artist: the line's alpha, how far the title moved, and
+    // where the badge is drawn against the end of the title's text. Then the first row is prepared for reuse and
+    // has to come back as Spotify drew it, and laid out again has to be dropped again.
+    NSString *(^rowState)(UICollectionViewCell *) = ^NSString *(UICollectionViewCell *cell) {
+        [cell layoutIfNeeded];
+        UIView *subtitle = byIdentifier(cell, @"EncoreConsumerMobile.View.Granular.Subtitle");
+        UIView *badge = byIdentifier(cell, @"Components.UI.ExplicitIcon");
+        UILabel *title = (UILabel *)byIdentifier(cell, @"EncoreConsumerMobile.View.Granular.Title-internal");
+        UIImageView *drawn = nil;
+        for (UIView *v in subtitle.superview.subviews) {
+            if ([v isKindOfClass:UIImageView.class]) drawn = (UIImageView *)v;
+        }
+        NSString *line = subtitle.alpha == 0 ? @"hidden" : @"shown";
+        NSString *badgeState = !badge ? @"" : (drawn ? [NSString stringWithFormat:@", badge drawn %.0fpt after the text (original a=%.0f, a11y %d)",
+            CGRectGetMinX([drawn.superview convertRect:drawn.frame toView:title]) -
+                [title textRectForBounds:title.bounds limitedToNumberOfLines:1].size.width, badge.alpha, drawn.isAccessibilityElement] : @", badge where it was");
+        return [NSString stringWithFormat:@"\"%@\": line %@, title moved %.1fpt, title width %.0f%@", title.text, line,
+                title.transform.ty, title.bounds.size.width, badgeState];
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        for (UICollectionViewCell *cell in trackCells) NSLog(@"[harness] row %@", rowState(cell));
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [trackCells[0] prepareForReuse];
+        NSLog(@"[harness] reused, before its pass: needs layout %d", trackCells[0].layer.needsLayout);
+        UIView *row = trackCells[0].contentView.subviews.firstObject.subviews.firstObject;
+        __block CGFloat subtitleAlpha = -1, badgeAlpha = -1;
+        __block NSUInteger drawnCount = 0;
+        for (UIView *v in row.subviews) {
+            if ([v.accessibilityIdentifier isEqualToString:@"EncoreConsumerMobile.View.Granular.Subtitle"]) subtitleAlpha = v.alpha;
+            if ([v.accessibilityIdentifier isEqualToString:@"Components.UI.ExplicitIcon"]) badgeAlpha = v.alpha;
+            if ([v isKindOfClass:UIImageView.class]) drawnCount++;
+        }
+        NSLog(@"[harness] reused, restored: line a=%.0f, badge a=%.0f, drawn badges %lu", subtitleAlpha, badgeAlpha,
+              (unsigned long)drawnCount);
+        NSLog(@"[harness] reused, laid out again: row %@", rowState(trackCells[0]));
+    });
+
     // and under it the footer Spotify sends: the album's own line, the copyright, and the sections the
-    // redesign drops -- each with the 16pt spacer Spotify puts between them.
+    // redesign drops -- each with the 16pt spacer Spotify puts between them. Fans also like stands for a
+    // section no switch names. They sit in a real collection view, which is what AlbumSections.x keeps what
+    // it has read of them on.
     _footerCells = [NSMutableArray array];
+    UICollectionView *footerList = [[UICollectionView alloc] initWithFrame:collection.bounds
+                                                      collectionViewLayout:[UICollectionViewFlowLayout new]];
+    footerList.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    footerList.backgroundColor = UIColor.clearColor;
+    footerList.userInteractionEnabled = NO;
+    [collection addSubview:footerList];
     NSArray *footer = @[@[@"", @16], @[@"Album.ConsumptionExperience", @15.33], @[@"", @16],
                         @[@"heading:More by The Weeknd", @52.67], @[@"cards", @194.33], @[@"", @16],
                         @[@"heading:Related Music Videos", @52.67], @[@"cards", @235.67], @[@"", @16],
                         @[@"heading:Merch", @52.67], @[@"cards", @197], @[@"", @16],
                         @[@"heading:You might also like", @52.67], @[@"cards", @193.33], @[@"", @16],
+                        @[@"heading:Fans also like", @52.67], @[@"cards", @190], @[@"", @16],
                         @[@"Album.Copyright", @60.67]];
     for (NSArray *item in footer) {
         NSString *kind = item[0];
         CGFloat height = [item[1] doubleValue];
         _TtC12Element_List18CollectionViewCell *cell =
             [[_TtC12Element_List18CollectionViewCell alloc] initWithFrame:CGRectMake(0, 0, W, height)];
-        [collection addSubview:cell];
+        [footerList addSubview:cell];
         UIView *content = box(cell.contentView, MockAlbum_PageImpl20FooterStructuredDataView.class, cell.contentView.bounds, nil);
         if ([kind isEqualToString:@"Album.ConsumptionExperience"]) {
             UIView *line = box(content, UIView.class, content.bounds, kind);
@@ -404,6 +466,10 @@ static NSString *trailingLabel(UIView *root) {
                 UIView *card = box(content, UIView.class, CGRectMake(16 + i * 161, 0, 153, height), @"Components.UI.ContentCardAlbum");
                 card.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1];
                 card.layer.cornerRadius = 4;
+                // A card's caption backing as the device paints it: the base surface, on its layer.
+                if (i == 0) card.layer.backgroundColor = [UIColor colorWithRed:0x12 / 255.0 green:0x12 / 255.0 blue:0x12 / 255.0 alpha:1].CGColor;
+                if (i == 0 && !_baseCard) _baseCard = card;
+                if (i == 1 && !_greyCard) _greyCard = card;
             }
         }
         [_footerCells addObject:cell];
@@ -439,6 +505,9 @@ static NSString *trailingLabel(UIView *root) {
         NSLog(@"[harness] the episode page's paint: %@ %@ %@, and the card inside a cell %@",
               episodePaints[0].backgroundColor ?: @"clear", episodePaints[1].backgroundColor ?: @"clear",
               episodePaints[2].backgroundColor ?: @"clear", card.backgroundColor ?: @"clear");
+        // The base-surface album card cleared, the one painted gray left alone.
+        NSLog(@"[harness] album cards: base surface a=%.0f, gray a=%.2f",
+              CGColorGetAlpha(self->_baseCard.layer.backgroundColor), CGColorGetAlpha(self->_greyCard.layer.backgroundColor));
     });
 
     // the sticky navigation bar, its gradient hidden until the page scrolls
@@ -481,6 +550,47 @@ static NSString *trailingLabel(UIView *root) {
         }
         at(3, ^{ setAddTo(1); NSLog(@"[harness] add-to: saved from elsewhere"); });
         at(7, ^{ [trailingButton(rootView) sendActionsForControlEvents:UIControlEventTouchUpInside]; });
+    }
+
+    // `motion`: Apple Music's animated cover, HARNESS_CANVAS_FILE (any mp4), handed to the hero at 2 s as the
+    // catalog would hand it. The clip stays transparent until its first frame is decoded and then fades in;
+    // it plays in a window and stops out of one.
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"motion"]) {
+        UIView *rootView = root.view;
+        __block UIView *hero = nil;
+        at(2, ^{
+            NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:rootView];
+            while (queue.count && !hero) {
+                UIView *v = queue.firstObject;
+                [queue removeObjectAtIndex:0];
+                if ([NSStringFromClass(v.class) isEqualToString:@"SGRAlbumHero"]) hero = v;
+                [queue addObjectsFromArray:v.subviews];
+            }
+            const char *path = getenv("HARNESS_CANVAS_FILE");
+            NSLog(@"[harness] motion: hero %@, clip %s", hero ? @"found" : @"missing", path ?: "not given");
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            if (hero && path) [hero performSelector:NSSelectorFromString(@"showMotion:") withObject:[NSURL fileURLWithPath:@(path)]];
+#pragma clang diagnostic pop
+            AVPlayerLayer *clip = [hero valueForKey:@"_motion"];
+            NSLog(@"[harness] motion: added, ready %d, opacity %.0f, fading %@", clip.readyForDisplay, clip.opacity,
+                  [clip animationForKey:@"fade"] ? @"yes" : @"no");
+        });
+        for (NSNumber *when in @[@2.5, @4]) {
+            at(when.doubleValue, ^{
+                AVPlayerLayer *clip = [hero valueForKey:@"_motion"];
+                NSLog(@"[harness] motion at %@s: ready %d, opacity %.0f, rate %.0f", when, clip.readyForDisplay, clip.opacity, clip.player.rate);
+            });
+        }
+        at(4.5, ^{
+            UIView *parent = hero.superview;
+            NSUInteger index = [parent.subviews indexOfObject:hero];
+            [hero removeFromSuperview];
+            AVPlayerLayer *clip = [hero valueForKey:@"_motion"];
+            NSLog(@"[harness] motion out of the window: rate %.0f", clip.player.rate);
+            [parent insertSubview:hero atIndex:index];
+            NSLog(@"[harness] motion back in it: rate %.0f", clip.player.rate);
+        });
     }
 
     // In `late`, add arrives at 2.5 s, after every pass of the header's and the metadata's re-reads: an arranged
@@ -549,17 +659,14 @@ static NSString *trailingLabel(UIView *root) {
     return YES;
 }
 
-- (void)sgr_parentFired {
-    NSLog(@"[harness] the artist line fired ParentRow");
-}
-
 // Every footer cell asked for its height the way the collection's self-sizing asks, then stacked under the
 // tracks with whatever each answered.
 - (void)measureFooter:(CGFloat)width {
     CGFloat y = _tracksBottom;
     for (_TtC12Element_List18CollectionViewCell *cell in _footerCells) {
         CGFloat natural = cell.bounds.size.height;
-        UICollectionViewLayoutAttributes *attributes = [UICollectionViewLayoutAttributes layoutAttributesForCellWithIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
+        NSIndexPath *path = [NSIndexPath indexPathForItem:[_footerCells indexOfObject:cell] inSection:0];
+        UICollectionViewLayoutAttributes *attributes = [UICollectionViewLayoutAttributes layoutAttributesForCellWithIndexPath:path];
         attributes.frame = CGRectMake(0, y, width, natural);
         UICollectionViewLayoutAttributes *answer = [cell preferredLayoutAttributesFittingAttributes:attributes];
         cell.frame = CGRectMake(0, y, width, answer.size.height);

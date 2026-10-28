@@ -1,6 +1,6 @@
 // The redesign's AMOLED background, always on: its copy of Native/Appearance/Amoled.x without the switch.
-// AMOLED background: Spotify paints its base surface #121212; with the switch on, that grey and
-// the gradients fading into it go pure black. Lighter greys stay (#1F1F1F placeholders, #292929
+// AMOLED background: Spotify paints its base surface #121212; with the switch on, that gray and
+// the gradients fading into it go pure black. Lighter grays stay (#1F1F1F placeholders, #292929
 // cards), so elevated surfaces still read against the black.
 //
 // Trees: #121212 sits on the Home, Search, Library and settings scroll views, on list rows, the
@@ -36,23 +36,27 @@ static CGColorRef copyBlack(CGColorRef color) {
 
 %hook CAGradientLayer
 - (void)setColors:(NSArray *)colors {
-    NSMutableArray *mapped = [[NSMutableArray alloc] initWithCapacity:colors.count];
+    // Most gradients hold no base gray: those go through as they are, and a copy is made only from the first gray on.
+    NSMutableArray *mapped = nil;
+    NSUInteger index = 0;
     for (id entry in colors) {
         CGColorRef color = (__bridge CGColorRef)entry;
-        if (!isBaseGrey(color)) {
+        if (isBaseGrey(color)) {
+            if (!mapped) mapped = [[colors subarrayWithRange:NSMakeRange(0, index)] mutableCopy];
+            CGColorRef black = copyBlack(color);
+            [mapped addObject:(__bridge id)black];
+            CGColorRelease(black);
+        } else if (mapped) {
             [mapped addObject:entry];
-            continue;
         }
-        CGColorRef black = copyBlack(color);
-        [mapped addObject:(__bridge id)black];
-        CGColorRelease(black);
+        index++;
     }
-    %orig(colors ? mapped : nil);
+    %orig(mapped ?: colors);
 }
 %end
 
 // Spotify's settings list paints nothing of its own and shows whatever sits under it, which is not
-// the base grey the hooks above turn black. The list is the top surface, so it takes the black.
+// the base gray the hooks above turn black. The list is the top surface, so it takes the black.
 %hook _TtC21Settings_PlatformImpl26SettingsListViewController
 - (void)viewDidLayoutSubviews {
     %orig;

@@ -1,0 +1,14 @@
+iOS 27.0 arm64 simulator; source selector unregistered
+PASS one chain, normal 44.1 kHz chain drained 1.00x (want 1.00), 48 kHz chain 0.00x (want 0.00); the processors on 44.1
+PASS 48 kHz chain started too, normal 44.1 kHz chain drained 1.00x (want 1.00), 48 kHz chain 1.00x (want 1.00); the processors on 48
+PASS 1.5x: only the 48 kHz chain 44.1 kHz chain drained 1.00x (want 1.00), 48 kHz chain 1.50x (want 1.50); the processors on 48
+PASS 48 kHz stopped: 1.5x moves to 44.1 44.1 kHz chain drained 1.50x (want 1.50), 48 kHz chain 0.00x (want 0.00); the processors on 44.1
+PASS 48 kHz started again: back to it 44.1 kHz chain drained 1.00x (want 1.00), 48 kHz chain 1.50x (want 1.50); the processors on 48
+PASS a callback-fed unit started: 1.5x stays 44.1 kHz chain drained 1.00x (want 1.00), 48 kHz chain 1.50x (want 1.50); the processors on 48
+PASS 48 kHz silent for a while: 1.5x to 44.1 44.1 kHz chain drained 1.50x (want 1.50), 48 kHz chain 1.00x (want 1.00); the processors on 44.1
+PASS 48 kHz sound again: stays on 44.1 44.1 kHz chain drained 1.50x (want 1.50), 48 kHz chain 1.00x (want 1.00); the processors on 44.1
+PASS 48 kHz mixer disposed: 44.1 unchanged 44.1 kHz chain drained 1.50x (want 1.50), 48 kHz chain 0.00x (want 0.00); the processors on 44.1
+PASS 44.1 stopped, 48 output disposed 44.1 kHz chain drained 0.00x (want 0.00), 48 kHz chain 0.00x (want 0.00); the processors on neither
+PASS 44.1 started again, still 1.5x 44.1 kHz chain drained 1.50x (want 1.50), 48 kHz chain 0.00x (want 0.00); the processors on 44.1
+PASS back to normal 44.1 kHz chain drained 1.00x (want 1.00), 48 kHz chain 0.00x (want 0.00); the processors on 44.1
+two chains: 0 failures

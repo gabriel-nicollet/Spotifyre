@@ -23,3 +23,9 @@ UIView *SGRGlassInside(UIView *control, const void *key, CGFloat side);
 // leads (the playlist header's Play). `prominent` lays a white film inside the shape, so that control
 // reads a step brighter than the circles beside it without leaving the same material.
 UIView *SGRGlassCapsuleInside(UIView *control, const void *key, CGSize size, BOOL prominent);
+
+// Shows or hides a shape of the Kit's by its effect, never by an alpha on it or on a view above it
+// (Redesigned/Player/PlayerMotion.x): UIKit draws the material wrongly or not at all under a fading alpha.
+// The solid shape Reduce Transparency puts in its place has no effect and fades by its own alpha. Animates
+// in the caller's animation.
+void SGRShowGlass(UIView *shape, BOOL shown);

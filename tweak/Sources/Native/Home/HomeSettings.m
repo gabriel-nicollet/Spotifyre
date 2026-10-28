@@ -16,7 +16,7 @@ UIViewController *SGHomeGradientPage(void) {
                                    sections:@[
         SGSection(@"Gradient", @[
             SGOptionRow(@"Show", nil, SGKeyHomeGradient),
-            choiceRow(@"Colour", nil, SGHomeChoiceTint),
+            choiceRow(@"Color", nil, SGHomeChoiceTint),
             choiceRow(@"Strength", nil, SGHomeChoiceStrength),
             choiceRow(@"Height", nil, SGHomeChoiceHeight),
         ]),
@@ -38,7 +38,7 @@ static UIViewController *libraryPage(void) {
 }
 
 UIViewController *SGHomeSettingsPage(void) {
-    // The row reads its own state out, so the section says which colour is set without being opened.
+    // The row reads its own state out, so the section says which color is set without being opened.
     SGModRow *gradient = SGPageRow(@"Gradient", ^UIViewController *{ return SGHomeGradientPage(); });
     gradient.value = ^NSString *{
         if (!SGFlag(SGKeyHomeGradient, NO)) return @"Off";

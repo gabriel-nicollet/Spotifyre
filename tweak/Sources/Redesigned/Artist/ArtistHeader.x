@@ -1,5 +1,5 @@
 // Artist redesign: the header the playlist and album pages have. The photo runs full bleed across the top
-// of the page and dissolves into the page's colour; the name and the monthly listeners are centred on the
+// of the page and dissolves into the page's color; the name and the monthly listeners are centered on the
 // bottom of that dissolve; and under them one row -- shuffle, a white Play capsule, and Follow.
 //
 // Tree (trees/clean/artist/01.txt:37-170). The header is TemplateKit's HeaderContainer, 568pt, the first view
@@ -26,8 +26,11 @@
 // section. The Kit's SGRHeaderInfo reads the name and the listeners off Spotify's concealed labels and draws
 // and fires Spotify's shuffle, play and Follow, Follow as a glyph from the collection (ArtistFollow.x). More stays in Spotify's row, where the row needs it (ArtistField.x), and the Kit's pinned ⋯
 // (SGRPinnedMore) draws and fires it from the top trailing corner of the page, level with the back button.
+#import <objc/runtime.h>
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
+#import "Redesigned/Album/Album.h"
 #import "Artist.h"
 
 // How much of the photo's height the dissolve into the field covers, and the scrim over the top of it that
@@ -38,7 +41,7 @@ static const CGFloat kMinCover = 80, kMinHero = 120;
 // The collapsed ImageHeaderView, Spotify's navigation bar; the text fades out over the last kFade before it.
 static const CGFloat kBar = 100, kFade = 150;
 
-static char kInfoKey, kHeroKey, kHeroHeightKey, kContainerHeightKey, kRowWatchedKey;
+static char kInfoKey, kHeroKey, kHeroHeightKey, kContainerHeightKey, kRowWatchedKey, kSizeKey;
 static char kTitleKey, kMetaKey, kShuffleKey, kPlayKey, kFollowKey, kArtworkKey, kBarKey, kMoreKey, kMoreButtonKey;
 
 #pragma mark - Spotify's views
@@ -62,6 +65,23 @@ static NSString *trimmed(NSString *text) {
     return clean.length ? clean : nil;
 }
 
+static char kLogoNameKey;
+
+// Apple Music's logo for the artist in place of the name, where Apple Music has one. Asked once per name;
+// the catalog remembers the answer for the launch.
+static void showLogo(SGRHeaderInfo *info, NSString *name) {
+    if (!name.length || !SGEnabled(SGRKeyArtistLogo) || [objc_getAssociatedObject(info, &kLogoNameKey) isEqualToString:name]) return;
+    objc_setAssociatedObject(info, &kLogoNameKey, name, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    __weak SGRHeaderInfo *weakInfo = info;
+    CGFloat pixels = UIScreen.mainScreen.bounds.size.width * UIScreen.mainScreen.scale;
+    SGMotionArtistLogo(name, pixels, ^(UIImage *logo) {
+        SGRHeaderInfo *shown = weakInfo;
+        if (!shown || ![objc_getAssociatedObject(shown, &kLogoNameKey) isEqualToString:name]) return;
+        [shown showTitleImage:logo];
+        if (logo) SGLog(@"redesign artist: Apple Music's logo for %@", name);
+    });
+}
+
 static NSString *firstText(UIView *root) {
     __block NSString *found = nil;
     SGForEachView(root, ^(UIView *v) {
@@ -82,11 +102,11 @@ static UIView *containerOf(UIView *header) {
 #pragma mark - the photo, full bleed
 
 // The picture across the top of the page with the field showing through the bottom of it: a scrim over the
-// top for the status bar, and under it a fade to the very colour the page's field is drawing.
+// top for the status bar, and under it a fade to the very color the page's field is drawing.
 @interface SGRArtistHero : UIView
 @property (nonatomic, readonly) UIImageView *picture;
 @property (nonatomic, copy) UIColor *fieldColor;
-// The photo in Spotify's artwork view, and every photo it puts there afterwards: the hero keeps itself
+// The photo in Spotify's artwork view, and every photo it puts there afterward: the hero keeps itself
 // right, rather than being handed a picture on each of the header's passes and staying empty between them.
 // The same view again only re-reads it.
 - (void)followArtwork:(UIImageView *)source;
@@ -118,7 +138,7 @@ static UIView *containerOf(UIView *header) {
     _dissolve.zPosition = 2;
     [self.layer addSublayer:_dissolve];
     self.fieldColor = SGRNeutralField();
-    // The colour is read off the main thread, so it can land after the last layout pass of the page.
+    // The color is read off the main thread, so it can land after the last layout pass of the page.
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(sgr_fieldColorDidChange)
                                                name:SGRFieldColorDidChangeNotification object:nil];
     return self;
@@ -135,7 +155,7 @@ static UIView *containerOf(UIView *header) {
 - (void)setFieldColor:(UIColor *)color {
     if (!color || [_fieldColor isEqual:color]) return;
     _fieldColor = [color copy];
-    // The clear end is the same colour with no alpha, so the fade keeps its hue instead of going through grey.
+    // The clear end is the same color with no alpha, so the fade keeps its hue instead of going through gray.
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     _dissolve.colors = @[(id)[color colorWithAlphaComponent:0].CGColor,
@@ -172,9 +192,8 @@ static UIView *containerOf(UIView *header) {
     UIImage *image = source.image;
     if (!image || _picture.image == image) return;
     _picture.image = image;
-    // The page's field takes its colour from the same picture.
+    // The page's field takes its color from the same picture.
     SGRArtistSetArtwork(self, image);
-    SGRRevealMark(SGRArtistPageOf(self), SGRRevealPicture);
     static BOOL logged;
     if (late && !logged) {
         logged = YES;
@@ -201,7 +220,7 @@ static UIImageView *photoIn(UIView *artwork) {
 
 // The picture from the top of the container down to `bottom`, which comes from the container at rest and only
 // ever grows, so it does not change size while the page loads or scrolls.
-static void applyHero(UIView *container, UIView *artwork, CGFloat bottom) {
+static void applyHero(UIView *container, UIView *artwork, CGFloat bottom, UIColor *fieldColor) {
     SGRArtistHero *hero = objc_getAssociatedObject(container, &kHeroKey);
     if (!hero) {
         hero = [[SGRArtistHero alloc] initWithFrame:CGRectZero];
@@ -218,13 +237,14 @@ static void applyHero(UIView *container, UIView *artwork, CGFloat bottom) {
     }
     if (height < kMinHero) return;
     setFrame(hero, CGRectMake(0, 0, container.bounds.size.width, height));
-    hero.fieldColor = SGRArtistFieldColor(container);
+    hero.fieldColor = fieldColor;
     [hero followArtwork:photoIn(artwork)];
 }
 
 #pragma mark - the header's pass
 
-static void applyHeader(UIView *header);
+static void applyHeader(UIView *header, BOOL full);
+static void applyContent(UIView *header, UIView *container, SGRHeaderInfo *info, NSString *name, UIView *listeners, UIColor *fieldColor);
 
 // Spotify's navigation bar, the one part of the header kept: collapsed, it is where the name is. Its gradient
 // is a flat dark band over the field, as the album's was (Album/AlbumHeader.x); the soft top edge every
@@ -243,13 +263,16 @@ static UIView *keepBar(UIView *header) {
     return foreground;
 }
 
-static void applyHeader(UIView *header) {
+// `full` NO is the header's own pass: a step of the collapse (its height changed, its width did not) then only
+// moves and fades, unless the name or the listeners changed; any other pass and the row's take everything again.
+static void applyHeader(UIView *header, BOOL full) {
+    CGSize size = header.bounds.size;
+    NSValue *last = objc_getAssociatedObject(header, &kSizeKey);
+    if (!full) full = !last || last.CGSizeValue.width != size.width || last.CGSizeValue.height == size.height;
     UIView *container = containerOf(header);
     UIView *artwork = SGRFindByIdentifier(header, @"Components.Header.UI.ArtworkImage", &kArtworkKey);
-    UIView *page = SGRArtistPageOf(container);
-    if (!container || !artwork || !page) return;
-    // The photo header the redesign lays out: the page's curtain waits for all of it (ArtistField.x put it up).
-    SGRRevealHold(page, SGRRevealPage);
+    if (!container || !artwork || !SGRArtistPageOf(container)) return;
+    objc_setAssociatedObject(header, &kSizeKey, [NSValue valueWithCGSize:size], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     UIView *bar = keepBar(header);
     for (UIView *sub in header.subviews) {
@@ -260,7 +283,7 @@ static void applyHeader(UIView *header) {
     if (!info) {
         info = [[SGRHeaderInfo alloc] initWithFrame:CGRectZero];
         // Follow's only state is its title in the app's language, so the glyph takes it from the collection.
-        __weak UIView *weakPage = page;
+        __weak UIView *weakPage = SGRArtistPageOf(container);
         __weak SGRHeaderInfo *weakInfo = info;
         __weak UIView *weakHeader = header;
         info.trailingState = ^BOOL(BOOL *on) {
@@ -276,21 +299,17 @@ static void applyHeader(UIView *header) {
 
     UIView *title = SGRFindByIdentifier(header, @"Encore.AdaptiveTitle", &kTitleKey);
     UIView *listeners = SGRFindByIdentifier(header, @"Components.Header.UI.Metadata", &kMetaKey);
-    NSString *name = firstText(title) ?: firstText(bar), *listening = firstText(listeners);
-    [info showTitle:name creator:nil length:listening about:nil];
-
-    UIView *shuffle = SGRFindByIdentifier(header, @"Components.UI.ShuffleButton", &kShuffleKey);
-    UIView *play = SGRFindByIdentifier(header, @"header-play-button", &kPlayKey);
-    UIView *follow = SGRFindByIdentifier(header, @"Curation.FollowButtonElementKit.FollowButton", &kFollowKey);
-    [info showShuffle:shuffle play:play trailing:follow trailingFallback:nil playColor:SGRArtistFieldColor(container)];
-    // The listeners are waited for with the name and Play: arriving late they pushed the name up by a line.
-    if (name && play && listening) SGRRevealMark(page, SGRRevealHeader);
-
-    // More, in the top trailing corner of the page itself rather than of the container, which scrolls away
-    // with the photo: pinned there it is the same button in the same place on the album and the playlist,
-    // and the page keeps it however far down the list one is (issue #57).
-    UIView *more = SGRFindByIdentifier(header, @"Components.UI.ContextMenuButton*", &kMoreKey);
-    SGRPinnedMore(page, &kMoreButtonKey, more);
+    NSString *name = firstText(title) ?: firstText(bar);
+    full |= [info showTitle:name creator:nil length:firstText(listeners) about:nil];
+    // Play's glyph and word are drawn in the field's color, which lands whenever the photo's has been read.
+    UIColor *fieldColor = SGRArtistFieldColor(container);
+    full |= ![fieldColor isEqual:info.handedPlayColor];
+    // Until the buttons' row is found and watched, every pass looks for it: it can arrive after the last full one.
+    full |= !info.rowFound;
+    if (full) {
+        info.handedPlayColor = fieldColor;
+        applyContent(header, container, info, name, listeners, fieldColor);
+    }
 
     // Collapsing, the text would pass over Spotify's bar with the name in it: it goes over the last kFade of
     // the collapse, from the header's own height, which this pass runs on every step of. More stays: it is
@@ -303,7 +322,23 @@ static void applyHeader(UIView *header) {
     CGFloat rest = MAX([objc_getAssociatedObject(container, &kContainerHeightKey) doubleValue], container.bounds.size.height);
     objc_setAssociatedObject(container, &kContainerHeightKey, @(rest), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     CGFloat bottom = rest - SGRHeaderInfoBottom - [info contentHeightForWidth:container.bounds.size.width] + SGRHeaderInfoTitleRise;
-    applyHero(container, artwork, bottom);
+    applyHero(container, artwork, bottom, fieldColor);
+}
+
+// What the header shows besides its text: the logo, the buttons, More, and the watch on the buttons' row.
+static void applyContent(UIView *header, UIView *container, SGRHeaderInfo *info, NSString *name, UIView *listeners, UIColor *fieldColor) {
+    showLogo(info, name);
+
+    UIView *shuffle = SGRFindByIdentifier(header, @"Components.UI.ShuffleButton", &kShuffleKey);
+    UIView *play = SGRFindByIdentifier(header, @"header-play-button", &kPlayKey);
+    UIView *follow = SGRFindByIdentifier(header, @"Curation.FollowButtonElementKit.FollowButton", &kFollowKey);
+    [info showShuffle:shuffle play:play trailing:follow trailingFallback:nil playColor:fieldColor];
+
+    // More, in the top trailing corner of the page itself rather than of the container, which scrolls away
+    // with the photo: pinned there it is the same button in the same place on the album and the playlist,
+    // and the page keeps it however far down the list one is (issue #57).
+    UIView *more = SGRFindByIdentifier(header, @"Components.UI.ContextMenuButton*", &kMoreKey);
+    SGRPinnedMore(SGRArtistPageOf(container), &kMoreButtonKey, more);
 
     // The buttons arrive after the header has laid out, in a row that keeps its size and so lays nothing out
     // again (Native/Artist/Artist.x): the row's own pass is watched, a plain UIStackView.
@@ -313,9 +348,10 @@ static void applyHeader(UIView *header) {
         objc_setAssociatedObject(row, &kRowWatchedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         __weak UIView *weakHeader = header;
         SGRObserveLayout(row, ^(UIView *view) {
-            if (weakHeader) applyHeader(weakHeader);
+            if (weakHeader) applyHeader(weakHeader, YES);
         });
     }
+    if (row && objc_getAssociatedObject(row, &kRowWatchedKey)) info.rowFound = YES;
 
     static BOOL logged;
     if (!logged && header.window && name) {
@@ -326,10 +362,36 @@ static void applyHeader(UIView *header) {
     }
 }
 
+// Scrolled, Spotify fades UIKit's navigation bar in over the artist page with an opaque black background
+// (SPNavigationBar's _UIBarBackground, 116pt), where the album's own bar lets the page's field show through
+// (issue #28). The page's item gets the same bar with no background, again whenever Spotify sets its own.
+static void clearNavigationBar(UIView *header) {
+    static char kClearKey;
+    UIResponder *responder = header;
+    while (responder && !([responder isKindOfClass:UIViewController.class]
+                          && [((UIViewController *)responder).parentViewController isKindOfClass:UINavigationController.class]))
+        responder = responder.nextResponder;
+    UIViewController *page = (UIViewController *)responder;
+    if (!page) return;
+    UINavigationItem *item = page.navigationItem;
+    UINavigationBarAppearance *clear = objc_getAssociatedObject(page, &kClearKey);
+    if (clear && item.standardAppearance == clear && item.scrollEdgeAppearance == clear) return;
+    if (!clear) {
+        clear = [page.navigationController.navigationBar.standardAppearance copy] ?: [UINavigationBarAppearance new];
+        [clear configureWithTransparentBackground];
+        objc_setAssociatedObject(page, &kClearKey, clear, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    item.standardAppearance = clear;
+    item.scrollEdgeAppearance = clear;
+    item.compactAppearance = clear;
+    item.compactScrollEdgeAppearance = clear;
+}
+
 %hook _TtC35CreativeWorkPlatform_ImageHeaderKit15ImageHeaderView
 - (void)layoutSubviews {
     %orig;
-    applyHeader((UIView *)self);
+    applyHeader((UIView *)self, NO);
+    clearNavigationBar((UIView *)self);
 }
 %end
 

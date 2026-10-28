@@ -15,8 +15,8 @@
 // names the Gradient page offers, the key it is stored under and the one it falls back to, so a
 // name and what it does cannot drift apart.
 typedef NS_ENUM(NSInteger, SGHomeChoice) {
-    SGHomeChoiceTint,       // which colour it fades
-    SGHomeChoiceStrength,   // how far up or down that colour is taken
+    SGHomeChoiceTint,       // which color it fades
+    SGHomeChoiceStrength,   // how far up or down that color is taken
     SGHomeChoiceHeight,     // how far down the page it reaches
     SGHomeChoiceCount,
 };

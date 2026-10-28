@@ -1,5 +1,4 @@
-// Player redesign: glass circles behind the header's close and more buttons, and the more button handed to
-// the menus that open from it (Speed and pitch's, and the Music app style menu of PlayerMenu.x).
+// Player redesign: glass circles behind the header's close and more buttons.
 //
 // Glass is the control layer floating over the field, so it goes behind the round buttons only: the
 // playlist name between them stays a label, and the row of playback controls stays bare glyphs
@@ -16,34 +15,85 @@
 //
 // Tree (trees/clean/player/01.txt): HeaderElementsUnit's view is a 402x48 row holding
 // id=now-playing-minimize-button 48x48 (:103) and id=Context menu 48x48 (:122), the playlist name
-// between them.
+// between them. The down arrow and the ⋯ are a pair, as the Music app's are: the same circle, size and glass.
+// 9.1.78 also carries mobile-nowplaying-close-button (strings in the binary), so the down arrow is looked for
+// under either name; which view each circle went into is logged once, so a phone where the arrow has none
+// says why.
+//
+// The circle presses in itself (scale, the Kit's press spring), from the control that takes the touches: the
+// arrow's own, and for the ⋯ the mod's button over it (ContextMenu.x). Spotify draws a button's pressed look
+// under its subviews, where the circle covers it (phone, 2026-10-06: the arrow closed the player but showed
+// no ripple), and the ⋯'s touches no longer reach Spotify's button at all.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
-#import "Shared/Player/SpeedPitch.h"
+#import "Redesigned/ContextMenu/ContextMenu.h"
 #import "Player.h"
 
-static char kGlassKey, kCloseKey, kMoreKey;
+static char kGlassKey, kCloseKey, kMoreKey, kPressKey;
+static const CGFloat kPressScale = 0.92;
 
-static void glassInside(UIViewController *unit, NSArray<NSString *> *identifiers, const void **findKeys) {
+@interface SGRHeaderPress : NSObject
+@end
+@implementation SGRHeaderPress
+// The circle of the control pressed, or of the button under it (the ⋯'s front).
+static UIView *circleOf(UIControl *control) {
+    return objc_getAssociatedObject(control, &kGlassKey) ?: objc_getAssociatedObject(control.superview, &kGlassKey);
+}
+- (void)down:(UIControl *)control {
+    UIView *circle = circleOf(control);
+    SGRAnimate(SGRMotionPress, ^{ circle.transform = CGAffineTransformMakeScale(kPressScale, kPressScale); }, nil);
+}
+- (void)up:(UIControl *)control {
+    UIView *circle = circleOf(control);
+    SGRAnimate(SGRMotionPress, ^{ circle.transform = CGAffineTransformIdentity; }, nil);
+}
+@end
+
+// `throughMenu`: the mod's ⋯, whose touch UIKit cancels as the menu comes up on it; the press holds until the
+// menu ends, which the button reports as a touch up outside (ContextMenu.x), so its cancel is not listened to.
+static void pressFrom(UIControl *control, BOOL throughMenu) {
+    if (![control isKindOfClass:UIControl.class] || objc_getAssociatedObject(control, &kPressKey)) return;
+    objc_setAssociatedObject(control, &kPressKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    static SGRHeaderPress *press;
+    if (!press) press = [SGRHeaderPress new];
+    [control addTarget:press action:@selector(down:) forControlEvents:UIControlEventTouchDown | UIControlEventTouchDragEnter];
+    UIControlEvents up = UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchDragExit;
+    [control addTarget:press action:@selector(up:) forControlEvents:throughMenu ? up : up | UIControlEventTouchCancel];
+}
+
+// `identifiers` holds, for each button, the identifiers it may carry, the first found winning. `watchMenu`: the ⋯ is
+// handed to PlayerMenu.m, which takes it for the ordinary player's; the AI DJ's ⋯ keeps Spotify's own menu.
+static void glassInside(UIViewController *unit, NSArray<NSArray<NSString *> *> *identifiers, const void **findKeys, BOOL watchMenu) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
     NSUInteger found = 0;
     for (NSUInteger i = 0; i < identifiers.count; i++) {
-        UIView *button = SGRFindByIdentifier(host, identifiers[i], findKeys[i]);
+        UIView *button = nil;
+        for (NSString *identifier in identifiers[i]) {
+            if ((button = SGRFindByIdentifier(host, identifier, findKeys[i]))) break;
+        }
+        NSString *name = identifiers[i].firstObject;
+        static NSMutableSet<NSString *> *said;
+        if (!said) said = [NSMutableSet set];
         if (!button) {
-            static NSMutableSet<NSString *> *missing;
-            if (!missing) missing = [NSMutableSet set];
-            if (![missing containsObject:identifiers[i]]) {
-                [missing addObject:identifiers[i]];
-                SGLog(@"redesign player: %@ not found in %@, left as Spotify's", identifiers[i], NSStringFromClass(host.class));
+            if (![said containsObject:name]) {
+                [said addObject:name];
+                SGLog(@"redesign player: %@ not found in %@, left as Spotify's", [identifiers[i] componentsJoinedByString:@" or "], NSStringFromClass(host.class));
             }
             continue;
         }
-        SGRGlassInside(button, &kGlassKey, SGRGlassCircleSize);
-        if ([identifiers[i] isEqualToString:@"Context menu"]) {
-            SGPlayerMenuWatchMoreButton(button);
-            SGRPlayerMenuWatchMoreButton(button);
+        UIView *circle = SGRGlassInside(button, &kGlassKey, SGRGlassCircleSize);
+        if (![said containsObject:name] && button.bounds.size.width > 0) {
+            [said addObject:name];
+            SGLog(@"redesign player: a %.0fpt glass circle in %@ (id %@, %.0fx%.0f, %@)", circle.bounds.size.width, NSStringFromClass(button.class),
+                  button.accessibilityIdentifier, button.bounds.size.width, button.bounds.size.height,
+                  button.hidden || button.alpha < 0.01 ? @"hidden" : @"shown");
         }
+        if (watchMenu && [name isEqualToString:@"Context menu"]) {
+            SGRPlayerMenuWatch(button);
+        }
+        UIControl *front = SGRSystemMenuFront(button);
+        pressFrom(front ?: (UIControl *)button, front != nil);
         found++;
     }
 
@@ -56,28 +106,33 @@ static void glassInside(UIViewController *unit, NSArray<NSString *> *identifiers
     }
 }
 
-static void layOutHeader(UIViewController *unit) {
+static void glassHeader(UIViewController *unit, BOOL watchMenu) {
     static const void *keys[] = {&kCloseKey, &kMoreKey};
-    glassInside(unit, @[@"now-playing-minimize-button", @"Context menu"], keys);
+    glassInside(unit, @[@[@"now-playing-minimize-button", @"mobile-nowplaying-close-button"], @[@"Context menu"]], keys, watchMenu);
 }
 
 %hook _TtC20NowPlaying_ModesImpl18HeaderElementsUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    layOutHeader((UIViewController *)self);
+    glassHeader((UIViewController *)self, YES);
 }
 %end
 
-// Spotify Free's player builds the same elements into units of its own (Player.h).
-%hook _TtC32ReinventFree_ReinventFreeNpvImpl43ReinventFreeNavigationBarUnitViewController
+// The AI DJ's player has a header unit of its own with the same two buttons, which the circles never reached.
+// Its ⋯ gets the glass but is not watched: the menu it opens (feedback, language, voice) is not the player's.
+%group SGRDJHeaderHooks
+%hook SGRDJHeaderUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    layOutHeader((UIViewController *)self);
+    glassHeader((UIViewController *)self, NO);
 }
+%end
 %end
 
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
-    SGRequireClasses(@[@"_TtC20NowPlaying_ModesImpl18HeaderElementsUnit", @"_TtC32ReinventFree_ReinventFreeNpvImpl43ReinventFreeNavigationBarUnitViewController"]);
+    Class djHeader = SGRDJClass(@"DJMHeaderElementsUnitViewController");
+    if (djHeader) { %init(SGRDJHeaderHooks, SGRDJHeaderUnit = djHeader); }
+    SGRequireClasses(@[@"_TtC20NowPlaying_ModesImpl18HeaderElementsUnit"]);
 }

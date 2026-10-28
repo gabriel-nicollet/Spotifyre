@@ -32,12 +32,13 @@ static void vanish(UIView *view) {
     if (!view) return;
     if (view.alpha != 0) view.alpha = 0;
     if (view.userInteractionEnabled) view.userInteractionEnabled = NO;
-    view.accessibilityElementsHidden = YES;
+    if (!view.accessibilityElementsHidden) view.accessibilityElementsHidden = YES;
 }
 
+// `marker` is a literal (SGClassNamed).
 static UIView *childNamed(UIView *host, NSString *marker) {
     for (UIView *sub in host.subviews) {
-        if ([NSStringFromClass(sub.class) containsString:marker]) return sub;
+        if (SGClassNamed(sub.class, marker)) return sub;
     }
     return nil;
 }
@@ -104,12 +105,10 @@ static UILabel *titleIn(UIStackView *row) {
 static void layoutHeader(UIStackView *row) {
     vanish(sg_scrim);
 
-    static Class faceClass;
-    if (!faceClass) faceClass = NSClassFromString(@"_TtC29ListeningActivity_ElementsKit21AdaptiveFaceContainer");
     UIView *face = nil;
     NSString *text = titleText(row);
     for (UIView *part in row.arrangedSubviews) {
-        if (faceClass && [part isKindOfClass:faceClass]) face = part;
+        if (SGRIsAvatar(part) && !face) face = part;
         else vanish(part);
     }
     if (row.semanticContentAttribute != UISemanticContentAttributeForceRightToLeft) {

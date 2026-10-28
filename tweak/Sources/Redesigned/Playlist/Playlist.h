@@ -2,12 +2,13 @@
 // laid out the way the Music app lays a playlist out. Liked Songs and a playlist of the user's own are the
 // same page (trees/clean/liked-songs/01.txt, own-playlist/01.txt: one FTPViewController, one
 // SPTFreeTierPlaylistEncoreHeaderViewController), so one redesign covers all three. Album and artist pages
-// are built by another framework and are left alone.
+// are built by another framework and are left alone. The page of the songs the user liked by one artist
+// (CollectionArtist_ArtistImpl) is the same header kit with no cover, like Liked Songs, and is given the same files.
 //
 //     PlaylistField.x   the artwork field behind the whole page, the artwork it is read from, the flags
 //                       the screen forces
 //     PlaylistHeader.x  the header: the cover full bleed at the top dissolving into the field, the title,
-//                       the creator and the length centred under it, and one row of glass controls --
+//                       the creator and the length centered under it, and one row of glass controls --
 //                       shuffle, a prominent Play capsule, add, and more where Spotify still has it
 //     PlaylistRows.x    the track rows on the field with no surface of their own, rounded artwork, a
 //                       hairline between them, and the curation pills collapsed
@@ -39,8 +40,10 @@ UIView *SGRPlaylistPageOf(UIView *view);
 // PlaylistField.x. The field belongs to the page `view` is on, found by walking up from it, so two playlist
 // pages on the navigation stack keep a field each.
 //
-// The colour the page's field is showing, SGRNeutralField() before one has been read: what the header's
+// The color the page's field is showing, SGRNeutralField() before one has been read: what the header's
 // cover has to dissolve into for there to be no seam.
 UIColor *SGRPlaylistFieldColor(UIView *view);
-// The cover of the page `view` is on, for its field to take its colour from. The same image again is a no-op.
+// The cover of the page `view` is on, for its field to take its color from. The same image again is a no-op.
 void SGRPlaylistSetArtwork(UIView *view, UIImage *image);
+// The page `view` is on has no cover to wait for (Liked Songs): shown now rather than after the field's limit.
+void SGRPlaylistShowPage(UIView *view);

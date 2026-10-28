@@ -1,5 +1,6 @@
 // The native look's player: Spotify's full screen player with the artwork background and glass header
-// buttons (Player.x), the glass lyrics card (LyricsCard.x), the gestures' hookup (PlayerGestures.x) and the parts of it to hide (PlayerDeclutter.x). The glass
+// buttons (Player.x), the glass lyrics card (LyricsCard.x), the gestures' hookup (PlayerGestures.x), the parts of it to hide (PlayerDeclutter.x)
+// and its pull held off while the progress bar is scrubbed (PlayerScrub.x). The glass
 // lyrics page is Native/Lyrics/LyricsPage.x's and shares SGKeyLyricsCard ("Glass lyrics").
 #import <UIKit/UIKit.h>
 
@@ -24,12 +25,6 @@
 #define SGHideCredits @"spotifyglass.hide.credits"
 #define SGHideMerch @"spotifyglass.hide.merch"
 #define SGHideRecommendations @"spotifyglass.hide.recommendations"
-
-// The welcome tour's one switch for the player: on hides every card under the player but the
-// lyrics, off shows them again. The player's buttons are not its business. Only the tour reads
-// it; the hooks read the keys above.
-#define SGKeyPlayerLyricsOnly @"spotifyglass.hide.playerLyricsOnly"
-void SGSetPlayerLyricsOnly(BOOL on);
 
 @class SGModRow, SGModSection;
 // PlayerSettings.m: the player screen's sections of the Player page, the Queue & devices page and the

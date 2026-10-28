@@ -1,12 +1,11 @@
-// Accent colour: Spotify's green, #1ED760, is one token. Its three components occur once in the
+// Accent color: Spotify's green, #1ED760, is one token. Its three components occur once in the
 // whole binary, and every green the app draws, from the play button to the "Zobrazit vše" links
 // and the progress bar, is that token or a state blended from it. So it is swapped where it is
-// born, in the UIColor initialiser, and the blends follow. Lottie animations carry their own green
+// born, in the UIColor initializer, and the blends follow. Lottie animations carry their own green
 // and are caught at the layer, below. Image assets with green baked in, the logo above all, are
 // out of reach.
 #import "Core/SGCore.h"
 #import "Appearance.h"
-#import "Settings/SGPageStyle.h"
 
 // The greens the app is known to build from literals: the token, and the older brand green the
 // upsell backend still names.
@@ -33,37 +32,9 @@ UIColor *SGAccentColor(void) {
     return [UIColor colorWithRed:r green:g blue:b alpha:1];
 }
 
-NSString *SGAccentLabel(void) {
+NSInteger SGAccentRGB(void) {
     NSInteger rgb = chosen();
-    return rgb < 0 ? @"Spotify green" : [NSString stringWithFormat:@"#%06lX", (long)rgb];
-}
-
-#pragma mark - picker
-
-@interface SGAccentPicker : NSObject <UIColorPickerViewControllerDelegate>
-@end
-
-@implementation SGAccentPicker
-
-- (void)colorPickerViewControllerDidFinish:(UIColorPickerViewController *)picker {
-    CGFloat r = 0, g = 0, b = 0, a = 0;
-    [picker.selectedColor getRed:&r green:&g blue:&b alpha:&a];
-    uint32_t rgb = ((uint32_t)lround(MIN(1, MAX(0, r)) * 255) << 16)
-                 | ((uint32_t)lround(MIN(1, MAX(0, g)) * 255) << 8)
-                 | (uint32_t)lround(MIN(1, MAX(0, b)) * 255);
-    SGSetInt(SGKeyAccent, rgb);
-}
-
-@end
-
-void SGPickAccent(void) {
-    static SGAccentPicker *delegate;
-    if (!delegate) delegate = [SGAccentPicker new];
-    UIColorPickerViewController *picker = [UIColorPickerViewController new];
-    picker.supportsAlpha = NO;
-    picker.selectedColor = SGAccentColor() ?: [UIColor colorWithRed:0x1E / 255.0 green:0xD7 / 255.0 blue:0x60 / 255.0 alpha:1];
-    picker.delegate = delegate;
-    [SGTopController() presentViewController:picker animated:YES completion:nil];
+    return rgb < 0 ? SGSpotifyGreen : rgb;
 }
 
 // A darker green than the token comes out as the accent darkened by the same amount, so the two
@@ -95,10 +66,10 @@ static BOOL swap(CGFloat *r, CGFloat *g, CGFloat *b) {
 }
 %end
 
-// Lottie draws its animations, the play indicator and the checkmarks among them, from colours
-// in the animation file straight onto shape layers, or into colour keyframes, never through
+// Lottie draws its animations, the play indicator and the checkmarks among them, from colors
+// in the animation file straight onto shape layers, or into color keyframes, never through
 // UIColor. The same swap goes on the CGColor. Layers get set off the main thread too, so the
-// copy is made with CoreGraphics alone; NULL when the colour is not one of the greens.
+// copy is made with CoreGraphics alone; NULL when the color is not one of the greens.
 static CGColorRef swappedCopy(CGColorRef color) {
     if (!color || CFGetTypeID(color) != CGColorGetTypeID() || CGColorGetNumberOfComponents(color) != 4) return NULL;
     const CGFloat *c = CGColorGetComponents(color);

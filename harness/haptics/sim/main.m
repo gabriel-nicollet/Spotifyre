@@ -8,7 +8,9 @@
 // The generator plays a beat at 120 BPM, a kick on each whole second and a snare on each half, so the analyzer
 // hears a kick and a snare a second. A script changes the settings every 6 s and checks what the stand-in was
 // asked to play in the 4 s after the change has settled: what each Follows choice leaves out, the strength
-// scaling the taps and the rumble, then a 16-bit interleaved client at 48 kHz.
+// scaling the taps and the rumble, the two switches and the stand-down while iOS's own covers the song (as
+// SystemMusicHaptics.x reports it), then a 16-bit interleaved client at 48 kHz. Before the audio starts, the
+// move from the one choice of before to the two switches is checked for each stored choice.
 //
 //     THEOS=$HOME/theos ../build-sim.sh
 //     xcrun simctl install <udid> build/sim/HapticsHarness.app
@@ -24,6 +26,10 @@
 #import "Core/SGCore.h"
 #import "Shared/Haptics/Haptics.h"
 #import "fakehaptics.h"
+
+// Shared/Player/PlayerState.x, for SpeedPitch.x's SGSetPlayerSpeed: no player state here.
+@class SPTPlayerState;
+SPTPlayerState *SGPlayerState(void) { return nil; }
 
 static atomic_uint_fast64_t sg_frame;
 static double sg_generatorRate;
@@ -70,7 +76,7 @@ static void check(OSStatus status, const char *what) {
 
 static int sg_failures;
 
-@interface HapticsHarnessDelegate : UIResponder <UIApplicationDelegate, UIWindowSceneDelegate>
+@interface HapticsHarnessDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
 
@@ -169,14 +175,41 @@ static int sg_failures;
           rumble ? (isnan(level) ? @"some" : [NSString stringWithFormat:@"%.3f", level]) : @"none");
 }
 
-- (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
-    UISceneConfiguration *config = [[UISceneConfiguration alloc] initWithName:@"Harness" sessionRole:session.role];
-    config.delegateClass = self.class;
-    return config;
+#ifndef BEFORE
+// The move from the one choice of before to the two switches, from each thing someone could have stored: the
+// choice (beside an old switch it overrides), the old switch alone, the redesign's old key alone, nothing. Run
+// twice each, since every reader of the switches runs it. Leaves Music Haptics on and In the Background off.
+- (void)checkMigration {
+    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+    id none = NSNull.null;
+    // The choice, the switch, the redesign's old key; then what the two switches should read.
+    NSArray<NSArray *> *cases = @[
+        @[@0, @YES, none, @NO, @NO], @[@1, @NO, none, @YES, @NO], @[@2, @YES, none, @NO, @YES], @[@7, none, none, @NO, @NO],
+        @[none, @YES, none, @YES, @NO], @[none, none, @YES, @YES, @NO], @[none, none, none, @NO, @NO],
+    ];
+    NSArray<NSString *> *keys = @[SGKeyMusicHapticsMode, SGKeyMusicHaptics, SGKeyMusicHapticsWas];
+    for (NSArray *c in cases) {
+        for (NSString *key in [keys arrayByAddingObject:SGKeyMusicHapticsBackground]) [store removeObjectForKey:key];
+        for (NSUInteger i = 0; i < keys.count; i++) if (c[i] != none) [store setObject:c[i] forKey:keys[i]];
+        SGMigrateMusicHaptics();
+        SGMigrateMusicHaptics();
+        BOOL music = SGMusicHapticsOn(), background = SGMusicHapticsInBackground(), left = [store objectForKey:SGKeyMusicHapticsMode] != nil;
+        BOOL ok = music == [c[3] boolValue] && background == [c[4] boolValue] && !left;
+        if (!ok) sg_failures++;
+        NSLog(@"[harness] %@ stored choice %@, switch %@, old key %@: Music Haptics %@, In the Background %@ (want %@, %@)%@", ok ? @"  ok  " : @"FAILED",
+              c[0], c[1], c[2], music ? @"on" : @"off", background ? @"on" : @"off", [c[3] boolValue] ? @"on" : @"off", [c[4] boolValue] ? @"on" : @"off",
+              left ? @", the choice still stored" : @"");
+    }
+    for (NSString *key in [keys arrayByAddingObject:SGKeyMusicHapticsBackground]) [store removeObjectForKey:key];
+    SGSetEnabled(SGKeyMusicHaptics, YES);
 }
+#endif
 
-- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
-    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+#ifndef BEFORE
+    [self checkMigration];
+#endif
+    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [UIViewController new];
     [self.window makeKeyAndVisible];
     [AVAudioSession.sharedInstance setCategory:AVAudioSessionCategoryPlayback error:nil];
@@ -196,6 +229,11 @@ static int sg_failures;
               ok ? @"  ok  " : @"FAILED", @"44.1 kHz client, Everything, 100%", peek.kicks, peek.snares, s, s, s, tap100, peek.levels, level100);
     }]];
 #ifndef BEFORE
+    // What the page's switches do: store one and tell both engines.
+    void (^flip)(NSString *, BOOL) = ^(NSString *key, BOOL on) {
+        SGSetEnabled(key, on);
+        [NSNotificationCenter.defaultCenter postNotificationName:SGMusicHapticsSwitchesChangedNotification object:nil];
+    };
     void (^set)(NSInteger, NSInteger) = ^(NSInteger follows, NSInteger strength) {
         SGSetInt(SGKeyMusicFollows, follows);
         SGSetInt(SGKeyMusicStrength, strength);
@@ -214,14 +252,46 @@ static int sg_failures;
         @[@"Everything at 200%", ^{ set(SGMusicFollowsEverything, 200); }, ^(double s) {
             [self report:@"Everything at 200%" seconds:s kicks:1 snares:1 rumble:YES intensity:NAN level:MIN(1, level100 * 2)];
         }],
-        @[@"the switch off", ^{ SGSetMusicHapticsEnabled(NO); }, ^(double s) {
-            [self report:@"the switch off" seconds:s kicks:0 snares:0 rumble:NO intensity:NAN level:NAN];
+        @[@"Music Haptics off", ^{ flip(SGKeyMusicHaptics, NO); }, ^(double s) {
+            [self report:@"Music Haptics off" seconds:s kicks:0 snares:0 rumble:NO intensity:NAN level:NAN];
         }],
-        @[@"on again, Everything, 100%", ^{
+        @[@"Music Haptics on, Everything, 100%", ^{
             set(SGMusicFollowsEverything, 100);
-            SGSetMusicHapticsEnabled(YES);
+            flip(SGKeyMusicHaptics, YES);
         }, ^(double s) {
-            [self report:@"on again, Everything, 100%" seconds:s kicks:1 snares:1 rumble:YES intensity:tap100 level:level100];
+            [self report:@"Music Haptics on, Everything, 100%" seconds:s kicks:1 snares:1 rumble:YES intensity:tap100 level:level100];
+        }],
+        // In the Background on with iOS's switch off or nothing asked yet: iOS covers nothing, the mod's plays.
+        @[@"both on, iOS covers nothing", ^{ flip(SGKeyMusicHapticsBackground, YES); }, ^(double s) {
+            [self report:@"both on, iOS covers nothing" seconds:s kicks:1 snares:1 rumble:YES intensity:tap100 level:level100];
+        }],
+        // SystemMusicHaptics.x asking about the song (Checking) or having a haptic track named (Ready).
+        @[@"both on, iOS covers the song", ^{ SGMusicHapticsSetSystemCovers(YES); }, ^(double s) {
+            [self report:@"both on, iOS covers the song" seconds:s kicks:0 snares:0 rumble:NO intensity:NAN level:NAN];
+        }],
+        // A next song iOS has no haptic track for (Unavailable).
+        @[@"both on, iOS has none for the next", ^{ SGMusicHapticsSetSystemCovers(NO); }, ^(double s) {
+            [self report:@"both on, iOS has none for the next" seconds:s kicks:1 snares:1 rumble:YES intensity:tap100 level:level100];
+        }],
+        // Music Haptics flipped while iOS covers: still quiet, then on again once iOS lets go.
+        @[@"covered, Music Haptics off and on", ^{
+            SGMusicHapticsSetSystemCovers(YES);
+            flip(SGKeyMusicHaptics, NO);
+            flip(SGKeyMusicHaptics, YES);
+        }, ^(double s) {
+            [self report:@"covered, Music Haptics off and on" seconds:s kicks:0 snares:0 rumble:NO intensity:NAN level:NAN];
+        }],
+        @[@"In the Background alone", ^{
+            SGMusicHapticsSetSystemCovers(NO);
+            flip(SGKeyMusicHaptics, NO);
+        }, ^(double s) {
+            [self report:@"In the Background alone" seconds:s kicks:0 snares:0 rumble:NO intensity:NAN level:NAN];
+        }],
+        @[@"Music Haptics alone again", ^{
+            flip(SGKeyMusicHapticsBackground, NO);
+            flip(SGKeyMusicHaptics, YES);
+        }, ^(double s) {
+            [self report:@"Music Haptics alone again" seconds:s kicks:1 snares:1 rumble:YES intensity:tap100 level:level100];
         }],
     ]];
 #endif
@@ -248,12 +318,13 @@ static int sg_failures;
         NSLog(@"[harness] %@: %d failed", sg_failures ? @"FAILED" : @"all passed", sg_failures);
         exit(sg_failures ? 1 : 0);
     }];
+    return YES;
 }
 
 @end
 
-// Music Haptics on, and its settings at their defaults, before MusicHaptics.x's constructor reads them; the
-// redesign on, which gates it.
+// Music Haptics on and its settings at their defaults, before MusicHaptics.x's constructor reads them; the
+// redesign on, as in the tweak.
 __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     for (NSString *key in defaults.dictionaryRepresentation.allKeys) {

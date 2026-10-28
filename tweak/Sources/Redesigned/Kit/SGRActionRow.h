@@ -16,10 +16,10 @@
 @interface SGRPlayCapsule : UIControl
 // Spotify's play button, the one the capsule reads and fires. Set by -feedFrom:.
 @property (nonatomic, weak, readonly) UIView *source;
-// A solid capsule of this colour instead of the prominent glass, the Music app's white Play (the playlist).
+// A solid capsule of this color instead of the prominent glass, the Music app's white Play (the playlist).
 // nil, the default, is the glass. Set before the capsule is first laid out.
 @property (nonatomic, copy) UIColor *fillColor;
-// The glyph's and the word's colour; nil is the accent.
+// The glyph's and the word's color; nil is the accent.
 @property (nonatomic, copy) UIColor *contentColor;
 // Takes the glyph, the word and the language from `source`, and follows the glyph as Spotify swaps it
 // (play becoming pause) without the header laying out again. Cheap to call again on every pass.
@@ -34,24 +34,24 @@
 @property (nonatomic, weak, readonly) UIView *source;
 // Drawn, in white, when Spotify's button has no image view to copy (a glyph it draws itself).
 @property (nonatomic, strong) UIImage *fallbackGlyph;
-// The colour to draw the mirrored glyph in, whatever colour Spotify drew it. nil, the default, keeps
-// Spotify's -- which is what a glyph that says something by its colour needs (shuffle turns the accent
-// colour while it is on). Set it for a glyph whose colour is only the weight Spotify gave the control it
-// sat in: Encore bakes the colour into the image it draws, so this re-renders the copy as a template.
+// The color to draw the mirrored glyph in, whatever color Spotify drew it. nil, the default, keeps
+// Spotify's -- which is what a glyph that says something by its color needs (shuffle turns the accent
+// color while it is on). Set it for a glyph whose color is only the weight Spotify gave the control it
+// sat in: Encore bakes the color into the image it draws, so this re-renders the copy as a template.
 @property (nonatomic, copy) UIColor *glyphColor;
-// The colour the glyph takes while Spotify's button is on, and glyphColor while it is off, for a button that
+// The color the glyph takes while Spotify's button is on, and glyphColor while it is off, for a button that
 // says it is on with the small dot Encore puts under its glyph (shuffle: trees/continuous/1.txt, a 4pt round
-// view, hidden while off). Spotify's own off grey read as a disabled button beside the white download
-// (issue #65). A button with no such dot keeps Spotify's colours. nil, the default, reads no dot.
+// view, hidden while off). Spotify's own off gray read as a disabled button beside the white download
+// (issue #65). A button with no such dot keeps Spotify's colors. nil, the default, reads no dot.
 @property (nonatomic, copy) UIColor *onGlyphColor;
 // For a button that shows its state only as a word in the app's language (the artist's Follow): YES with
 // whether it is on once the state is known, from wherever the page reads it. The button then draws
-// stateOffSymbol, or stateOnSymbol in the accent colour, and nothing while it answers NO. Set before the
+// stateOffSymbol, or stateOnSymbol in the accent color, and nothing while it answers NO. Set before the
 // first -feedFrom:; call -feedFrom: again when the state changes.
 @property (nonatomic, copy) BOOL (^readState)(BOOL *on);
 @property (nonatomic, copy) NSString *stateOffSymbol;
 @property (nonatomic, copy) NSString *stateOnSymbol;
-// Takes the glyph, its colour and the label from `source`, and follows the glyph as Spotify swaps it
+// Takes the glyph, its color and the label from `source`, and follows the glyph as Spotify swaps it
 // (shuffle turning on). Cheap to call again on every pass.
 //
 // Spotify's download button (SGRDownload.h) is drawn by Lottie, with nothing to copy: for it the button
@@ -76,3 +76,6 @@ static const NSTimeInterval SGRPinnedMoreWindow = 3;
 // The page whose pinned ⋯ was tapped within that window, or nil: for a screen that puts rows of its own on
 // Spotify's context menu sheet and has to know which page the sheet belongs to.
 UIView *SGRPinnedMoreRecentPage(void);
+// The pinned ⋯ itself, tapped within that window, or nil: what the redesign's system menu opens from
+// (Redesigned/ContextMenu).
+SGRMirrorButton *SGRPinnedMoreRecentButton(void);

@@ -1,10 +1,24 @@
 #import "Lyrics.h"
-#import "Shared/Lyrics/Protobuf.h"
+#import "Shared/AdBlock/Protobuf.h"
 
 @implementation SGKaraokeWord
 @end
 
 @implementation SGKaraokeLine
+- (id)copyWithZone:(NSZone *)zone {
+    SGKaraokeLine *copy = [SGKaraokeLine new];
+    copy.words = _words;
+    copy.start = _start;
+    copy.end = _end;
+    copy.voice = _voice;
+    copy.align = _align;
+    copy.timing = _timing;
+    copy.backing = _backing;
+    copy.pronunciation = _pronunciation;
+    copy.translation = _translation;
+    copy.translationMade = _translationMade;
+    return copy;
+}
 @end
 
 // A line is sung at about this pace and never takes longer than the gap to the next one. A slow
@@ -19,12 +33,6 @@ static const NSUInteger kWordWeight = 2;
 static const NSUInteger kSyllableLetters = 3;
 
 #pragma mark - the model
-
-NSString *SGKaraokeLineDisplayTranslation(SGKaraokeLine *line) {
-    if ([NSUserDefaults.standardUserDefaults boolForKey:SGKeyLyricsAITranslation] && line.machineTranslation.length)
-        return line.machineTranslation;
-    return line.translation;
-}
 
 NSString *SGKaraokeLineText(SGKaraokeLine *line) {
     NSMutableString *text = [NSMutableString string];
@@ -48,6 +56,24 @@ NSInteger SGKaraokeLeadLine(NSArray<SGKaraokeLine *> *lines, NSInteger ms) {
     return last;
 }
 
+NSInteger SGKaraokeMsToChange(NSArray<SGKaraokeLine *> *lines, NSInteger position, NSInteger wordsOf) {
+    NSInteger next = NSIntegerMax;
+    for (SGKaraokeLine *line in lines) {
+        NSInteger sungEnd = SGKaraokeSungEnd(line);
+        NSInteger ats[] = {line.start, line.start - SGKaraokeBreakMs, sungEnd, line.end + SGKaraokeBreakMs + 1,
+                           sungEnd + SGKaraokeBreakMs + 1};
+        for (size_t i = 0; i < sizeof ats / sizeof *ats; i++) {
+            if (ats[i] > position && ats[i] < next) next = ats[i];
+        }
+    }
+    if (wordsOf >= 0) {
+        for (SGKaraokeWord *word in lines[(NSUInteger)wordsOf].words) {
+            if (word.start > position && word.start < next) next = word.start;
+        }
+    }
+    return next == NSIntegerMax ? -1 : next - position;
+}
+
 // Japanese, Chinese and Korean, and the punctuation set with them. Kana and Hangul are listed as
 // well as the ideographs: a line of either is written without spaces just the same.
 static NSCharacterSet *unspacedScript(void) {
@@ -69,6 +95,63 @@ static NSCharacterSet *unspacedScript(void) {
 
 BOOL SGKaraokeUnspacedScript(NSString *text) {
     return text.length && [text rangeOfCharacterFromSet:unspacedScript()].location != NSNotFound;
+}
+
+@implementation SGKaraokePiece
+@end
+
+SGKaraokeLine *SGKaraokePieceLine(NSArray<SGKaraokePiece *> *pieces, NSInteger start, NSInteger end) {
+    NSMutableArray<SGKaraokeWord *> *words = [NSMutableArray array];
+    SGKaraokeWord *open = nil;   // the word the next piece runs on into
+    BOOL spaced = YES;           // a space has gone by, so the next word is not joined to the last
+    for (SGKaraokePiece *piece in pieces) {
+        if (piece.spaceBefore) {
+            open = nil;
+            spaced = YES;
+        }
+        // A source times a Chinese or Japanese syllable a piece at a time and never spaces them, so
+        // running them together would light a line up whole instead of sweeping it.
+        BOOL unspaced = SGKaraokeUnspacedScript(piece.text);
+        if (piece.text.length && open && !unspaced) {
+            open.text = [open.text stringByAppendingString:piece.text];
+            open.end = MAX(open.end, piece.end);
+        } else if (piece.text.length) {
+            SGKaraokeWord *word = [SGKaraokeWord new];
+            word.text = piece.text;
+            word.start = piece.start;
+            word.end = piece.end;
+            word.joined = !spaced;
+            [words addObject:word];
+            open = unspaced ? nil : word;
+            spaced = NO;
+        }
+        if (!piece.text.length || piece.spaceAfter) {
+            open = nil;
+            spaced = YES;
+        }
+    }
+    if (!words.count) return nil;
+    SGKaraokeLine *line = [SGKaraokeLine new];
+    line.words = words;
+    line.start = start;
+    line.end = MAX(end, words.lastObject.end);
+    return line;
+}
+
+// Thai, Lao, Burmese and Khmer, which leave no space between words either, but whose syllables are a
+// letter with marks around it: they are split where the system's dictionary finds a word, not a
+// character at a time.
+static BOOL dictionaryScript(NSString *text) {
+    static NSCharacterSet *set;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableCharacterSet *building = [NSMutableCharacterSet new];
+        [building addCharactersInRange:NSMakeRange(0x0E00, 0x100)];   // Thai and Lao
+        [building addCharactersInRange:NSMakeRange(0x1000, 0xA0)];    // Myanmar
+        [building addCharactersInRange:NSMakeRange(0x1780, 0x80)];    // Khmer
+        set = [building copy];
+    });
+    return [text rangeOfCharacterFromSet:set].location != NSNotFound;
 }
 
 void SGKaraokeAlignVoices(NSArray<SGKaraokeLine *> *lines) {
@@ -106,8 +189,28 @@ static void appendPiece(NSMutableArray<SGKaraokeWord *> *pieces, NSString *text)
     [pieces addObject:word];
 }
 
+// A token cut at the start of every word the system finds in it, so the pieces still make up the
+// whole token: whatever comes between two words stays with the first, whatever comes before the
+// first word with it.
+static void appendWords(NSMutableArray<SGKaraokeWord *> *pieces, NSString *token) {
+    NSMutableArray<NSNumber *> *cuts = [NSMutableArray arrayWithObject:@0];
+    __block BOOL first = YES;
+    [token enumerateSubstringsInRange:NSMakeRange(0, token.length)
+                              options:NSStringEnumerationByWords | NSStringEnumerationSubstringNotRequired
+                           usingBlock:^(NSString *word, NSRange range, NSRange enclosing, BOOL *stop) {
+        if (!first && range.location > cuts.lastObject.unsignedIntegerValue) [cuts addObject:@(range.location)];
+        first = NO;
+    }];
+    [cuts addObject:@(token.length)];
+    for (NSUInteger i = 0; i + 1 < cuts.count; i++) {
+        NSUInteger from = cuts[i].unsignedIntegerValue;
+        appendPiece(pieces, [token substringWithRange:NSMakeRange(from, cuts[i + 1].unsignedIntegerValue - from)]);
+    }
+}
+
 // The line split into what the sweep lights one at a time: words where the script spaces them, a
-// syllable at a time where it does not, so a Japanese line sweeps instead of lighting up whole.
+// syllable at a time where it does not, so a Japanese line sweeps instead of lighting up whole, and
+// the dictionary's words in Thai and its neighbors, so a long line wraps between them.
 // Everything a token holds past its first piece is joined to the one before it.
 static NSArray<SGKaraokeWord *> *piecesOf(NSString *line) {
     NSMutableArray<SGKaraokeWord *> *pieces = [NSMutableArray array];
@@ -115,7 +218,8 @@ static NSArray<SGKaraokeWord *> *piecesOf(NSString *line) {
         if (!token.length) continue;
         NSUInteger first = pieces.count;
         if (!SGKaraokeUnspacedScript(token)) {
-            appendPiece(pieces, token);
+            if (dictionaryScript(token)) appendWords(pieces, token);
+            else appendPiece(pieces, token);
         } else {
             // Latin letters or digits caught between two syllables stay together as one piece.
             NSMutableString *run = [NSMutableString string];
@@ -175,12 +279,19 @@ static SGKaraokeLine *timedLine(NSString *text, NSInteger start, NSInteger gap) 
 }
 
 NSArray<SGKaraokeLine *> *SGKaraokeEstimatedLines(NSArray<NSNumber *> *starts, NSArray<NSString *> *texts) {
+    // A line listed out of time order is given the gap to the line sung after it, not the one listed after
+    // it. The lines stay in the order they were listed: a source pairs them up with its own by position, and
+    // the lines are put in time order where they are kept (SGKaraokeInTimeOrder).
+    NSUInteger count = MIN(texts.count, starts.count);
     NSMutableArray<SGKaraokeLine *> *lines = [NSMutableArray array];
-    for (NSUInteger i = 0; i < texts.count; i++) {
+    for (NSUInteger i = 0; i < count; i++) {
         if (isBreak(texts[i])) continue;
-        NSInteger start = starts[i].integerValue;
-        NSInteger gap = i + 1 < starts.count ? starts[i + 1].integerValue - start : 0;
-        [lines addObject:timedLine(texts[i], start, MAX(gap, 0))];
+        NSInteger start = starts[i].integerValue, gap = 0;
+        for (NSUInteger j = 0; j < count; j++) {   // ponytail: quadratic, a song's few hundred lines at most
+            NSInteger after = starts[j].integerValue - start;
+            if (after > 0 && (!gap || after < gap)) gap = after;
+        }
+        [lines addObject:timedLine(texts[i], start, gap)];
     }
     return lines.count ? lines : nil;
 }
@@ -203,6 +314,18 @@ SGKaraokeTiming SGKaraokeLinesTiming(NSArray<SGKaraokeLine *> *lines) {
     SGKaraokeTiming finest = SGKaraokeTimingNone;
     for (SGKaraokeLine *line in lines) finest = MIN(finest, line.timing);
     return finest;
+}
+
+// Some sources list a line out of its place in time: a chorus written once with its repeats after it,
+// or one voice's lines listed after the other's. Everything that reads lines takes them in time order.
+NSArray<SGKaraokeLine *> *SGKaraokeInTimeOrder(NSArray<SGKaraokeLine *> *lines) {
+    for (NSUInteger i = 1; i < lines.count; i++) {
+        if (lines[i].start >= lines[i - 1].start) continue;
+        return [lines sortedArrayWithOptions:NSSortStable usingComparator:^NSComparisonResult(SGKaraokeLine *a, SGKaraokeLine *b) {
+            return a.start < b.start ? NSOrderedAscending : a.start > b.start ? NSOrderedDescending : NSOrderedSame;
+        }];
+    }
+    return lines;
 }
 
 #pragma mark - Spotify's own bodies
