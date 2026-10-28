@@ -45,6 +45,7 @@ static const CGFloat kRowHeight = 56, kSliderBlockHeight = 72, kSwitchRowHeight 
 // that settles without overshooting.
 static const CGFloat kSideMargin = 16, kGrid = 8;
 static const NSTimeInterval kOpenDuration = 0.45;
+NSNotificationName const SGSpeedPitchChangedNotification = @"spotifyglass.speedPitch.changed";
 
 static UIColor *primary(void) {
     return UIColor.whiteColor;
@@ -503,6 +504,7 @@ static NSString *pitchText(float pitch) {
     SGSetPlayerPitchFollowsSpeed(_follows.on);
     SGPlayFeedback(SGFeedbackDetent);
     [self refresh];
+    [NSNotificationCenter.defaultCenter postNotificationName:SGSpeedPitchChangedNotification object:nil];
 }
 
 - (void)resetSpeed {
@@ -530,9 +532,7 @@ static NSString *pitchText(float pitch) {
 
 @implementation SGSpeedPitchPanel
 - (void)loadView {
-    SGSpeedPitchView *block = [SGSpeedPitchView new];
-    block.panelOnly = YES;
-    self.view = block;
+    self.view = SGSpeedPitchPanelMake();
 }
 
 - (UIModalPresentationStyle)adaptivePresentationStyleForPresentationController:(UIPresentationController *)controller
@@ -540,6 +540,28 @@ static NSString *pitchText(float pitch) {
     return UIModalPresentationNone;
 }
 @end
+
+UIView *SGSpeedPitchPanelMake(void) {
+    SGSpeedPitchView *block = [SGSpeedPitchView new];
+    block.panelOnly = YES;
+    return block;
+}
+
+CGFloat SGSpeedPitchPanelHeight(void) {
+    return kGrid + 3 * kSliderBlockHeight + kSwitchRowHeight + kPanelBottom;
+}
+
+NSString *SGSpeedPitchSummary(void) {
+    NSMutableArray<NSString *> *changed = [NSMutableArray array];
+    float speed = snappedSpeed(SGPlayerSpeed());
+    BOOL follows = SGPlayerSpeedAllowed() && SGPlayerPitchFollowsSpeed() && speed != 1;
+    if (speed != 1) [changed addObject:speedText(speed)];
+    float pitch = SGPlayerPitch();
+    if (!follows && pitch != 0) [changed addObject:[pitchText(pitch) stringByAppendingString:@" st"]];
+    float reverb = SGPlayerReverb();
+    if (reverb > 0) [changed addObject:[NSString stringWithFormat:@"Reverb %.0f%%", reverb]];
+    return changed.count ? [changed componentsJoinedByString:@"  "] : nil;
+}
 
 void SGPlayerShowSpeedPitchPanel(UIView *from) {
     if (!from.window) return;

@@ -58,6 +58,11 @@ BOOL SGPlayerMenuAnimatedArtwork(void);
 void SGPlayerMenuSetAnimatedArtwork(BOOL on);
 // The speed, pitch and reverb sliders and Pitch follows speed, in a popover from `from` (the redesign's ⋯).
 void SGPlayerShowSpeedPitchPanel(UIView *from);
+// The redesign's menu uses the same controls in its own popover.
+extern NSNotificationName const SGSpeedPitchChangedNotification;
+UIView *SGSpeedPitchPanelMake(void);
+CGFloat SGSpeedPitchPanelHeight(void);
+NSString *SGSpeedPitchSummary(void);
 // A stage between Spotify's mixer and the rest of the chain (Sing's look-ahead, Shared/Sing): it fills the
 // chain's buffers, pulling the mixer through `pull` as much as it likes. NULL passes the mixer straight on.
 // Called on the render thread, and only on the music's output (below) while Spotify's connection to it is taken

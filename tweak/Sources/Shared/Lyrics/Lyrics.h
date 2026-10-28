@@ -22,6 +22,7 @@ SGModRow *SGLyricsDelayRow(void);
 // Shows a line written in another alphabet (Japanese, Korean, Chinese, Cyrillic, Greek, Thai, Arabic,
 // Hebrew, Devanagari...) again under itself in Latin letters, before its translation. Off by default.
 // Only the redesign's lyrics view draws it, and it applies at once: the switch posts the notification.
+#define SGKeyLyricsAITranslation @"spotifyglass.lyricsAITranslation"
 #define SGKeyLyricsRomanised @"spotifyglass.lyricsRomanised"
 extern NSNotificationName const SGLyricsRomanisedDidChangeNotification;
 // Romanise.m: the text in Latin letters, offline; nil where it has no letter of another script, or
