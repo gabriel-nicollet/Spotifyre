@@ -685,16 +685,18 @@ NSString *SGSingModelSpaceProblem(void) {
 }
 
 void SGSingModelCheckNetwork(void (^done)(SGSingModelNetwork network)) {
-    NWPathMonitor *monitor = [NWPathMonitor new];
+    nw_path_monitor_t monitor = nw_path_monitor_create();
     dispatch_queue_t queue = dispatch_queue_create("spotifyglass.sing.network", DISPATCH_QUEUE_SERIAL);
-    monitor.pathUpdateHandler = ^(NWPath *path) {
-        SGSingModelNetwork network = path.status != NWPathStatusSatisfied ? SGSingModelOffline
-            : (path.isExpensive || path.isConstrained) ? SGSingModelMetered : SGSingModelUnmetered;
-        monitor.pathUpdateHandler = nil;
-        [monitor cancel];
+    nw_path_monitor_set_queue(monitor, queue);
+    nw_path_monitor_set_update_handler(monitor, ^(nw_path_t path) {
+        nw_path_status_t status = nw_path_get_status(path);
+        SGSingModelNetwork network = status != nw_path_status_satisfied ? SGSingModelOffline
+            : (nw_path_is_expensive(path) || nw_path_is_constrained(path)) ? SGSingModelMetered : SGSingModelUnmetered;
+        nw_path_monitor_set_update_handler(monitor, nil);
+        nw_path_monitor_cancel(monitor);
         dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(network); });
-    };
-    [monitor startWithQueue:queue];
+    });
+    nw_path_monitor_start(monitor);
 }
 
 void SGSingModelDownload(BOOL metered) {
