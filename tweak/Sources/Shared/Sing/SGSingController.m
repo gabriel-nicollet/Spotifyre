@@ -30,9 +30,9 @@ static NSString *trackOf(SPTPlayerState *state) { return SGURIString(state.track
 static BOOL isSong(NSString *uri) { return [uri hasPrefix:@"spotify:track:"]; }
 static BOOL notPlaying(SPTPlayerState *state) { return state.isPaused || !state.isPlaying; }
 static BOOL overheated(void) { return NSProcessInfo.processInfo.thermalState >= NSProcessInfoThermalStateCritical; }
-// Everything between the source and the ear, in source seconds: the output route, and speed and pitch's unit.
+// The route's hardware latency, expressed in source seconds for the current playback speed.
 static double downstreamLatency(void) {
-    return (AVAudioSession.sharedInstance.outputLatency + SGPlayerAudioLatency()) * SGPlayerSpeed();
+    return AVAudioSession.sharedInstance.outputLatency * SGPlayerSpeed();
 }
 
 // The callback context owns the session until Finished; the controller owns it while audio is
