@@ -8,7 +8,8 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Shared/Sing/SGSingController.h"
-#import "Shared/Sing/SGSingModel.h"
+#import "Shared/Sing/Sing.h"
+#import "Shared/Sing/SGSingModelCompatibility.h"
 #import "Shared/Sing/SGSingAlternateModels.h"
 #import "Shared/Sing/SGSingDSP.h"
 #import "Shared/Player/PlayerState.h"
@@ -342,9 +343,9 @@ static void tell(NSString *title, NSString *message) {
 static NSString *modelStatus(void) {
     int64_t received = SGSingModelReceived(), size = SGSingModelSize();
     switch (SGSingModelCurrentState()) {
-        case SGSingModelInstalled: return [@"Downloaded · " stringByAppendingString:SGSingModelBytesText(size)];
-        case SGSingModelChecking: return @"Checking…";
+        case SGSingModelReady: return [@"Downloaded · " stringByAppendingString:SGSingModelBytesText(size)];
         case SGSingModelDownloading:
+            if (SGSingModelChecking()) return @"Checking…";
             return [NSString stringWithFormat:@"Downloading %lld %% · %lld of %@", received * 100 / size,
                     (received + (1ll << 19)) >> 20, SGSingModelBytesText(size)];
         case SGSingModelMissing:
@@ -359,7 +360,7 @@ static NSString *modelStatus(void) {
 static void explainModel(void) {
     NSString *failure = SGSingModelFailure();
     switch (SGSingModelCurrentState()) {
-        case SGSingModelInstalled:
+        case SGSingModelReady:
             tell(@"Voice model", [NSString stringWithFormat:@"It takes %@ on this iPhone. Remove it to free the space; Sing is unavailable without it.",
                                   SGSingModelBytesText(SGSingModelSize())]);
             break;
@@ -396,7 +397,7 @@ static void startDownload(void) {
 }
 
 static void confirmRemove(void) {
-    BOOL installed = SGSingModelCurrentState() == SGSingModelInstalled;
+    BOOL installed = SGSingModelCurrentState() == SGSingModelReady;
     BOOL hasAlternative = SGSingAlternateModelInstalled(SGSingAlternateModelANE) || SGSingAlternateModelInstalled(SGSingAlternateModelLight);
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Remove the voice model?"
         message:installed ? (hasAlternative ? [NSString stringWithFormat:@"The full model will be removed (%@). Sing will switch to another downloaded model if one is available.", aboutSize()]
@@ -481,14 +482,14 @@ static SGModSection *karaokeSection(void) {
     SGModRow *cancel = SGActionRow(@"Cancel full model download", nil, ^{ SGSingModelCancel(); });
     cancel.visible = ^BOOL {
         SGSingModelState state = SGSingModelCurrentState();
-        return state == SGSingModelDownloading || state == SGSingModelChecking;
+        return state == SGSingModelDownloading || SGSingModelChecking();
     };
     // Removing also takes what a stopped download kept, which can be most of the model.
     SGModRow *remove = SGActionRow(@"Remove full quality model", nil, ^{ confirmRemove(); });
     remove.color = SGRed();
     remove.visible = ^BOOL {
         SGSingModelState state = SGSingModelCurrentState();
-        return state == SGSingModelInstalled || (state == SGSingModelMissing && SGSingModelReceived() > 0);
+        return state == SGSingModelReady || (state == SGSingModelMissing && SGSingModelReceived() > 0);
     };
     return SGNotedSection(@"Karaoke", @[sing, model, modelChoice, ane, light, download, cancel, remove], footer());
 }
@@ -567,7 +568,7 @@ NSString *SGRKaraokeSummary(void) {
     if (SGSingModelPath()) return SGFlag(SGRKeySing, NO) ? @"On" : @"Off";
     SGSingModelState state = SGSingModelCurrentState();
     if (state == SGSingModelDownloading) return [NSString stringWithFormat:@"%lld %%", SGSingModelReceived() * 100 / SGSingModelSize()];
-    if (state == SGSingModelChecking) return @"Checking…";
+    if (SGSingModelChecking()) return @"Checking…";
     if (SGSingAlternateModelDownloading(SGSingAlternateModelANE))
         return [NSString stringWithFormat:@"Neural Engine %d%%", (int)lrint(SGSingAlternateModelProgress(SGSingAlternateModelANE) * 100)];
     if (SGSingAlternateModelDownloading(SGSingAlternateModelLight))
