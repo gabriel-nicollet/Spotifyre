@@ -55,6 +55,7 @@ static SGRArtworkField *fieldIn(UIView *page) {
     field = [[SGRArtworkField alloc] initWithFrame:page.bounds];
     field.bleed = kBleed;
     field.mainColor = YES;
+    field.vivid = YES;   // Spotifyre: the playlist page takes its cover's hue more vividly
     objc_setAssociatedObject(page, &kFieldKey, field, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     SGLog(@"redesign playlist: field on the page %.0fx%.0f", page.bounds.size.width, page.bounds.size.height);
     return field;

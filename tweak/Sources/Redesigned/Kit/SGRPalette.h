@@ -26,6 +26,10 @@ typedef struct {
     // edge: for a page, whose cover dissolves into the field across its whole width, where the bottom edge
     // is a scanned cover's pale border or whatever strip happens to sit at the foot of the picture.
     BOOL mainColor;
+    // The field color Spotifyre's way (a playlist page's): kept to an OKLab lightness of 0.34 (0.30 with Increase
+    // Contrast) with its chroma lifted 1.3 times up to 0.14, so the page wears its cover's hue more vividly than
+    // the saturation cap of 0.55 lets it. White text keeps its contrast on it all the same.
+    BOOL vivid;
 } SGRPaletteRequest;
 
 @interface SGRPalette : NSObject
@@ -54,3 +58,5 @@ typedef struct {
 // Any color made fit to be a field, the same way the edge color is: for a color Spotify hands over
 // before the artwork is read. Main thread.
 UIColor *SGRFieldColorFor(UIColor *color);
+// The same, the vivid way (SGRPaletteRequest's vivid).
+UIColor *SGRVividFieldColorFor(UIColor *color);

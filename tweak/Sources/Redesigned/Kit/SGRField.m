@@ -256,7 +256,7 @@ const NSTimeInterval SGRFieldHoldLimit = 1.0;
 
 - (void)setProvisionalColor:(UIColor *)color {
     if (_read || !color) return;
-    [self applyColor:SGRFieldColorFor(color) animated:self.window != nil];
+    [self applyColor:(_vivid ? SGRVividFieldColorFor(color) : SGRFieldColorFor(color)) animated:self.window != nil];
 }
 
 - (void)setArtwork:(UIImage *)image identity:(NSString *)identity animated:(BOOL)animated {
@@ -265,7 +265,7 @@ const NSTimeInterval SGRFieldHoldLimit = 1.0;
     _identity = [identity copy];
     if (_fluid) [_fluidLayer setArtwork:image animated:animated && self.window != nil];
     NSUInteger generation = ++_generation;
-    SGRPaletteRequest request = {CGSizeZero, NO, YES, _flows, _mainColor};
+    SGRPaletteRequest request = {CGSizeZero, NO, YES, _flows, _mainColor, _vivid};
     if (_showsBackdrop && !_flows && !_fluid) request.backdropSize = CGSizeMake(self.bounds.size.width > 0 ? self.bounds.size.width : 402, [self backdropHeightNow]);
     __weak SGRArtworkField *weakSelf = self;
     [SGRPalette paletteForImage:image request:request completion:^(SGRPalette *palette) {

@@ -46,6 +46,10 @@ extern NSNotificationName const SGRFieldColorDidChangeNotification;
 // backdrop meets the color. Set before the first artwork.
 @property (nonatomic) BOOL mainColor;
 
+// The field color the vivid way (SGRPaletteRequest's vivid): a playlist page's, as Spotifyre has it. Set before the
+// first artwork.
+@property (nonatomic) BOOL vivid;
+
 // A color Spotify already has for the page (the player's background color, the album's wash), made fit
 // to be a field and shown until the first artwork has been read; ignored after that.
 - (void)setProvisionalColor:(UIColor *)color;
