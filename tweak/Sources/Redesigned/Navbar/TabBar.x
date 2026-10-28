@@ -543,11 +543,12 @@ static void syncBar(UIView *stockBar) {
         [apart removeAllObjects];
     }
     // Minimized, the bar keeps the tab it is on, glyph only, on a circle at the leading end, and the last
-    // split tab on one at the trailing end when there are any, the way the Music app keeps Search. Without
-    // split tabs the now playing card has the rest of the row.
+    // split tab on one at the trailing end, the way the Music app keeps Search. With no split tab the last tab
+    // of the bar's order stands there (Spotifyre's change: the card sits between two circles, so the row feels
+    // centered, instead of running to the trailing edge from one).
     BOOL minimized = sg_minimized && sources.count >= 2;
     if (minimized) {
-        UIView *last = apart.lastObject;
+        UIView *last = apart.lastObject ?: sources.lastObject;
         main = [NSMutableArray arrayWithObject:active && active != last ? active : main.firstObject];
         apart = last ? [NSMutableArray arrayWithObject:last] : [NSMutableArray array];
         hideLabels = YES;
@@ -834,8 +835,8 @@ CGRect SGRTabBarInlineSlot(UIView *host, CGFloat height) {
     UIView *bar = stockBar ? objc_getAssociatedObject(stockBar, &kBarKey) : nil;
     UIView *apartBar = stockBar ? objc_getAssociatedObject(stockBar, &kApartBarKey) : nil;
     if (!sg_minimized || !host || !bar.window || stockBar.hidden || stockBar.alpha < 0.01) return CGRectNull;
-    // The frames the bars are going to, not what is on screen mid-spring. Without a split tab's circle the
-    // card runs to where the trailing circle's glass would end.
+    // The frames the bars are going to, not what is on screen mid-spring. The trailing circle is there whenever
+    // the bar is minimized (a split tab's, else the last tab's); the other branch is for a bar caught between.
     CGRect lead = [bar.superview convertRect:bar.frame toView:host];
     CGFloat left = CGRectGetMinX(lead) + kPlatterInset + kApartItemWidth + SGRGrid;
     CGFloat right;
