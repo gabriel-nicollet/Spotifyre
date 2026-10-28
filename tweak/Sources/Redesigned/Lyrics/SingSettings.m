@@ -464,10 +464,6 @@ static SGModSection *karaokeSection(void) {
     SGModRow *sing = SGOptionRow(@"Sing", @"The microphone in the lyrics", SGRKeySing);
     sing.changed = ^(BOOL on) { SGRSingApplySwitch(); };
     SGModRow *model = SGStatActionRow(@"Full quality model", nil, ^NSString *{ return modelStatus(); }, ^{ explainModel(); });
-    model.progress = ^double {
-        return SGSingModelCurrentState() == SGSingModelDownloading ? (double)SGSingModelReceived() / SGSingModelSize() : -1;
-    };
-    model.refreshOn = SGSingModelDidChangeNotification;
 
     SGModRow *modelChoice = SGChoiceRow(@"Separator model", @"Choose the model used by Sing and Spatial Voice", SGKeySingModelVariant,
         @[@"Full · best quality", @"Neural Engine · faster", @"Light · smaller"], SGSingAlternateModelFull);
@@ -478,11 +474,7 @@ static SGModSection *karaokeSection(void) {
     modelChoice.chosen = ^(NSInteger index) { SGSingAlternateModelSelect((SGSingAlternateModel)index); };
 
     SGModRow *ane = SGStatActionRow(@"Neural Engine model", @"Tap to download, cancel, or remove", ^NSString *{ return alternateModelStatus(SGSingAlternateModelANE); }, ^{ alternateModelAction(SGSingAlternateModelANE); });
-    ane.progress = ^double { return SGSingAlternateModelDownloading(SGSingAlternateModelANE) ? SGSingAlternateModelProgress(SGSingAlternateModelANE) : -1; };
-    ane.refreshOn = SGSingModelDidChangeNotification;
     SGModRow *light = SGStatActionRow(@"Light model", @"Tap to download, cancel, or remove", ^NSString *{ return alternateModelStatus(SGSingAlternateModelLight); }, ^{ alternateModelAction(SGSingAlternateModelLight); });
-    light.progress = ^double { return SGSingAlternateModelDownloading(SGSingAlternateModelLight) ? SGSingAlternateModelProgress(SGSingAlternateModelLight) : -1; };
-    light.refreshOn = SGSingModelDidChangeNotification;
 
     SGModRow *download = SGActionRow(@"Download full quality model", nil, ^{ startDownload(); });
     download.visible = ^BOOL { return SGSingModelCurrentState() == SGSingModelMissing; };
@@ -507,7 +499,6 @@ static SGModSection *spatialVoiceSection(void) {
     NSString *gatingInfo = @"Download the Sing voice model above to enable Spatial Voice. Tuning works with any headphones; AirPods are required only for head tracking.";
     SGModRow *spatial = SGOptionRow(@"Spatial Voice", @"Keep vocals focused in front", SGRKeySingSpatialVoice);
     spatial.info = installed ? @"Adjust the vocal stem's position and character. AirPods are needed for head tracking; effect tuning works with other headphones." : gatingInfo;
-    spatial.enabled = ^BOOL { return SGSingModelPath() != nil; };
     spatial.changed = ^(BOOL on) { SGRSingApplySpatialVoice(); applySpatialValues(); };
     SGModRow *gain = SGSliderRow(@"Vocal level", @"Relative vocal gain", -12, 6, 0.5,
         ^double { return spatialValue(SGRKeySpatialGainDB, 0.0); },
