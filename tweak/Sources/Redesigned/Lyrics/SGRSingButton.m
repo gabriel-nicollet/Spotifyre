@@ -364,20 +364,21 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
     _hide = [NSTimer scheduledTimerWithTimeInterval:kPanelStays repeats:NO block:^(NSTimer *timer) { [weakSelf hidePanel]; }];
 }
 
-// Out faster than it came, and without shrinking: nothing is watched on its way out.
+// The capsule shrinks back around the mic; an interrupted close leaves a reopened slider alone.
 - (void)hidePanel {
     if (!_panelShown) return;
     SGRAnimate(SGRMotionRespond, ^{
         self->_panel.transform = CGAffineTransformMakeScale(1, kPanelEnterScale);
         self->_slider.alpha = self->_mark.alpha = self->_level.alpha = 0;
     }, ^(BOOL finished) {
-        [self panelGone];
+        if (finished) [self panelGone];
     });
 }
 
 // The capsule's glass and the slider gone, in whatever animation the caller has open.
 - (void)panelGone {
     _panelShown = NO;
+    if (!SGRReduceMotion()) _panel.transform = CGAffineTransformMakeScale(1, kPanelEnterScale);
     [_hide invalidate];
     _hide = nil;
     UIView *glass = SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO);
