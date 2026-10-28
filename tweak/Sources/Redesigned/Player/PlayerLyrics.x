@@ -54,6 +54,7 @@ static const NSTimeInterval kLyricsGrace = 3;
 static const CGFloat kLivingHeight = 200;
 // The lines on their own: the controls under them fade after this long without a touch.
 static const NSTimeInterval kRest = 4;
+static const NSTimeInterval kAloneFadeOut = 0.6;   // the controls fading out as the lines go on their own
 
 static char kOverlayKey, kPlateKey, kTitleKey, kStackKey;
 static BOOL sg_open;
@@ -575,7 +576,15 @@ static void setAlone(BOOL alone, BOOL animated) {
         SGRAnimateLayout(host, move, nil);
         // Going, the controls take their time, since nobody waits on them; coming back at a touch, they answer at
         // once, from wherever the fade out has got to.
-        SGRAnimate(alone ? SGRMotionFade : SGRMotionRespond, fade, nil);
+        if (alone) {
+            // Spotifyre's: slower than the Kit's crossfade (0.35 s), so the controls leave the lines more softly. A
+            // finger on the player or a new tap still takes over from wherever the fade has got to.
+            [UIView animateWithDuration:kAloneFadeOut delay:0
+                                options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseInOut
+                             animations:fade completion:nil];
+        } else {
+            SGRAnimate(SGRMotionRespond, fade, nil);
+        }
     } else {
         move();
         fade();
