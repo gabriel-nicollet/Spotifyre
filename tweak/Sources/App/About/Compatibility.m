@@ -8,6 +8,10 @@
 #import "App/Onboarding/Onboarding.h"
 #import "App/Sheet/SGCardSheet.h"
 
+// This branch packages Vitrine against Spotify 9.1.78.
+static NSString *const SGSupportedSpotifyVersion = @"9.1.78";
+static BOOL SGEeveeLoaded(void) { return NSClassFromString(@"EeveeSpotify") != Nil; }
+
 static const NSTimeInterval kSettle = 3, kRetry = 4;
 static const NSInteger kTries = 45;
 
