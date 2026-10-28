@@ -24,6 +24,12 @@ NSArray<SGModRow *> *SGRNowPlayingBarRows(void);
 CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius);
 // The round artwork on that card in `host`'s coordinates; CGRectNull when none was found.
 CGRect SGRNowPlayingArtworkFrameIn(UIView *host);
+
+// The artwork image and image view still loaded by Spotify's underlying now-playing bar.
+UIImage *SGRNowPlayingArtworkImage(void);
+UIImageView *SGRNowPlayingArtworkView(void);
+// Forward a tap to Spotify's own now-playing bar so its player presentation is preserved.
+BOOL SGROpenPlayerFromBar(void);
 // Lays the bar out again at once, into the minimized tab bar's slot or back above the bar
 // (Navbar.h's SGRTabBarInlineSlot); TabBar.x calls it inside its own animation.
 void SGRNowPlayingBarFollowTabBar(void);
