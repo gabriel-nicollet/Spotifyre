@@ -8,6 +8,7 @@
 // its estimated words to be swept; lyrics with no timing at all are shown as plain text, every line
 // lit, nothing following the clock.
 #import <NaturalLanguage/NaturalLanguage.h>
+#import <objc/message.h>
 #import "Core/SGCore.h"
 #import "SGRKaraokeView.h"
 #import "LyricsText.h"
