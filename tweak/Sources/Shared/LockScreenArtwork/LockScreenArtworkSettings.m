@@ -6,6 +6,7 @@
 #import "Settings/SGPageStyle.h"
 #import "LockScreenArtwork.h"
 #import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LockScreenLyrics/LockScreenLyrics.h"
 
 static void sayWhatIsMissing(void) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Animated lock screen"
@@ -37,6 +38,10 @@ SGModRow *SGArtworkSourcesRow(NSString *key, NSString *note) {
         return names.count ? [names componentsJoinedByString:@", "] : @"None";
     };
     return row;
+}
+
+static SGModRow *SGLockScreenLyricsCoverRow(void) {
+    return SGOptionRow(@"Lyrics on the cover", @"A card of the current line over the album artwork", SGKeyLockScreenLyricsCover);
 }
 
 NSArray<SGModRow *> *SGAnimatedArtworkRows(void) {

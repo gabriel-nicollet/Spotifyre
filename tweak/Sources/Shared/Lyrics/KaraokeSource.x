@@ -250,6 +250,10 @@ BOOL SGEeveeLyricsOn(void) {
 
 // Main queue only. NO, asking nothing, before any request of Spotify's has shown the headers, and with
 // EeveeSpotify injected, whose lyrics answer the request: a second asker beside it froze Spotify after launch.
+NSString *SGKaraokeSpotifyAuthorization(void) {
+    return sg_spclientHeaders[@"authorization"];
+}
+
 static BOOL requestFromSpotify(NSString *trackID) {
     NSDictionary<NSString *, NSString *> *headers = sg_spclientHeaders;
     if (!headers || SGLyricsStandAsideForEevee()) return NO;
