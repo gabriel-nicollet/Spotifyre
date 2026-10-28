@@ -365,6 +365,20 @@ static UIView *valueView(SGModRow *row) {
     return box;
 }
 
+// A switchless row shown below the ordered items in SGOrderPage.
+void SGFillRowCell(UITableViewCell *cell, SGModRow *row) {
+    SGFillCell(cell, row.title, row.subtitle, row.color, row.symbol);
+    if (row.page) {
+        cell.accessoryView = SGChevronView();
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    } else if (row.value) {
+        cell.accessoryView = valueView(row);
+        cell.selectionStyle = row.action ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+    } else {
+        cell.selectionStyle = row.action ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+    }
+}
+
 // On means the row's own override is in place; anything else, including the opposite override
 // somebody set from the All flags page, reads as off.
 static BOOL flagRowOn(SGModRow *row) {

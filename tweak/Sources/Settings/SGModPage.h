@@ -18,6 +18,7 @@
 @property (nonatomic, copy) UIViewController *(^page)(void);
 @property (nonatomic, copy) NSString *(^value)(void);
 @property (nonatomic, copy) void (^action)(void);
+@property (nonatomic, copy) NSNotificationName refreshOn;   // redraw while the containing page is visible
 @property (nonatomic, copy) NSString *warning;
 @property (nonatomic, copy) void (^changed)(BOOL on);   // after the switch is stored; the page reloads
 @property (nonatomic, strong) UIColor *color;   // title, subtitle and symbol, for a warning row
@@ -71,6 +72,9 @@
 
 // The intro of every page whose switches the hooks read at launch.
 extern NSString *const SGRestartNote;
+
+// Draw a switchless settings row inside another page, as SGOrderPage does.
+void SGFillRowCell(UITableViewCell *cell, SGModRow *row);
 
 SGModRow *SGSwitchRow(NSString *title, NSString *subtitle, NSString *key);   // on until switched off
 SGModRow *SGHideRow(NSString *title, NSString *subtitle, NSString *key);     // off until switched on

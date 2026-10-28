@@ -122,16 +122,16 @@ typedef NS_ENUM(NSInteger, SGOrderSection) {
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForHeaderInSection:(NSInteger)section {
-    if (section == SGOrderSectionExtra) return self.extra.title ? SGSectionHeaderHeight : SGSectionGap;
-    return section == SGOrderSectionOn || _off.count ? SGSectionHeaderHeight : CGFLOAT_MIN;
+    if (section == SGOrderSectionExtra) return self.extra.title ? SGSectionHeaderHeight() : SGSectionGap;
+    return section == SGOrderSectionOn || _off.count ? SGSectionHeaderHeight() : CGFLOAT_MIN;
 }
 
 - (UIView *)tableView:(UITableView *)table viewForFooterInSection:(NSInteger)section {
-    return section == SGOrderSectionExtra ? SGSectionFooterFor(table, self.extra) : nil;
+    return section == SGOrderSectionExtra && self.extra.footer.length ? SGSectionFooter(table, self.extra.footer) : nil;
 }
 
 - (CGFloat)tableView:(UITableView *)table heightForFooterInSection:(NSInteger)section {
-    return section == SGOrderSectionExtra ? SGSectionFooterHeightFor(table, self.extra) : CGFLOAT_MIN;
+    return section == SGOrderSectionExtra && self.extra.footer.length ? SGSectionFooterHeight(table, self.extra.footer) : CGFLOAT_MIN;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
