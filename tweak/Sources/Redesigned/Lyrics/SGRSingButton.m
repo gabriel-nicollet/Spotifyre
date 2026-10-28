@@ -12,13 +12,75 @@ static const CGFloat kGlyph = 17, kRingWidth = 2.5, kRingInset = 1.5;
 static const CGFloat kPanelHeight = 168, kPanelGap = 24, kLevelWidth = 120, kLevelHeight = 20;
 // The capsule opens from just under full size at the mic, the way a popover grows out of what opened it.
 static const CGFloat kPanelEnterScale = 0.95;
-static const NSTimeInterval kPanelStays = 2.5;
+static const NSTimeInterval kPanelStays = 3;   // Spotifyre's: three seconds after the last touch
 static const float kLevelStep = 0.05f;
 // As sung (1) holds the thumb this close either side, 4% of the slider's travel: a detent caught with a tick, as the
 // Sing page's tall slider ticks there.
 static const float kAsSungCatch = 0.08f;
 static const CGFloat kMarkWidth = 14;
+// The fill's white, and the green of the very top, where the vocals stand alone (Spotifyre's slider).
+static const CGFloat kFillWhite = 0.88;
 static char kButtonGlassKey, kPanelGlassKey;
+
+static UIColor *vocalsOnlyGreen(void) {
+    return [UIColor colorWithRed:0.20 green:0.85 blue:0.35 alpha:1];
+}
+
+// Spotifyre's vocal slider: no thumb, the capsule is the track and a fill rises in it to the level, white, and green
+// at the very top where the vocals stand alone. Its value is the level as Sing.h has it, 0 (vocals gone) through 1
+// (the song as sung, the capsule's middle) to 2 (the vocals alone). It only shows the level: the drag is the
+// panel's (SGRVocalPan), measured from where the level is, so a finger anywhere on the capsule moves it.
+@interface SGRVocalSlider : UIView
+@property (nonatomic) float value;
+@end
+
+@implementation SGRVocalSlider {
+    UIView *_fill;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (!(self = [super initWithFrame:frame])) return nil;
+    self.clipsToBounds = YES;
+    self.userInteractionEnabled = NO;
+    self.isAccessibilityElement = NO;
+    _fill = [UIView new];
+    _fill.userInteractionEnabled = NO;
+    [self addSubview:_fill];
+    [self paint];
+    return self;
+}
+
+- (void)setValue:(float)value {
+    value = isfinite(value) ? fmaxf(0, fminf(2, value)) : 1;
+    if (value < 0.01f) value = 0;
+    if (value > 1.99f) value = 2;
+    _value = value;
+    [self paint];
+}
+
+- (void)paint {
+    _fill.backgroundColor = [(_value >= 2 ? vocalsOnlyGreen() : UIColor.whiteColor) colorWithAlphaComponent:kFillWhite];
+    CGFloat height = self.bounds.size.height, filled = height * _value / 2;
+    _fill.frame = CGRectMake(0, height - filled, self.bounds.size.width, filled);
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    self.layer.cornerRadius = self.bounds.size.width / 2;
+    [self paint];
+}
+
+@end
+
+// Spotify's player also pans to dismiss. A drag that starts on the capsule is the vocal level's, not the player's.
+@interface SGRVocalPan : UIPanGestureRecognizer
+@end
+
+@implementation SGRVocalPan
+- (BOOL)canBePreventedByGestureRecognizer:(UIGestureRecognizer *)other {
+    return NO;
+}
+@end
 
 @implementation SGRSingButton {
     UIButton *_button;   // holds no glass, so its alpha is free to fade
@@ -26,10 +88,12 @@ static char kButtonGlassKey, kPanelGlassKey;
     BOOL _ringShown;
     NSString *_glyph;
     UIView *_panel;
-    UISlider *_slider;
-    UIView *_mark;       // across the track at As sung
+    SGRVocalSlider *_slider;
+    UIView *_mark;       // across the capsule at As sung
     UISelectionFeedbackGenerator *_feedback;
-    BOOL _caught;        // the thumb is held at As sung
+    BOOL _caught;        // the level is held at As sung
+    BOOL _atTop;         // the level is at the vocals alone, which ticks once as it arrives
+    float _dragFrom;     // the level a drag started from
     UILabel *_level;
     NSTimer *_hide;
     BOOL _panelShown;
@@ -247,7 +311,17 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
             tell(SGSingStatusDetail(), @"Turn Karaoke off", ^{ SGSetSingOn(NO); });
             return;
         default:
-            SGSetSingOn(!SGSingOn());
+            // Spotifyre's: a tap turns Sing on and opens the capsule; open, a tap turns it off; closed while it is
+            // on, a tap opens it again.
+            if (!SGSingOn()) {
+                SGSetSingOn(YES);
+                [self showPanel];
+            } else if (_panelShown) {
+                SGSetSingOn(NO);
+                [self hidePanel];
+            } else {
+                [self showPanel];
+            }
     }
 }
 
@@ -263,19 +337,14 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
         _panel = [UIView new];
         _panel.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         _panel.layer.anchorPoint = CGPointMake(0.5, 1);   // its bottom edge, over the mic
-        _slider = [UISlider new];
-        _slider.minimumValue = 0;
-        _slider.maximumValue = 2;
-        _slider.transform = CGAffineTransformMakeRotation(-M_PI_2);
-        _slider.accessibilityLabel = @"Vocals";
-        [_slider addTarget:self action:@selector(slid) forControlEvents:UIControlEventValueChanged];
-        [_slider addTarget:self action:@selector(holdPanel) forControlEvents:UIControlEventTouchDown];
-        [_slider addTarget:self action:@selector(letPanelGo) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+        _slider = [SGRVocalSlider new];
         [_panel addSubview:_slider];
+        SGRVocalPan *pan = [[SGRVocalPan alloc] initWithTarget:self action:@selector(dragged:)];
+        pan.maximumNumberOfTouches = 1;
+        [_panel addGestureRecognizer:pan];
         _mark = [UIView new];
-        _mark.backgroundColor = [UIColor colorWithWhite:1 alpha:0.35];
         _mark.userInteractionEnabled = NO;
-        [_panel insertSubview:_mark belowSubview:_slider];
+        [_panel addSubview:_mark];   // over the fill, so it reads on both sides of the level
         _feedback = [UISelectionFeedbackGenerator new];
         _level = [UILabel new];
         _level.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
@@ -288,7 +357,6 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
         SGRShowGlass([self placePanel], NO);
         if (!SGRReduceMotion()) _panel.transform = CGAffineTransformMakeScale(kPanelEnterScale, kPanelEnterScale);
     }
-    _slider.minimumTrackTintColor = SGRAccentColor() ?: UIColor.systemGreenColor;
     _slider.value = SGSingLevel();
     [self showLevel];
     UIView *glass = [self placePanel];
@@ -308,9 +376,8 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
     _panel.bounds = CGRectMake(0, 0, width, kPanelHeight);
     _panel.center = CGPointMake(width / 2, -kPanelGap);
     UIView *glass = SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO);
-    _slider.bounds = CGRectMake(0, 0, kPanelHeight - 24, 31);
-    _slider.center = CGPointMake(width / 2, kPanelHeight / 2);
-    // The slider is centered, so As sung, the middle of its range, is the capsule's middle.
+    _slider.frame = _panel.bounds;
+    // As sung, the middle of the level's range, is the capsule's middle.
     _mark.frame = CGRectMake((width - kMarkWidth) / 2, kPanelHeight / 2 - 0.5, kMarkWidth, 1);
     _level.frame = CGRectMake(width - kLevelWidth, top - kLevelHeight - 4, kLevelWidth, kLevelHeight);
     return glass;
@@ -319,14 +386,53 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
 - (void)showLevel {
     _level.text = SGSingLevelText(_slider.value);
     _slider.accessibilityValue = _level.text;
+    // Light over the empty half, dark once the fill has reached it.
+    _mark.backgroundColor = _slider.value >= 1 ? [UIColor colorWithWhite:0 alpha:0.28] : [UIColor colorWithWhite:1 alpha:0.35];
 }
 
-// Near As sung the thumb holds there, with a tick as it catches; the finger drags it on out of the band.
-- (void)slid {
-    BOOL caught = fabsf(_slider.value - 1) <= kAsSungCatch;
-    if (caught) _slider.value = 1;
+// A finger on the capsule moves the level from where it is, by the capsule's own height for the whole range. Near As
+// sung the level holds there, with a tick as it catches; the finger drags it on out of the band. The very top ticks
+// once as it is reached, as the fill turns green.
+- (void)dragged:(UIPanGestureRecognizer *)pan {
+    switch (pan.state) {
+        case UIGestureRecognizerStateBegan:
+            [self holdPanel];
+            _dragFrom = _slider.value;
+            if (SGSingCurrentState() == SGSingStateOff) SGSetSingOn(YES);
+            [self dragTo:pan];
+            break;
+        case UIGestureRecognizerStateChanged:
+            [self dragTo:pan];
+            break;
+        case UIGestureRecognizerStateEnded:
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed:
+            [self letPanelGo];
+            break;
+        default:
+            break;
+    }
+}
+
+- (void)dragTo:(UIPanGestureRecognizer *)pan {
+    CGFloat travel = [pan translationInView:_panel].y;   // down is positive
+    float position = fmaxf(0, fminf(1, _dragFrom / 2 - (float)(travel / MAX(1, _slider.bounds.size.height))));
+    [self setLevelFromDrag:position * 2];
+}
+
+- (void)setLevelFromDrag:(float)value {
+    BOOL caught = fabsf(value - 1) <= kAsSungCatch;
+    if (caught) value = 1;
     if (caught && !_caught) [_feedback selectionChanged];
     _caught = caught;
+    _slider.value = value;
+    BOOL top = _slider.value >= 2;
+    if (top && !_atTop) {
+        UIImpactFeedbackGenerator *tick = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
+        [tick prepare];
+        [tick impactOccurred];
+    }
+    _atTop = top;
     SGSetSingLevel(roundf(_slider.value / kLevelStep) * kLevelStep);
     [self showLevel];
 }
@@ -335,6 +441,7 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
     [_hide invalidate];
     _hide = nil;
     _caught = fabsf(_slider.value - 1) <= kAsSungCatch;
+    _atTop = _slider.value >= 2;
     [_feedback prepare];
 }
 
