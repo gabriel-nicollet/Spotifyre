@@ -13,6 +13,10 @@
 #import "Shared/LiveActivity/LiveActivity.h"
 #import "Shared/LockScreenLyrics/LockScreenLyrics.h"
 #import "Shared/LyricsSources/LyricsSources.h"
+
+// These declarations are owned by the legacy usage report and certificate reader.
+#define SGKeyUsage @"spotifyglass.usage"
+extern NSString *SGCertificateKind(void);
 #import "Shared/Privacy/Privacy.h"
 
 // Outside "spotifyglass." on purpose: Reset all settings must not mint a second install, and a
