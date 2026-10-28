@@ -191,7 +191,7 @@ void SGShowCertificateSheet(NSDictionary *offer, UIImage *logo) {
 // Once a run at most, never in a run with the update notice or the donate sheet, and never over the
 // tour or an alert. The screen is checked again after the request, which can take a while.
 static void offerWhenClear(NSInteger tries) {
-    if (!kOfferURL.length || sg_offered || SGUpdateNoticeShown() || SGDonateShown() || !due()) return;
+    if (!kOfferURL.length || sg_offered || !due()) return;
     if (screenBusy(SGTopController())) {
         if (tries > 0)
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRetry * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ offerWhenClear(tries - 1); });
@@ -200,7 +200,7 @@ static void offerWhenClear(NSInteger tries) {
     sg_offered = YES;
     fetchOffer(^(NSDictionary *offer, UIImage *logo) {
         UIViewController *top = SGTopController();
-        if (!offer || screenBusy(top) || SGUpdateNoticeShown() || SGDonateShown()) {
+        if (!offer || screenBusy(top)) {
             SGLog(@"certificate: sheet due, not shown (%@)", offer ? @"screen busy" : @"no offer available");
             return;
         }
