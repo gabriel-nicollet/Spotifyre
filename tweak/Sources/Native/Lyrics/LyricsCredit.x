@@ -21,13 +21,13 @@ static char kTapKey;
 
 // Any other tap on the card or the page is left to Spotify.
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)tap {
-    return SGLyricsPageCreditFor(SGKaraokePlayingTrack()).links.count > 0;
+    return SGLyricsCreditLinks(SGLyricsCreditFor(SGKaraokePlayingTrack())).count > 0;
 }
 
 - (void)tapped:(UITapGestureRecognizer *)tap {
-    SGLyricsCredit *credit = SGLyricsPageCreditFor(SGKaraokePlayingTrack());
-    SGLog(@"lyrics: credit tapped, %lu links", (unsigned long)credit.links.count);
-    SGLyricsOpenCredit(credit);
+    NSArray<SGLyricsLink *> *links = SGLyricsCreditLinks(SGLyricsCreditFor(SGKaraokePlayingTrack()));
+    SGLog(@"lyrics: credit tapped, %lu links", (unsigned long)links.count);
+    SGLyricsOpenCreditLinks(links, tap.view);
 }
 
 @end
@@ -56,7 +56,7 @@ static void addTap(UIView *footer) {
 %end
 
 %ctor {
-    if (!SGNativeUI() || !SGLyricsActive()) return;
+    if (!SGNativeUI() || !SGLyricsEnabled()) return;
     %init;
     SGRequireClasses(@[@"_TtC22Lyrics_TextElementImpl16LyricsFooterView", @"_TtC24Lyrics_TextComponentImpl16LyricsFooterView"]);
 }
