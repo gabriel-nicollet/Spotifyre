@@ -66,6 +66,15 @@ SGRLyricsLook SGRLyricsLookNow(void) {
     return look;
 }
 
+// The lock-screen cover uses the same size as the reader. Weight is not a look setting, so keep it semibold.
+CGFloat SGRLyricsStyleFontSize(void) {
+    return SGRLyricsLookNow().size;
+}
+
+CGFloat SGRLyricsStyleFontWeight(void) {
+    return UIFontWeightSemibold;
+}
+
 void SGRSetLyricsLook(SGRLyricsLook look, id changer) {
     [NSUserDefaults.standardUserDefaults setObject:@{
         @"size": @(held(look.size, kLeast.size, kMost.size)),
