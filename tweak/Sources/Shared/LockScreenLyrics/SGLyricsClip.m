@@ -10,13 +10,15 @@
 // words keep to this middle share of the width. The center of the words sits this far down, clear of
 // the clock above and the controls below.
 // ponytail: guessed from the screen's shape, not measured on a lock screen; tune both on a device.
-static const CGFloat kColumn = 0.56;
+// Spotifyre: bigger than vitrine's 0.56 and 0.05, as its lock screen cover has them (a main line of 0.068 to 0.088 of the
+// width), with the column wide enough that the larger words do not wrap into a narrow strip.
+static const CGFloat kColumn = 0.74;
 static const CGFloat kCentreY = 0.5;
 // The words' size as a share of the width, made smaller down to kSmallest of it while they run taller
 // than kTallest of the height.
-static const CGFloat kFont = 0.05;
+static const CGFloat kFont = 0.07;
 static const CGFloat kSmallest = 0.6;
-static const CGFloat kTallest = 0.4;
+static const CGFloat kTallest = 0.46;
 static const CGFloat kNextAlpha = 0.4;
 // A still is one frame held this long; an animated clip breathes once over kLoopSeconds, which is all it
 // plays before the lock screen loops it.
