@@ -8,7 +8,7 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Shared/Sing/SGSingController.h"
-#import "Shared/Sing/Sing.h"
+#import "Shared/Sing/SGSingModelV2.h"
 #import "Shared/Sing/SGSingModelCompatibility.h"
 #import "Shared/Sing/SGSingAlternateModels.h"
 #import "Shared/Sing/SGSingDSP.h"
