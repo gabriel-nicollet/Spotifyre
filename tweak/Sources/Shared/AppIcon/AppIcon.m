@@ -6,6 +6,8 @@
 // stacks only, which nothing before iOS 26 draws, so below 26 the row says so. The name under the icon is
 // the signature's to set, not the app's.
 #import "Core/SGCore.h"
+#import "Settings/SGModPage.h"
+#import "Settings/SGPage.h"
 #import "Settings/SGPageStyle.h"
 #import "AppIcon.h"
 
