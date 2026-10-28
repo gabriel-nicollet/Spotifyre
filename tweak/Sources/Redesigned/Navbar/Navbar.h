@@ -32,6 +32,8 @@ void SGRComposeTabBar(UIView *tabBar);
 void SGRLogTabBarRow(UIView *tabBar);
 // Lays the bar out again after the Navbar page changes something, so it does not wait for a touch.
 void SGRRefreshTabBar(void);
+// Calls the target-action pairs of a view's tap recognizers, as a real tap would.
+BOOL SGRFireTapRecognizers(UIView *view);
 // Whether a tab of the composed row is one of the split tabs at its trailing end, for TabBar.x's second bar.
 BOOL SGRTabIsApart(UIView *item);
 // The tab of the mod's own whose page is on screen, which the glass bar shows selected; nil when none is.
