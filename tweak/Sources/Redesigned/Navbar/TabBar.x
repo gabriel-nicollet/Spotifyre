@@ -450,8 +450,33 @@ static SGRSystemTabBar *makeBar(UIView *stockBar) {
 static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideLabels) {
     bar.tintColor = SGRAccent();
     if (![sources isEqualToArray:bar.sources]) {
+        NSArray<UIView *> *oldSources = bar.sources ?: @[];
+        NSArray<UITabBarItem *> *oldItems = bar.items ?: @[];
         NSMutableArray<UITabBarItem *> *items = [NSMutableArray array];
-        for (UIView *source in sources) [items addObject:[[UITabBarItem alloc] initWithTitle:hideLabels ? nil : labelIn(source).text image:nil tag:items.count]];
+        NSMutableSet<UITabBarItem *> *reused = [NSMutableSet set];
+        for (UIView *source in sources) {
+            NSString *title = labelIn(source).text ?: @"";
+            UITabBarItem *item = nil;
+            // Keep the edge tab's actual button through the player-card transition. Rebuilding it made the
+            // trailing icon blink and clip while UIKit was moving the Liquid Glass split.
+            for (NSUInteger pass = 0; pass < 2 && !item; pass++) {
+                for (NSUInteger i = 0; i < oldSources.count && i < oldItems.count; i++) {
+                    if ([reused containsObject:oldItems[i]]) continue;
+                    BOOL sameSource = oldSources[i] == source;
+                    BOOL sameTitle = [labelIn(oldSources[i]).text isEqualToString:title];
+                    if (pass == 0 ? sameSource : sameTitle) {
+                        item = oldItems[i];
+                        break;
+                    }
+                }
+            }
+            if (!item) item = [[UITabBarItem alloc] initWithTitle:hideLabels ? nil : title image:nil tag:items.count];
+            else {
+                item.title = hideLabels ? nil : title;
+                [reused addObject:item];
+            }
+            [items addObject:item];
+        }
         bar.sources = sources;
         [bar setItems:items animated:NO];
         NSMutableString *out = [NSMutableString stringWithString:@"tab bar icons"];

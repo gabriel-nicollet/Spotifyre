@@ -4,14 +4,14 @@
 NSNotificationName const SGRLyricsLookDidChangeNotification = @"spotifyglass.redesign.lyricsLookDidChange";
 
 // The sliders' ranges, which a stored look is held to as well.
-static const SGRLyricsLook kLeast = {22, 12, 0, 0, 0}, kMost = {40, 40, 2, 2, 2};
+static const SGRLyricsLook kLeast = {22, 12, 0, 0, 0, 0.1, 0}, kMost = {40, 40, 2, 2, 2, 0.7, 1};
 
 static SGRLyricsLook presets[] = {
-    {30, 24, 1, 1, 1},          // Apple Music: its 30 pt lines, 24 pt apart
-    {36, 28, 1, 1, 1},          // Large
-    {25, 16, 1, 1, 1},          // Compact
-    {30, 24, 0, 0, 0},          // Calm: every line sharp, and nothing held glows or waves
-    {32, 26, 1.4, 1.6, 1.8},    // Vivid
+    {30, 24, 1, 1, 1, 0.3, 0},          // Apple Music: its 30 pt lines, 24 pt apart
+    {36, 28, 1, 1, 1, 0.3, 0},          // Large
+    {25, 16, 1, 1, 1, 0.3, 0},          // Compact
+    {30, 24, 0, 0, 0, 0.3, 0},          // Calm: every line sharp, and nothing held glows or waves
+    {32, 26, 1.4, 1.6, 1.8, 0.3, 0.35}, // Vivid
 };
 
 NSArray<NSString *> *SGRLyricsLookPresetNames(void) {
@@ -34,12 +34,35 @@ static CGFloat stored(NSDictionary *look, NSString *name, CGFloat fallback, CGFl
 SGRLyricsLook SGRLyricsLookNow(void) {
     SGRLyricsLook look = presets[0];
     NSDictionary *saved = [NSUserDefaults.standardUserDefaults dictionaryForKey:SGRKeyLyricsLook];
-    if (!saved) return look;
+    if (!saved) {
+        // Keep the reader's former Lyrics Style sliders when moving to the consolidated look page.
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        NSDictionary *legacy = @{
+            @"size": @"spotifyglass.redesign.lyricsStyleFontSize",
+            @"spacing": @"spotifyglass.redesign.lyricsStyleLineGap",
+            @"blur": @"spotifyglass.redesign.lyricsStyleBlur",
+            @"opacity": @"spotifyglass.redesign.lyricsStyleDim",
+            @"bloom": @"spotifyglass.redesign.lyricsStyleBloom"
+        };
+        id value = [defaults objectForKey:legacy[@"size"]];
+        if ([value isKindOfClass:NSNumber.class]) look.size = held([value doubleValue], kLeast.size, kMost.size);
+        value = [defaults objectForKey:legacy[@"spacing"]];
+        if ([value isKindOfClass:NSNumber.class]) look.spacing = held([value doubleValue], kLeast.spacing, kMost.spacing);
+        value = [defaults objectForKey:legacy[@"blur"]];
+        if ([value isKindOfClass:NSNumber.class]) look.blur = held([value doubleValue] / 6.0, kLeast.blur, kMost.blur);
+        value = [defaults objectForKey:legacy[@"opacity"]];
+        if ([value isKindOfClass:NSNumber.class]) look.opacity = held([value doubleValue], kLeast.opacity, kMost.opacity);
+        value = [defaults objectForKey:legacy[@"bloom"]];
+        if ([value isKindOfClass:NSNumber.class]) look.bloom = held([value doubleValue] / 100.0, kLeast.bloom, kMost.bloom);
+        return look;
+    }
     look.size = stored(saved, @"size", look.size, kLeast.size, kMost.size);
     look.spacing = stored(saved, @"spacing", look.spacing, kLeast.spacing, kMost.spacing);
     look.blur = stored(saved, @"blur", look.blur, kLeast.blur, kMost.blur);
     look.glow = stored(saved, @"glow", look.glow, kLeast.glow, kMost.glow);
     look.wave = stored(saved, @"wave", look.wave, kLeast.wave, kMost.wave);
+    look.opacity = stored(saved, @"opacity", look.opacity, kLeast.opacity, kMost.opacity);
+    look.bloom = stored(saved, @"bloom", look.bloom, kLeast.bloom, kMost.bloom);
     return look;
 }
 
@@ -50,6 +73,8 @@ void SGRSetLyricsLook(SGRLyricsLook look, id changer) {
         @"blur": @(held(look.blur, kLeast.blur, kMost.blur)),
         @"glow": @(held(look.glow, kLeast.glow, kMost.glow)),
         @"wave": @(held(look.wave, kLeast.wave, kMost.wave)),
+        @"opacity": @(held(look.opacity, kLeast.opacity, kMost.opacity)),
+        @"bloom": @(held(look.bloom, kLeast.bloom, kMost.bloom)),
     } forKey:SGRKeyLyricsLook];
     [NSNotificationCenter.defaultCenter postNotificationName:SGRLyricsLookDidChangeNotification object:changer];
 }
@@ -63,7 +88,8 @@ NSInteger SGRLyricsLookPresetIndex(SGRLyricsLook look) {
     for (NSUInteger i = 0; i < sizeof(presets) / sizeof(*presets); i++) {
         SGRLyricsLook preset = presets[i];
         if (same(look.size, preset.size) && same(look.spacing, preset.spacing) && same(look.blur, preset.blur)
-            && same(look.glow, preset.glow) && same(look.wave, preset.wave)) return (NSInteger)i;
+            && same(look.glow, preset.glow) && same(look.wave, preset.wave)
+            && same(look.opacity, preset.opacity) && same(look.bloom, preset.bloom)) return (NSInteger)i;
     }
     return -1;
 }

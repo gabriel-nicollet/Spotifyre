@@ -14,7 +14,7 @@ static const CGFloat kChipHeight = 36, kChipGap = 8, kStripGap = 12, kStripPad =
 
 #pragma mark - the sliders
 
-// A page of the five sliders, each storing as it moves. A preset picked on the page while the sheet is up
+// A page of the look sliders, each storing as it moves. A preset picked on the page while the sheet is up
 // is read back into them; their own changes are not, so a slider is never reloaded under the finger.
 @interface SGRLyricsStyleSheet : SGModPage
 @property (nonatomic, readonly) CGFloat fittedHeight;   // the table's content once laid out, 0 before
@@ -87,15 +87,20 @@ static void presentStyleSheet(UIViewController *owner) {
                    ^(SGRLyricsLook *l, double v) { l->size = v; }, ^NSString *(double v) { return points(v); }, &sheetPage),
         lookSlider(@"Line spacing", 12, 40, 2, ^CGFloat(SGRLyricsLook l) { return l.spacing; },
                    ^(SGRLyricsLook *l, double v) { l->spacing = v; }, ^NSString *(double v) { return points(v); }, &sheetPage),
-        lookSlider(@"Blur", 0, 2, 0.1, ^CGFloat(SGRLyricsLook l) { return l.blur; },
-                   ^(SGRLyricsLook *l, double v) { l->blur = v; }, ^NSString *(double v) { return share(v); }, &sheetPage),
+        lookSlider(@"Inactive opacity", 0.1, 0.7, 0.01, ^CGFloat(SGRLyricsLook l) { return l.opacity; },
+                   ^(SGRLyricsLook *l, double v) { l->opacity = v; }, ^NSString *(double v) { return share(v); }, &sheetPage),
+        lookSlider(@"Distant blur", 0, 12, 0.5, ^CGFloat(SGRLyricsLook l) { return l.blur * 6; },
+                   ^(SGRLyricsLook *l, double v) { l->blur = v / 6; }, ^NSString *(double v) { return [NSString stringWithFormat:@"%.1f pt", v]; }, &sheetPage),
+        lookSlider(@"Bloom / glare", 0, 1, 0.01, ^CGFloat(SGRLyricsLook l) { return l.bloom; },
+                   ^(SGRLyricsLook *l, double v) { l->bloom = v; }, ^NSString *(double v) { return share(v); }, &sheetPage),
         lookSlider(@"Glow", 0, 2, 0.1, ^CGFloat(SGRLyricsLook l) { return l.glow; },
                    ^(SGRLyricsLook *l, double v) { l->glow = v; }, ^NSString *(double v) { return share(v); }, &sheetPage),
         lookSlider(@"Wave", 0, 2, 0.1, ^CGFloat(SGRLyricsLook l) { return l.wave; },
                    ^(SGRLyricsLook *l, double v) { l->wave = v; }, ^NSString *(double v) { return share(v); }, &sheetPage),
     ];
-    NSString *footer = @"Blur is how much the lines away from the one sung soften. Glow and Wave are how strongly a held "
-                       @"word glows and its letters rise. 100% is Apple Music's.";
+    NSString *footer = @"Inactive opacity sets the other lines' brightness. Distant blur softens lines farther from "
+                       @"the one sung. Bloom / glare halos the sung line; Glow and Wave affect held words. "
+                       @"100% is Apple Music's blur, glow and wave.";
     SGRLyricsStyleSheet *page = [[SGRLyricsStyleSheet alloc] initWithTitle:@"Lyrics Style" intro:nil
                                                                  sections:@[SGNotedSection(nil, rows, footer)] footer:nil];
     sheetPage = page;

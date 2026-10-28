@@ -26,7 +26,7 @@
 
 // The size of the words and the room between lines are the Lyrics page's (LyricsLook.h).
 static const CGFloat kMargin = 24, kRowTighten = 2;
-static const CGFloat kDimAlpha = 0.3, kFillEdge = 22, kLift = 2.5, kDimScale = 0.97;
+static const CGFloat kFillEdge = 22, kLift = 2.5, kDimScale = 0.97;
 static const CGFloat kAnchor = 0.28;   // where the sung line rests, as a share of the height
 static const CGFloat kEdgeFade = 0.1;  // the lines fade out over this share at the top and bottom
 static const CGFloat kBlurPerLine = 1.4, kMaxBlur = 6;   // Apple Music's, scaled by the Lyrics page's blur
@@ -52,8 +52,8 @@ static const double kFloatMinMs = 700, kFloatLeadMs = 80;   // a short word stil
 // word and fades over kGlowFadeMs after it.
 static const double kGlowFromMs = 900, kGlowFullMs = 2400, kGlowFadeMs = 450;
 static const CGFloat kGlowRadius = 9, kGlowOpacity = 0.85;
-// How strongly the glow and the wave below are drawn, the Lyrics page's (LyricsLook.h), 1 being as here.
-static CGFloat sgr_glowScale = 1, sgr_waveScale = 1;
+// The Lyrics page's look: held-word glow and wave, inactive opacity, and the sung line's bloom.
+static CGFloat sgr_glowScale = 1, sgr_waveScale = 1, sgr_dimOpacity = 0.3, sgr_bloomScale = 0;
 // A word held long enough to glow lifts its letters one after another as the sweep reaches each, a wave
 // running through it, as high as this share of the font for the word held longest: a letter starts up a
 // little before the sweep's edge reaches its middle and is up over this share of the word's time. They come
@@ -207,7 +207,7 @@ static UIView *lettersOf(NSArray<NSString *> *letters, NSArray<NSNumber *> *xs, 
     }
     if (letters.count > 1) {
         NSMutableArray<UILabel *> *dim = [NSMutableArray array], *lit = [NSMutableArray array];
-        [self addSubview:lettersOf(letters, xs, font, [UIColor colorWithWhite:1 alpha:kDimAlpha], self.bounds.size, dim)];
+        [self addSubview:lettersOf(letters, xs, font, [UIColor colorWithWhite:1 alpha:sgr_dimOpacity], self.bounds.size, dim)];
         _lit = lettersOf(letters, xs, font, UIColor.whiteColor, self.bounds.size, lit);
         _dimLetters = dim;
         _litLetters = lit;
@@ -219,7 +219,7 @@ static UIView *lettersOf(NSArray<NSString *> *letters, NSArray<NSNumber *> *xs, 
         }
         _waveHeight = font.pointSize * kWaveShare;
     } else {
-        [self addSubview:wordLabel(word.text, font, [UIColor colorWithWhite:1 alpha:kDimAlpha], self.bounds, rightToLeft)];
+        [self addSubview:wordLabel(word.text, font, [UIColor colorWithWhite:1 alpha:sgr_dimOpacity], self.bounds, rightToLeft)];
         _lit = wordLabel(word.text, font, UIColor.whiteColor, self.bounds, rightToLeft);
     }
     // Hidden until the line is sung: a masked layer is drawn offscreen every frame even when the
@@ -897,7 +897,7 @@ static double wholeFrom(SGKaraokeLine *run, BOOL sweepsEstimates) {
     label.numberOfLines = 0;
     label.font = font;
     label.textColor = UIColor.whiteColor;
-    label.alpha = kDimAlpha;
+    label.alpha = sgr_dimOpacity;
     label.textAlignment = _right ? NSTextAlignmentRight : NSTextAlignmentLeft;
     label.text = text;
     [self addSubview:label];
@@ -931,9 +931,13 @@ static const NSUInteger kLinesPerFrame = 4;
     NSUInteger generation = ++_generation;
     if (_translation || _romanised) {
         [UIView animateWithDuration:active ? 0.3 : 0.5 delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
-            self->_translation.alpha = self->_romanised.alpha = active ? kTranslationLit : kDimAlpha;
+            self->_translation.alpha = self->_romanised.alpha = active ? kTranslationLit : sgr_dimOpacity;
         } completion:nil];
     }
+    self.layer.shadowColor = UIColor.whiteColor.CGColor;
+    self.layer.shadowOffset = CGSizeZero;
+    self.layer.shadowRadius = 10.0 * sgr_bloomScale;
+    self.layer.shadowOpacity = active ? MIN(0.8, sgr_bloomScale * 0.8) : 0;
     if (active) {
         NSMutableArray<SGRKaraokeWordView *> *whole = [NSMutableArray array];
         for (SGRKaraokeWordView *word in _words) {
@@ -1124,7 +1128,7 @@ static double smoothstep(double p) {
         dot.frame = CGRectMake(i * (_side + _gap), 0, _side, _side);
         dot.cornerRadius = _side / 2;
         dot.backgroundColor = UIColor.whiteColor.CGColor;
-        dot.opacity = kDimAlpha;
+        dot.opacity = sgr_dimOpacity;
         [_group addSublayer:dot];
         [dots addObject:dot];
     }
@@ -1198,7 +1202,7 @@ static double smoothstep(double p) {
     // Each dot fills over its third of the time before they go, in the order the next line reads.
     for (NSUInteger i = 0; i < _dots.count; i++) {
         CABasicAnimation *fill = [CABasicAnimation animationWithKeyPath:@"opacity"];
-        fill.fromValue = @(kDimAlpha);
+        fill.fromValue = @(sgr_dimOpacity);
         fill.toValue = @1;
         fill.beginTime = kBreakEpoch + (_rightToLeft ? _dots.count - 1 - i : i) * exitAt / 3;
         fill.duration = exitAt / 3;
@@ -1422,6 +1426,8 @@ typedef struct {
     _maxBlur = kMaxBlur * look.blur;
     sgr_glowScale = look.glow;
     sgr_waveScale = look.wave;
+    sgr_dimOpacity = look.opacity;
+    sgr_bloomScale = look.bloom;
 }
 
 - (void)lookChanged {

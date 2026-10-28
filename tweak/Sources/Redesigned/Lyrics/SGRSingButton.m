@@ -7,11 +7,11 @@
 #import "SGRSingButton.h"
 
 static const CGFloat kGlyph = 17, kRingWidth = 2.5, kRingInset = 1.5;
-// The slider's capsule over the button, and the gap between them: wider than SGRGlassSpacing (16), so the
-// two glass shapes stay apart rather than sampling each other.
-static const CGFloat kPanelHeight = 168, kPanelGap = 24, kLevelWidth = 120, kLevelHeight = 20;
-// The capsule opens from just under full size at the mic, the way a popover grows out of what opened it.
-static const CGFloat kPanelEnterScale = 0.95;
+// The glass grows up from the mic's 44 pt circle into one continuous capsule; the track fills its upper part.
+static const CGFloat kPanelHeight = 168, kButtonSide = 44, kLevelWidth = 120, kLevelHeight = 20;
+static const CGFloat kLevelGap = 8;
+// The capsule starts as the mic's circle and grows up from its bottom edge.
+static const CGFloat kPanelEnterScale = 0.21;
 static const NSTimeInterval kPanelStays = 2.5;
 static const float kLevelStep = 0.05f;
 // As sung (1) holds the thumb this close either side, 4% of the slider's travel: a detent caught with a tick, as the
@@ -78,10 +78,9 @@ static char kButtonGlassKey, kPanelGlassKey;
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
-    _button.frame = bounds;
-    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(bounds.size.width, bounds.size.height)), !_tucked);
+    if (_button.superview == self) _button.frame = bounds;
+    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(bounds.size.width, bounds.size.height)), !_tucked && !_panelShown);
     _ring.frame = bounds;
-    // Starting at the top and running clockwise, as a download ring does.
     CGFloat radius = MIN(bounds.size.width, bounds.size.height) / 2 - kRingInset - kRingWidth / 2;
     _ring.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds)) radius:radius
                                             startAngle:-M_PI_2 endAngle:3 * M_PI_2 clockwise:YES].CGPath;
@@ -262,7 +261,7 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
     if (!_panel) {
         _panel = [UIView new];
         _panel.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-        _panel.layer.anchorPoint = CGPointMake(0.5, 1);   // its bottom edge, over the mic
+        _panel.layer.anchorPoint = CGPointMake(0.5, 1);   // the capsule grows from the mic
         _slider = [UISlider new];
         _slider.minimumValue = 0;
         _slider.maximumValue = 2;
@@ -286,13 +285,15 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
         [self addSubview:_level];
         _slider.alpha = _mark.alpha = _level.alpha = 0;
         SGRShowGlass([self placePanel], NO);
-        if (!SGRReduceMotion()) _panel.transform = CGAffineTransformMakeScale(kPanelEnterScale, kPanelEnterScale);
+        _panel.transform = CGAffineTransformMakeScale(1, kPanelEnterScale);
     }
     _slider.minimumTrackTintColor = SGRAccentColor() ?: UIColor.systemGreenColor;
     _slider.value = SGSingLevel();
     [self showLevel];
-    UIView *glass = [self placePanel];
     _panelShown = YES;
+    UIView *glass = [self placePanel];
+    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(self.bounds.size.width, self.bounds.size.height)), NO);
+    [self bringSubviewToFront:_button];
     // The fade answers the hold at once; the growth is motion, which Reduce Motion leaves out.
     SGRAnimate(SGRMotionRespond, ^{
         SGRShowGlass(glass, YES);
@@ -304,15 +305,34 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
 
 // Bounds and a center rather than a frame, since the capsule can be under its entering scale.
 - (UIView *)placePanel {
-    CGFloat width = self.bounds.size.width, top = -kPanelGap - kPanelHeight;
-    _panel.bounds = CGRectMake(0, 0, width, kPanelHeight);
-    _panel.center = CGPointMake(width / 2, -kPanelGap);
+    CGFloat width = self.bounds.size.width, height = kPanelHeight + kButtonSide;
+    _panel.bounds = CGRectMake(0, 0, width, height);
+    // The panel's bottom stays at the mic's bottom edge, so its glass grows up from the 44 pt circle.
+    _panel.center = CGPointMake(width / 2, CGRectGetMaxY(self.bounds));
     UIView *glass = SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO);
+    UIView *content = glass;
+    if ([glass isKindOfClass:UIVisualEffectView.class]) {
+        UIVisualEffectView *pane = (id)glass;
+        if (@available(iOS 26.0, *)) {
+            if ([pane.effect isKindOfClass:UIGlassEffect.class] && !((UIGlassEffect *)pane.effect).interactive) {
+                UIGlassEffect *effect = [(UIGlassEffect *)pane.effect copy];
+                effect.interactive = YES;
+                pane.effect = effect;
+            }
+        }
+        content = pane.contentView;
+    }
+    glass.userInteractionEnabled = YES;
+    content.clipsToBounds = YES;
+    content.layer.cornerRadius = width / 2;
+    for (UIView *view in @[_mark, _slider]) {
+        if (_panelShown && view.superview != content) [content addSubview:view];
+    }
+    _button.frame = self.bounds;
     _slider.bounds = CGRectMake(0, 0, kPanelHeight - 24, 31);
     _slider.center = CGPointMake(width / 2, kPanelHeight / 2);
-    // The slider is centered, so As sung, the middle of its range, is the capsule's middle.
     _mark.frame = CGRectMake((width - kMarkWidth) / 2, kPanelHeight / 2 - 0.5, kMarkWidth, 1);
-    _level.frame = CGRectMake(width - kLevelWidth, top - kLevelHeight - 4, kLevelWidth, kLevelHeight);
+    _level.frame = CGRectMake(-kLevelWidth - kLevelGap, (kButtonSide - kLevelHeight) / 2, kLevelWidth, kLevelHeight);
     return glass;
 }
 
@@ -347,8 +367,11 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
 // Out faster than it came, and without shrinking: nothing is watched on its way out.
 - (void)hidePanel {
     if (!_panelShown) return;
-    SGRAnimate(SGRMotionRespond, ^{ [self panelGone]; }, ^(BOOL finished) {
-        if (!self->_panelShown && !SGRReduceMotion()) self->_panel.transform = CGAffineTransformMakeScale(kPanelEnterScale, kPanelEnterScale);
+    SGRAnimate(SGRMotionRespond, ^{
+        self->_panel.transform = CGAffineTransformMakeScale(1, kPanelEnterScale);
+        self->_slider.alpha = self->_mark.alpha = self->_level.alpha = 0;
+    }, ^(BOOL finished) {
+        [self panelGone];
     });
 }
 
@@ -357,13 +380,16 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
     _panelShown = NO;
     [_hide invalidate];
     _hide = nil;
-    SGRShowGlass(SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO), NO);
+    UIView *glass = SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO);
+    SGRShowGlass(glass, NO);
+    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(self.bounds.size.width, self.bounds.size.height)), !_tucked);
     _slider.alpha = _mark.alpha = _level.alpha = 0;
+    [self setNeedsLayout];
 }
 
-// The slider sits outside the button's bounds, above it, and takes touches while it shows.
+// The glass capsule extends above the mic's circle and takes touches while it shows.
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    if (_panelShown && CGRectContainsPoint(_panel.frame, point)) return YES;
+    if (_panelShown && CGRectContainsPoint([self convertRect:_panel.bounds fromView:_panel], point)) return YES;
     return [super pointInside:point withEvent:event];
 }
 
