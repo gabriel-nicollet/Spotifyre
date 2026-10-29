@@ -505,7 +505,7 @@ static SGRSingLook lookOf(SGSingState state) {
                name:SGSingDidChangeNotification
              object:nil];
 
-    _shown = SGSingCurrentState();
+    _shown = SGSingControllerCurrentState();
     _shownLevel = SGSingVocalLevel();
 
     [self refreshAnimated:NO];
@@ -524,7 +524,7 @@ static SGRSingLook lookOf(SGSingState state) {
 #pragma mark - what it shows
 
 - (void)updateHold {
-    SGSingState state = SGSingCurrentState();
+    SGSingState state = SGSingControllerCurrentState();
 
     BOOL held =
         _expanded ||
@@ -544,7 +544,7 @@ static SGRSingLook lookOf(SGSingState state) {
 - (void)updateVisibility {
     BOOL visible =
         !_immersive ||
-        SGSingStateIsOn(SGSingCurrentState());
+        SGSingStateIsOn(SGSingControllerCurrentState());
 
     self.alpha = visible ? 1 : 0;
     self.accessibilityElementsHidden = !visible;
@@ -701,7 +701,7 @@ static SGRSingLook lookOf(SGSingState state) {
 }
 
 - (void)refreshAnimated:(BOOL)animated {
-    SGSingState state = SGSingCurrentState();
+    SGSingState state = SGSingControllerCurrentState();
     SGRSingLook look = lookOf(state);
 
     if (look.on && !_wasOn)
@@ -861,7 +861,7 @@ static SGRSingLook lookOf(SGSingState state) {
         return;
 
     BOOL busy =
-        !SGSingStateIsOn(SGSingCurrentState()) ||
+        !SGSingStateIsOn(SGSingControllerCurrentState()) ||
         _dragging ||
         _slider.tracking ||
         _button.tracking ||
@@ -1022,7 +1022,7 @@ static SGRSingLook lookOf(SGSingState state) {
 
     [self interacted];
 
-    SGSingState state = SGSingCurrentState();
+    SGSingState state = SGSingControllerCurrentState();
 
     _dragStart =
         [touch locationInView:self.superview];
@@ -1058,7 +1058,7 @@ static SGRSingLook lookOf(SGSingState state) {
 - (void)tapped {
     [self interacted];
 
-    SGSingState state = SGSingCurrentState();
+    SGSingState state = SGSingControllerCurrentState();
 
     if (state == SGSingFailed)
         [self showExplanation];
@@ -1079,7 +1079,7 @@ static SGRSingLook lookOf(SGSingState state) {
     SGSingSetVocalLevel(SGSingReducedLevel());
     SGSingSetEnabled(YES);
 
-    if (SGSingCurrentState() == SGSingFailed)
+    if (SGSingControllerCurrentState() == SGSingFailed)
         [self showExplanation];
     else
         self.expanded = YES;
@@ -1091,7 +1091,7 @@ static SGRSingLook lookOf(SGSingState state) {
 }
 
 - (void)expand {
-    SGSingState state = SGSingCurrentState();
+    SGSingState state = SGSingControllerCurrentState();
 
     if (state == SGSingIdle)
         [self turnOn];
@@ -1156,7 +1156,7 @@ static SGRSingLook lookOf(SGSingState state) {
         [self expand];
 
     if (gesture.state == UIGestureRecognizerStateChanged &&
-        SGSingStateIsOn(SGSingCurrentState())) {
+        SGSingStateIsOn(SGSingControllerCurrentState())) {
 
         CGPoint point =
             [gesture locationInView:_slider];
@@ -1244,7 +1244,7 @@ static SGRSingLook lookOf(SGSingState state) {
                     }]];
     }
 
-    if (SGSingCurrentState() == SGSingFailed) {
+    if (SGSingControllerCurrentState() == SGSingFailed) {
         [alert
             addAction:
                 [UIAlertAction
