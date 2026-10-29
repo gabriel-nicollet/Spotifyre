@@ -7,11 +7,9 @@
 #import "SGRSingButton.h"
 
 static const CGFloat kGlyph = 17, kRingWidth = 2.5, kRingInset = 1.5;
-// The slider's capsule over the button, and the gap between them: wider than SGRGlassSpacing (16), so the
-// two glass shapes stay apart rather than sampling each other.
-static const CGFloat kPanelHeight = 168, kPanelGap = 24, kLevelWidth = 120, kLevelHeight = 20;
-// The capsule opens from just under full size at the mic, the way a popover grows out of what opened it.
-static const CGFloat kPanelEnterScale = 0.95;
+// The capsule is the button's own glass grown upward: a circle at rest that opens into a pill kPanelHeight tall, the
+// mic fused into its foot, and closes into the circle again (Spotifyre's). The level reads out to the left of the mic.
+static const CGFloat kPanelHeight = 168, kLevelGap = 12, kLevelWidth = 120, kLevelHeight = 20;
 static const NSTimeInterval kPanelStays = 3;   // Spotifyre's: three seconds after the last touch
 static const float kLevelStep = 0.05f;
 // As sung (1) holds the thumb this close either side, 4% of the slider's travel: a detent caught with a tick, as the
@@ -66,7 +64,9 @@ static UIColor *vocalsOnlyGreen(void) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    self.layer.cornerRadius = self.bounds.size.width / 2;
+    // Round at the top only: the foot meets the mic's circle, which the capsule's glass rounds itself.
+    self.layer.cornerRadius = MIN(self.bounds.size.width, self.bounds.size.height) / 2;
+    self.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
     [self paint];
 }
 
@@ -80,6 +80,9 @@ static UIColor *vocalsOnlyGreen(void) {
 - (BOOL)canBePreventedByGestureRecognizer:(UIGestureRecognizer *)other {
     return NO;
 }
+@end
+
+@interface SGRSingButton () <UIGestureRecognizerDelegate>
 @end
 
 @implementation SGRSingButton {
@@ -112,6 +115,12 @@ static UIColor *vocalsOnlyGreen(void) {
     [_button addTarget:self action:@selector(tapped) forControlEvents:UIControlEventTouchUpInside];
     [_button addGestureRecognizer:[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(held:)]];
     [self addSubview:_button];
+    // A drag on the capsule, or on the mic while Sing is on, sets the level; the player's own pan to dismiss does not
+    // get to take it (SGRVocalPan).
+    SGRVocalPan *pan = [[SGRVocalPan alloc] initWithTarget:self action:@selector(dragged:)];
+    pan.maximumNumberOfTouches = 1;
+    pan.delegate = self;
+    [self addGestureRecognizer:pan];
 
     // VoiceOver has the mic itself as one adjustable button: the slider shows only for a held finger and
     // goes again on a timer, which a swipe up or down never holds open.
@@ -143,24 +152,29 @@ static UIColor *vocalsOnlyGreen(void) {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
     _button.frame = bounds;
-    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(bounds.size.width, bounds.size.height)), !_tucked);
+    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(bounds.size.width, bounds.size.height)), !_tucked && !_panelShown);
     _ring.frame = bounds;
     // Starting at the top and running clockwise, as a download ring does.
     CGFloat radius = MIN(bounds.size.width, bounds.size.height) / 2 - kRingInset - kRingWidth / 2;
     _ring.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds)) radius:radius
                                             startAngle:-M_PI_2 endAngle:3 * M_PI_2 clockwise:YES].CGPath;
-    if (_panel) SGRShowGlass([self placePanel], _panelShown);
+    [self layoutPanel];
 }
 
 // Goes with the host's controls, in the host's animation: the glass dematerializes, the glyph and the ring
 // fade, and an open slider goes with them.
 - (void)setTucked:(BOOL)tucked {
     _tucked = tucked;
-    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(self.bounds.size.width, self.bounds.size.height)), !tucked);
+    if (tucked && _panelShown) {
+        _panelShown = NO;
+        [_hide invalidate];
+        _hide = nil;
+    }
     _button.alpha = tucked ? 0 : 1;
     [self showRing];
     self.userInteractionEnabled = !tucked;
-    if (tucked && _panelShown) [self panelGone];
+    // The capsule closes with the rest, and the button's glass is the one left, or none.
+    [self layoutPanel];
 }
 
 #pragma mark - what Sing is doing
@@ -332,55 +346,54 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
     [self showPanel];
 }
 
+- (void)makePanel {
+    if (_panel) return;
+    _panel = [UIView new];
+    _panel.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    _slider = [SGRVocalSlider new];
+    [_panel addSubview:_slider];
+    _mark = [UIView new];
+    _mark.userInteractionEnabled = NO;
+    [_panel addSubview:_mark];   // over the fill, so it reads on both sides of the level
+    _feedback = [UISelectionFeedbackGenerator new];
+    _level = [UILabel new];
+    _level.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    _level.textColor = [UIColor colorWithWhite:1 alpha:0.85];
+    _level.textAlignment = NSTextAlignmentRight;
+    _level.isAccessibilityElement = NO;
+    _level.alpha = 0;
+    // Under the mic, whose glyph and ring stay over the capsule's foot.
+    [self insertSubview:_panel belowSubview:_button];
+    [self addSubview:_level];
+}
+
+// The circle grows into the pill on the Kit's layout spring (a dissolve under Reduce Motion), and the level comes in
+// beside the mic.
 - (void)showPanel {
-    if (!_panel) {
-        _panel = [UIView new];
-        _panel.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-        _panel.layer.anchorPoint = CGPointMake(0.5, 1);   // its bottom edge, over the mic
-        _slider = [SGRVocalSlider new];
-        [_panel addSubview:_slider];
-        SGRVocalPan *pan = [[SGRVocalPan alloc] initWithTarget:self action:@selector(dragged:)];
-        pan.maximumNumberOfTouches = 1;
-        [_panel addGestureRecognizer:pan];
-        _mark = [UIView new];
-        _mark.userInteractionEnabled = NO;
-        [_panel addSubview:_mark];   // over the fill, so it reads on both sides of the level
-        _feedback = [UISelectionFeedbackGenerator new];
-        _level = [UILabel new];
-        _level.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-        _level.textColor = [UIColor colorWithWhite:1 alpha:0.8];
-        _level.textAlignment = NSTextAlignmentRight;
-        _level.isAccessibilityElement = NO;
-        [self addSubview:_panel];
-        [self addSubview:_level];
-        _slider.alpha = _mark.alpha = _level.alpha = 0;
-        SGRShowGlass([self placePanel], NO);
-        if (!SGRReduceMotion()) _panel.transform = CGAffineTransformMakeScale(kPanelEnterScale, kPanelEnterScale);
-    }
+    [self makePanel];
     _slider.value = SGSingLevel();
     [self showLevel];
-    UIView *glass = [self placePanel];
     _panelShown = YES;
-    // The fade answers the hold at once; the growth is motion, which Reduce Motion leaves out.
-    SGRAnimate(SGRMotionRespond, ^{
-        SGRShowGlass(glass, YES);
-        self->_slider.alpha = self->_mark.alpha = self->_level.alpha = 1;
-    }, nil);
-    SGRAnimateLayout(self, ^{ self->_panel.transform = CGAffineTransformIdentity; }, nil);
+    SGRAnimateLayout(self, ^{ [self layoutPanel]; }, nil);
     [self letPanelGo];
 }
 
-// Bounds and a center rather than a frame, since the capsule can be under its entering scale.
-- (UIView *)placePanel {
-    CGFloat width = self.bounds.size.width, top = -kPanelGap - kPanelHeight;
-    _panel.bounds = CGRectMake(0, 0, width, kPanelHeight);
-    _panel.center = CGPointMake(width / 2, -kPanelGap);
-    UIView *glass = SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO);
-    _slider.frame = _panel.bounds;
-    // As sung, the middle of the level's range, is the capsule's middle.
-    _mark.frame = CGRectMake((width - kMarkWidth) / 2, kPanelHeight / 2 - 0.5, kMarkWidth, 1);
-    _level.frame = CGRectMake(width - kLevelWidth, top - kLevelHeight - 4, kLevelWidth, kLevelHeight);
-    return glass;
+// Everything of the capsule for whether it is open, set in whatever animation the caller has open. The capsule is
+// bottom-anchored on the mic: closed it is the mic's circle, so its glass and the button's own swap in place.
+- (void)layoutPanel {
+    BOOL open = _panelShown && !_tucked;
+    CGFloat width = self.bounds.size.width, side = self.bounds.size.height;
+    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(width, side)), !open && !_tucked);
+    if (!_panel) return;
+    CGFloat height = open ? MAX(kPanelHeight, side) : side;
+    _panel.frame = CGRectMake(0, side - height, width, height);
+    SGRShowGlass(SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO), open);
+    CGFloat track = height - side;   // the slider's part, above the mic
+    _slider.frame = CGRectMake(0, 0, width, MAX(0, track));
+    // As sung, the middle of the level's range, is the middle of that part.
+    _mark.frame = CGRectMake((width - kMarkWidth) / 2, track / 2 - 0.5, kMarkWidth, 1);
+    _level.frame = CGRectMake(-kLevelGap - kLevelWidth, (side - kLevelHeight) / 2, kLevelWidth, kLevelHeight);
+    _slider.alpha = _mark.alpha = _level.alpha = open ? 1 : 0;
 }
 
 - (void)showLevel {
@@ -396,6 +409,10 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
 - (void)dragged:(UIPanGestureRecognizer *)pan {
     switch (pan.state) {
         case UIGestureRecognizerStateBegan:
+            if (!_panelShown) {
+                [self showPanel];
+                _slider.value = SGSingLevel();
+            }
             [self holdPanel];
             _dragFrom = _slider.value;
             if (SGSingCurrentState() == SGSingStateOff) SGSetSingOn(YES);
@@ -415,8 +432,8 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
 }
 
 - (void)dragTo:(UIPanGestureRecognizer *)pan {
-    CGFloat travel = [pan translationInView:_panel].y;   // down is positive
-    float position = fmaxf(0, fminf(1, _dragFrom / 2 - (float)(travel / MAX(1, _slider.bounds.size.height))));
+    CGFloat travel = [pan translationInView:self].y;   // down is positive
+    float position = fmaxf(0, fminf(1, _dragFrom / 2 - (float)(travel / MAX(1, kPanelHeight - self.bounds.size.height))));
     [self setLevelFromDrag:position * 2];
 }
 
@@ -451,24 +468,24 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
     _hide = [NSTimer scheduledTimerWithTimeInterval:kPanelStays repeats:NO block:^(NSTimer *timer) { [weakSelf hidePanel]; }];
 }
 
-// Out faster than it came, and without shrinking: nothing is watched on its way out.
+// Back into the circle, on the same spring.
 - (void)hidePanel {
     if (!_panelShown) return;
-    SGRAnimate(SGRMotionRespond, ^{ [self panelGone]; }, ^(BOOL finished) {
-        if (!self->_panelShown && !SGRReduceMotion()) self->_panel.transform = CGAffineTransformMakeScale(kPanelEnterScale, kPanelEnterScale);
-    });
-}
-
-// The capsule's glass and the slider gone, in whatever animation the caller has open.
-- (void)panelGone {
     _panelShown = NO;
     [_hide invalidate];
     _hide = nil;
-    SGRShowGlass(SGRGlassCapsuleInside(_panel, &kPanelGlassKey, _panel.bounds.size, NO), NO);
-    _slider.alpha = _mark.alpha = _level.alpha = 0;
+    SGRAnimateLayout(self, ^{ [self layoutPanel]; }, nil);
 }
 
-// The slider sits outside the button's bounds, above it, and takes touches while it shows.
+// A drag begins on the capsule, or on the mic while Sing is on, and goes mostly up or down.
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture {
+    if (![gesture isKindOfClass:SGRVocalPan.class]) return YES;
+    if (!_panelShown && !SGSingOn()) return NO;
+    CGPoint velocity = [(UIPanGestureRecognizer *)gesture velocityInView:self];
+    return fabs(velocity.y) >= fabs(velocity.x);
+}
+
+// The capsule sits outside the button's bounds, above it, and takes touches while it shows.
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if (_panelShown && CGRectContainsPoint(_panel.frame, point)) return YES;
     return [super pointInside:point withEvent:event];
