@@ -581,6 +581,9 @@ static void syncBar(UIView *stockBar) {
     }
     if (!CGRectEqualToRect(bar.frame, mainFrame)) bar.frame = mainFrame;
     if (apart.count && !CGRectEqualToRect(apartBar.frame, apartFrame)) apartBar.frame = apartFrame;
+    // Expanding with no split tab, the trailing circle held on screen (sg_keepApart) goes back to the whole bar's
+    // frame, so its glass runs into the main bar's rather than going at once.
+    else if (!apart.count && !apartBar.hidden && apartBar.sources.count && !CGRectEqualToRect(apartBar.frame, mainFrame)) apartBar.frame = mainFrame;
 
     // The items go in once the bars are laid out at their frames. UIKit sizes an item's title by the platter it
     // is made in and never again when the bar grows, so items made while a bar was still a circle kept "…" for
@@ -787,6 +790,45 @@ static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), void
     SGRAnimate(SGRMotionFade, ^{ for (UIView *v in faded) v.alpha = 1; }, nil);
 }
 
+// Whether any of the bar's tabs is set apart for real (Navbar > Split tabs), which a trailing circle then is.
+static BOOL hasSplitTabs(UIView *stockBar) {
+    for (UIView *source in tabItems(stockBar)) if (SGRTabIsApart(source)) return YES;
+    return NO;
+}
+
+static void setApartGlyphsAlpha(UIView *stockBar, CGFloat alpha) {
+    UIView *apartBar = objc_getAssociatedObject(stockBar, &kApartBarKey);
+    if (!apartBar) return;
+    SGForEachView(apartBar, ^(UIView *v) { if (isTabButton(v)) v.alpha = alpha; });
+}
+
+// The trailing circle divides from the bar, as the leading one is what is left of it: before a minimize with no split
+// tab it stands where the whole bar does, on the last tab, with its glyph clear, so the spring that narrows the main
+// bar takes the glass from there to the trailing end (and the glyph comes in with it, setApartGlyphsAlpha). Made
+// only for an animated change, so nothing has to start from a frame nobody saw.
+static void seedTrailingBar(UIView *stockBar) {
+    SGRSystemTabBar *bar = objc_getAssociatedObject(stockBar, &kBarKey);
+    UIView *host = objc_getAssociatedObject(stockBar, &kHostKey);
+    SGRSystemTabBar *apartBar = objc_getAssociatedObject(stockBar, &kApartBarKey);
+    NSArray<UIView *> *sources = tabItems(stockBar);
+    if (!bar || !host || sources.count < 2 || hasSplitTabs(stockBar) || (apartBar && !apartBar.hidden)) return;
+    [UIView performWithoutAnimation:^{
+        SGRSystemTabBar *trailing = apartBar;
+        if (!trailing) {
+            trailing = makeBar(stockBar);
+            objc_setAssociatedObject(stockBar, &kApartBarKey, trailing, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            trailing.partner = bar;
+            bar.partner = trailing;
+            [host addSubview:trailing];
+        }
+        trailing.hidden = NO;
+        trailing.frame = bar.frame;
+        fillBar(trailing, @[sources.lastObject], YES);
+        [host layoutIfNeeded];
+        setApartGlyphsAlpha(stockBar, 0);
+    }];
+}
+
 static void setMinimized(BOOL minimized, BOOL animated) {
     UIView *stockBar = sg_stockBar;
     if (minimized == sg_minimized) return;
@@ -803,6 +845,9 @@ static void setMinimized(BOOL minimized, BOOL animated) {
         syncBar(stockBar);
     };
     animated &= host.window != nil;
+    if (minimized && animated) seedTrailingBar(stockBar);
+    // With no split tab the trailing circle's glyph comes in as the circle divides off, and goes as it runs back.
+    BOOL circleOnly = !hasSplitTabs(stockBar);
     SGRBarState before = animated ? barState(host) : (SGRBarState){0};
     // The items are made where the bars are going, before anything moves. UIKit sizes a tab's name by the platter
     // its item is made in and never again, and the first pass made the expanding row's items while the bar still
@@ -824,7 +869,10 @@ static void setMinimized(BOOL minimized, BOOL animated) {
         return;
     }
     SGRNowPlayingBarMoving(YES);
-    moveFrom(host, before, ^{ SGRNowPlayingBarFollowTabBar(); }, ^(BOOL finished) {
+    moveFrom(host, before, ^{
+        SGRNowPlayingBarFollowTabBar();
+        if (circleOnly) setApartGlyphsAlpha(stockBar, minimized ? 1 : 0);
+    }, ^(BOOL finished) {
         SGRNowPlayingBarMoving(NO);
         settle(finished);
     });
