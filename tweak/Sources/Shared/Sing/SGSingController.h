@@ -13,7 +13,7 @@ static inline BOOL SGSingStateIsOn(SGSingState state) {
 }
 BOOL SGSingSupported(void);
 void SGSingConfigure(BOOL enabled);
-SGSingState SGSingCurrentState(void);
+SGSingState SGSingControllerCurrentState(void);
 BOOL SGSingAvailable(void);
 NSString *SGSingExplanation(void);
 BOOL SGSingCanRetry(void);
@@ -35,4 +35,4 @@ void SGSingPlaybackDidChange(void);
 void SGSingPlaybackDidSeek(double seconds);
 uint64_t SGSingTrackIdentifier(id uri);
 BOOL SGSingPosition(SPTPlayerState *state, double *position);
-double SGSingSourcePosition(SPTPlayerState *state);
+double SGSingControllerSourcePosition(SPTPlayerState *state);

@@ -219,7 +219,7 @@ static void workerStatus(void *context, int32_t status) {
     if ((!session.loading && !session.ready) || session.attached || session.retiring || _interrupted) return;
     SPTPlayerState *state = SGPlayerState();
     if (state.isLoading || ![session.track isEqualToString:trackOf(state)]) return;
-    SGSingAudioSetClock(session.audio, SGSingSourcePosition(state), SGSingTrackIdentifier(session.track));
+    SGSingAudioSetClock(session.audio, SGSingControllerSourcePosition(state), SGSingTrackIdentifier(session.track));
     SGSingAudioSetLatency(session.audio, downstreamLatency());
     SGSingStreamPause(stream(session), notPlaying(state));
     session.attached = SGSingAudioAttach(session.audio);
@@ -332,7 +332,7 @@ static void workerStatus(void *context, int32_t status) {
     }
     if (_waitingForCommand) {
         SPTPlayerState *state = SGPlayerState();
-        BOOL changed = _commandTrack ? ![_commandTrack isEqualToString:trackOf(state)] : fabs(SGSingSourcePosition(state) - _seekTarget) < 0.3;
+        BOOL changed = _commandTrack ? ![_commandTrack isEqualToString:trackOf(state)] : fabs(SGSingControllerSourcePosition(state) - _seekTarget) < 0.3;
         if (state && !state.isLoading && changed) _waitingForCommand = NO;
         else if (CACurrentMediaTime() > _commandDeadline) {
             _waitingForCommand = NO; _blockedTrack = trackOf(state);
@@ -453,8 +453,8 @@ void SGSingConfigure(BOOL enabled) {
     // What SGSingAvailable answers changes with the switch even where the controller's own state does not.
     [NSNotificationCenter.defaultCenter postNotificationName:SGSingDidChangeNotification object:nil];
 }
-SGSingState SGSingCurrentState(void) { return sg_configured ? sg_controller.state : SGSingUnavailable; }
-BOOL SGSingAvailable(void) { return SGSingCurrentState() != SGSingUnavailable; }
+SGSingState SGSingControllerCurrentState(void) { return sg_configured ? sg_controller.state : SGSingUnavailable; }
+BOOL SGSingAvailable(void) { return SGSingControllerCurrentState() != SGSingUnavailable; }
 NSString *SGSingExplanation(void) { return [sg_controller restriction] ?: sg_controller.explanation; }
 BOOL SGSingCanRetry(void) {
     return sg_configured && sg_controller.state != SGSingUnavailable && !sg_controller.session &&

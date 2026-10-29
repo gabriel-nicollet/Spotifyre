@@ -7,7 +7,7 @@
 #import <MediaPlayer/MediaPlayer.h>
 
 static double (*sourcePosition)(id, SEL);
-double SGSingSourcePosition(SPTPlayerState *state) {
+double SGSingControllerSourcePosition(SPTPlayerState *state) {
     if (!state) return 0;
     return state.isPaused ? state.positionAsOfTimestamp : sourcePosition ? sourcePosition(state, @selector(position)) : state.position;
 }

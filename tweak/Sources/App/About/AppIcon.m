@@ -153,7 +153,7 @@ static UIImage *preview(NSString *file) {
 
 @end
 
-SGModRow *SGAppIconRow(void) {
+SGModRow *SGAboutAppIconRow(void) {
     if (availableFiles().count < 2) return nil;
     if (@available(iOS 26.0, *)) {
         SGModRow *row = SGPageRow(@"App icon", ^UIViewController *{ return [SGAppIconPage new]; });
